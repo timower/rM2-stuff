@@ -1,0 +1,9 @@
+BasedOnStyle: Mozilla
+
+BreakBeforeBraces: Attach
+PointerBindsToType: true
+BreakConstructorInitializersBeforeComma: true
+ConstructorInitializerAllOnOneLineOrOnePerLine: true
+FixNamespaceComments: true
+
+ColumnLimit: 100
