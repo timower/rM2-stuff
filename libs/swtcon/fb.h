@@ -84,6 +84,9 @@ blank();
 int
 unblank(int pan);
 
+int
+pan(int pan);
+
 void
 fillPanBuffer(uint8_t* buffer, int value);
 } // namespace swtcon::fb

@@ -63,7 +63,8 @@ fillPanBuffer(uint8_t* buffer, int value) {
   fillLine((uint32_t*)(buffer + 3 * pan_line_size), value);
 
   for (int line = 0; line < SCREEN_WIDTH; line++) {
-    auto* dest = buffer + 4 * pan_line_size + line * pan_line_size; // skip preamble
+    auto* dest =
+      buffer + 4 * pan_line_size + line * pan_line_size; // skip preamble
     memcpy(dest, buffer + 3 * pan_line_size, pan_line_size);
   }
 }
@@ -74,6 +75,7 @@ unblank(int pan) {
     return 1;
   }
 
+  // This does not actually pan??
   fb_var_info->yoffset = pan * pan_buffer_size;
   if (ioctl(*fb_fd, /* set var info */ 0x4601, fb_var_info) == -1) {
     perror("Error setting pan offset (unblank)");
@@ -93,6 +95,27 @@ unblank(int pan) {
   }
 
   *isBlanked = 0;
+
+  return 0;
+}
+
+int
+pan(int pan) {
+  fb_var_info->yoffset = pan * pan_buffer_size;
+  if (ioctl(*fb_fd, /* pan */ 0x4606, fb_var_info) == -1) {
+    std::cerr << "arg: " << pan << " offset: " << std::hex
+              << fb_var_info->yoffset << std::dec << std::endl;
+    perror("Error setting pan offset");
+    return 1;
+  }
+
+  timespec time;
+  clock_gettime(CLOCK_MONOTONIC_RAW, &time);
+
+  pthread_mutex_lock(lastPanMutex);
+  *lastPanSec = time.tv_sec;
+  *lastPanNsec = time.tv_nsec;
+  pthread_mutex_unlock(lastPanMutex);
 
   return 0;
 }
@@ -122,7 +145,8 @@ openFb(const char* path, int panBuffers) {
     return -1;
   }
 
-  // TODO: is ioctl fixed needed if it's unused? Probably used for asserts in debug builds?
+  // TODO: is ioctl fixed needed if it's unused? Probably used for asserts in
+  // debug builds?
   fb::fb_fix_screeninfo fix_info;
   if (ioctl(fd, 0x4602, &fix_info) == -1) {
     perror("Unable to get fix info");
@@ -143,6 +167,7 @@ openFb(const char* path, int panBuffers) {
 
   fb_var_info->xres = pan_line_size / 4;
   fb_var_info->xres_virtual = pan_line_size / 4;
+  fb_var_info->xoffset = 0;
 
   fb_var_info->pixclock = 0x7080;
 
@@ -178,7 +203,9 @@ openFb(const char* path, int panBuffers) {
   std::cout << "mmaped" << std::endl;
 
   for (int i = 0; i < panCount; i++) {
-    memcpy(ptr + i * pan_buffer_size * pan_line_size, zeroBuffer, pan_buffer_size * pan_line_size);
+    memcpy(ptr + i * pan_buffer_size * pan_line_size,
+           zeroBuffer,
+           pan_buffer_size * pan_line_size);
   }
   std::cout << "done" << std::endl;
 
@@ -187,7 +214,8 @@ openFb(const char* path, int panBuffers) {
 
 void
 unmap() {
-  munmap(*fb_map_ptr, pan_line_size * pan_buffer_size * (pan_buffers_count + 1));
+  munmap(*fb_map_ptr,
+         pan_line_size * pan_buffer_size * (pan_buffers_count + 1));
   close(*fb_fd);
 }
 } // namespace swtcon::fb

@@ -6,4 +6,4 @@ BreakConstructorInitializersBeforeComma: true
 ConstructorInitializerAllOnOneLineOrOnePerLine: true
 FixNamespaceComments: true
 
-ColumnLimit: 100
+ColumnLimit: 80

@@ -3,7 +3,8 @@ project(swtcon)
 add_library(${PROJECT_NAME} STATIC
   SwtconState.cpp
   swtcon.cpp
-  fb.cpp)
+  fb.cpp
+  Waveforms.cpp)
 
 set_property(TARGET ${PROJECT_NAME}
   PROPERTY

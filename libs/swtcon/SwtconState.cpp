@@ -2,510 +2,227 @@
 
 #include "Addresses.h"
 #include "Constants.h"
+#include "Waveforms.h"
 #include "fb.h"
 
 #include <string>
 #include <vector>
 
 #include <cstdlib>
-#include <dirent.h>
 #include <iostream>
 #include <string.h>
-#include <sys/time.h>
 #include <unistd.h>
+
+#include <sys/time.h>
+#include <time.h>
 
 namespace swtcon {
 
 namespace {
 
-struct BootData {
-  std::string deviceSerial;
-  std::string serial2;
-  std::string serial3;
-  std::string epdSerial;
-};
-
-int
-readBootData(BootData& out) {
-  // Read the serial number from /dev/mmcblk2boot1
-  auto* bootFile = fopen("/dev/mmcblk2boot1", "r");
-  if (bootFile == nullptr) {
-    perror("Error opening boot1 for reading");
-    return -1;
-  }
-  char buf[32];
-
-  for (int i = 0; i < 4; i++) {
-    // 4 bytes length
-    if (fread(buf, 4, 1, bootFile) != 1) {
-      perror("Error reading length");
-      fclose(bootFile);
-      return -1;
-    }
-    int tmpBuf = *(int*)buf;
-    int length =
-      tmpBuf << 0x18 | (tmpBuf >> 8 & 0xff) << 0x10 | (tmpBuf >> 0x10 & 0xff) << 8 | tmpBuf >> 0x18;
-
-    // followed by length bytes of data
-    if (fread(buf, length, 1, bootFile) != 1) {
-      perror("Error reading data");
-      fclose(bootFile);
-      return -1;
-    }
-
-    // zero terminate
-    buf[length] = '\0';
-    switch (i) {
-      case 0:
-        out.deviceSerial = std::string(buf);
-        break;
-      case 1:
-        out.serial2 = std::string(buf);
-        break;
-      case 2:
-        out.serial3 = std::string(buf);
-        break;
-      case 3:
-        out.epdSerial = std::string(buf);
-        break;
-      default:
-        fclose(bootFile);
-        return -1;
-    }
-  }
-
-  fclose(bootFile);
-  return 0;
-}
-
-int
-decodeBarcode(std::string_view epdSerial) {
-  if (epdSerial.length() != 25) {
-    std::cerr << "Barcode length error\n";
-    return -1;
-  }
-
-  int result = 0;
-
-  // TODO: off by one? should be 7 and 8
-  constexpr int offset = 7; // 6;
-
-  int master = epdSerial[offset];
-
-  if (((master - 'A') & 0xFF) < 8) {
-    result = (master - 'A') * 10 + 100;
-  } else if (((master - 'J') & 0xff) < 5) {
-    result = (master - 'J') * 10 + 180;
-  } else if (((master - 'Q') & 0xff) < 10) {
-    result = (master - 'Q') * 10 + 230;
-  } else if (master != '0') {
-    return -1;
-  }
-
-  int second = epdSerial[offset + 1];
-  if (((second - '0') & 0xff) >= 10) {
-    return -1;
-  }
-
-  result = result + (second - '0');
-  return result;
-}
-
-bool
-hasEnding(const std::string& fullString, const std::string& ending) {
-  if (fullString.length() >= ending.length()) {
-    return (0 ==
-            fullString.compare(fullString.length() - ending.length(), ending.length(), ending));
-  } else {
-    return false;
-  }
-}
-
-uint8_t*
-readWbf(const char* path) {
-  auto* file = fopen(path, "r");
-  if (file == nullptr) {
-    return nullptr;
-  }
-
-  fseek(file, 0, SEEK_END);
-  auto size = ftell(file);
-
-  if (size < 0x31) {
-    std::cerr << "wbf file too small\n";
-    fclose(file);
-    return nullptr;
-  }
-
-  uint8_t* result = (uint8_t*)malloc(size);
-  if (result == nullptr) {
-    std::cerr << "wbf allocation error\n";
-    fclose(file);
-    return result;
-  }
-
-  fseek(file, 0, 0);
-  if (fread(result, size, 1, file) != 1) {
-    std::cerr << "wbf read error\n";
-    free(result);
-    fclose(file);
-    return nullptr;
-  }
-
-  fclose(file);
-  uint32_t fileSize = *(uint32_t*)(result + 4);
-  if (fileSize != (uint32_t)size) {
-    std::cerr << "file length mismatch\n";
-    free(result);
-    return nullptr;
-  }
-
-  return result;
-}
-
-std::string
-findWaveformFile(int signature) {
-  const std::string extension = ".wbf"; // TODO: ignore case
-  const auto paths = { "/var/lib/uboot", "/usr/share/remarkable/" };
-
-  std::vector<std::string> wbfPaths;
-
-  for (const auto& path : paths) {
-    DIR* dir = opendir(path);
-    if (dir == nullptr) {
-      continue;
-    }
-
-    dirent* entry = nullptr;
-    while ((entry = readdir(dir)) != nullptr) {
-      if (entry->d_type != DT_REG) {
-        continue;
-      }
-
-      auto fileName = std::string(entry->d_name);
-      if (!hasEnding(fileName, extension)) {
-        continue;
-      }
-
-      wbfPaths.push_back(path + fileName);
-    }
-    closedir(dir);
-  }
-
-  if (wbfPaths.empty()) {
-    return "";
-  }
-
-  std::string fallback;
-  for (const auto& path : wbfPaths) {
-    auto* wbfData = readWbf(path.c_str());
-    if (wbfData == nullptr) {
-      std::cerr << "Error parsing wbf: " << path << std::endl;
-      continue;
-    }
-
-    auto fpl_lot = *(uint16_t*)(wbfData + 0xe);
-    free(wbfData); // TODO: unique ptr
-
-    if (fpl_lot == signature) {
-      return path;
-    }
-
-    fallback = path;
-  }
-
-  std::cout << "No matching waveform file found, using fallback: " << fallback << std::endl;
-  return fallback;
-}
-
-uint8_t*
-getTablePtr(uint8_t* waveformData, int mode, int temp) {
-  if (mode > waveformData[0x25]) {
-    std::cerr << "Error mode " << mode << " bigger than mode count " << (int)waveformData[0x25]
-              << std::endl;
-    return nullptr;
-  }
-
-  if (temp > waveformData[0x26]) {
-    std::cerr << "Error temp " << temp << " bigger than temp count " << (int)waveformData[0x26]
-              << std::endl;
-    return nullptr;
-  }
-
-  uint32_t modeOffset = waveformData[0x20] | (waveformData[0x21] << 8) | (waveformData[0x22] << 16);
-  uint32_t tempOffset = (*(uint32_t*)(waveformData + modeOffset + mode * 4)) & 0xffffff;
-  uint32_t offset = (*(uint32_t*)(waveformData + tempOffset + temp * 4)) & 0xffffff;
-  return waveformData + offset;
-}
-
-int
-getTableAt(uint8_t* waveformData, int mode, int temp, uint8_t* out) {
-  auto* tablePtr = getTablePtr(waveformData, mode, temp);
-  if (tablePtr == nullptr) {
-    return -1;
-  }
-
-  bool notAtRowEnd = true;
-
-  // TODO: simplify this. Should just be a while and a for loop.
-  int curSize = 0;
-  int idx = 0;
-
-  uint32_t elem = (uint32_t)*tablePtr;
-  if ((uint32_t)waveformData[0x28] == elem) {
-    return 0;
-  }
-
-  do {
-    int nextIdx = idx + 1;
-    auto* elemPtr = tablePtr + nextIdx;
-
-    if (waveformData[0x29] == elem) {
-      notAtRowEnd = !notAtRowEnd;
-    } else {
-      int length;
-      if (notAtRowEnd) {
-        length = (int)tablePtr[nextIdx] + 1;
-        elemPtr = tablePtr + idx + 2;
-        nextIdx = idx + 2;
-      } else {
-        length = 1;
-      }
-
-      int idx2 = 0;
-      int lastSize = curSize;
-
-      do {
-        int nextIdx2 = idx2 + 1;
-        curSize = lastSize + 4;
-        if (out == nullptr) {
-          idx2 = idx2 + 2;
-          lastSize = lastSize + 8;
-          if (nextIdx2 >= length) {
-            break; // goto BreakInnerLoop;
-          }
-        } else {
-          *out = (uint8_t)elem & 3;
-          out[1] = (uint8_t)((elem << 0x1c) >> 0x1e);
-          out[2] = (uint8_t)((elem << 0x1a) >> 0x1e);
-          out[3] = (uint8_t)(elem >> 6);
-          lastSize = curSize;
-          idx2 = nextIdx2;
-          out = out + 4;
-        }
-        curSize = lastSize;
-      } while (idx2 < length);
-    }
-    // BreakInnerLoop:
-    elem = (uint32_t)*elemPtr;
-
-    idx = nextIdx;
-  } while ((uint32_t)waveformData[0x28] != elem);
-
-  return curSize;
-}
-
-int
-readInitTable(uint8_t* waveformData) {
-  uint32_t elementSize;
-  if ((waveformData[0x24] & 0xc) == 4) {
-    elementSize = 0x400;
-  } else {
-    elementSize = 0x100;
-  }
-
-  for (uint8_t tempIdx = 0; tempIdx <= waveformData[0x26]; tempIdx++) {
-    auto size = getTableAt(waveformData, /* mode */ 0, tempIdx, nullptr);
-    if (size < 1) {
-      std::cerr << "Error reading init table (" << (int)tempIdx << ")\n";
-      continue;
-    }
-
-    auto* tbl = (uint8_t*)malloc(size);
-    auto size2 = getTableAt(waveformData, /* mode */ 0, tempIdx, tbl);
-    if (size != size2) {
-      std::cerr << "Error reading init table (" << (int)tempIdx << ")\n";
-      free(tbl);
-      continue;
-    }
-
-    auto elementCount = size / elementSize;
-    auto* elements = (uint8_t*)malloc(elementCount);
-
-    auto* tablePtr = &globalInitTable[tempIdx * 2];
-    tablePtr[0] = elementCount;
-    tablePtr[1] = (int)elements; // TODO: proper structure
-
-    for (unsigned i = 0; i < elementCount; i++) {
-      elements[i] = tbl[i * elementSize];
-    }
-
-    free(tbl);
-  }
-
-  return 0;
+constexpr int
+normPhase(int i) {
+  return i < 0 ? -(-i & 0xf) : i & 0xf;
 }
 
 void
-readWaveformTable(int idx, uint8_t* waveformData, int mode, bool a, bool skipInit) {
-  uint32_t elementSize;
-  uint32_t ptr1Inc;
-  uint32_t ptr2Inc;
-
-  if ((waveformData[0x24] & 0xc) == 4) {
-    ptr1Inc = 2;
-    ptr2Inc = 0x40;
-    elementSize = 0x400;
-  } else {
-    ptr1Inc = 1;
-    ptr2Inc = 0x10;
-    elementSize = 0x100;
-  }
-
-  uint8_t tempCount = waveformData[0x26];
-  auto* destPtr = globalTempTable + idx * 3;
-  // Three values per table idx. Increment 26 = 2 temps + 3 * 8 idx values
-  for (uint8_t tempIdx = 0; tempIdx <= tempCount; tempIdx++, destPtr += 26) {
-    auto tableSize1 = getTableAt(waveformData, mode, tempIdx, nullptr);
-    if (tableSize1 < 1) {
-      std::cerr << "Error reading waveform table, skipping" << std::endl;
-      continue;
-    }
-
-    auto* tablePtr = (uint8_t*)malloc(tableSize1);
-    auto tableSize2 = getTableAt(waveformData, mode, tempIdx, tablePtr);
-    if (tableSize1 != tableSize2) {
-      std::cerr << "Error reading waveform table, skipping" << std::endl;
-      continue;
-    }
-
-    auto elementCount = tableSize1 / elementSize;
-    auto elementCountDiv8 = (elementCount + 7) >> 3; // TODO: why?
-    auto totalSize = elementCountDiv8 * 0x200;
-
-    auto* table1 = (uint8_t*)calloc(totalSize, 1);
-    // 0 and 1 are temp range, 2, 3 and 4 are table size and two pointers.
-    destPtr[2] = elementCount;
-    destPtr[3] = (int)table1;
-
-    int iVar1;
-
-    auto* tablePtr1 = tablePtr;
-    for (int idx1 = 0; idx1 != 0x100; idx1 += 0x10, tablePtr1 += ptr1Inc) {
-      auto* tablePtr2 = tablePtr1;
-      for (int idx2 = 0; idx2 != 0x10; idx2 += 1, tablePtr2 += ptr2Inc) {
-
-        // TODO: name these
-        uint32_t uVar8 = 0;
-        uint32_t uVar6 = 0;
-        bool inInit = true;
-
-        auto* elementPtr = tablePtr2;
-        for (uint32_t elementIdx = 0; elementIdx != elementCount;
-             elementIdx += 1, elementPtr += elementSize) {
-          iVar1 = (int)uVar8 >> 3; // div by 8
-
-          if (skipInit) {
-            if ((*elementPtr & 3) != 0) {
-              inInit = false;
-            }
-
-            if (inInit) {
-              continue;
-            }
-          }
-
-          // TODO: verify operator precedence
-          uVar6 = (uVar6 | ((*elementPtr & 3) << ((uVar8 & 7) << 1))) & 0xffff;
-          uVar8 += 1;
-
-          if (((uVar8 & 7) != 0) && (elementCount - 1 != elementIdx)) {
-            continue;
-          }
-
-          *(short*)(table1 + ((idx1 | idx2) + iVar1 * 0x100) * 2) = (short)uVar6;
-          uVar6 = 0;
-        }
-      }
-    }
-
-    if (!a) {
-      destPtr[4] = (int)table1;
-    } else {
-      auto* table2 = (uint16_t*)malloc(totalSize);
-      destPtr[4] = (int)table2;
-      memcpy(table2, table1, totalSize);
-
-      auto* table2End = table2 + elementCountDiv8 * 0x100;
-      for (auto* table2Ptr = table2; table2Ptr != table2End; table2Ptr += 0x100) {
-        for (auto* table2Ptr2 = table2Ptr; table2Ptr2 != table2Ptr + 0x110; table2Ptr2 += 0x11) {
-          *table2Ptr2 = 0;
-        }
-      }
-    }
-
-    free(tablePtr);
-  } // foreach tempIdx
+notifyVsyncThread() {
+  pthread_mutex_lock(vsyncMutex);
+  pthread_cond_broadcast(vsyncCondVar);
+  pthread_mutex_unlock(vsyncMutex);
 }
 
-int
-initWaveforms() {
-  BootData bootData;
-  if (readBootData(bootData) != 0) {
-    return -1;
-  }
-  std::cout << "Got epd serial: " << bootData.epdSerial << std::endl;
+void
+notifyGeneratorThread() {
+  pthread_mutex_lock(generatorMutex);
+  *generatorNotifyVar = 0;
+  pthread_cond_broadcast(generatorCondVar);
+  pthread_mutex_unlock(generatorMutex);
+}
 
-  auto signature = decodeBarcode(bootData.epdSerial);
-  if (signature == -1) {
-    std::cout << "Error decoding serial" << std::endl;
-  }
-  std::cout << "Got signature: " << signature << std::endl;
+void
+clearDirtyBuffer(int pan) {
+  auto phase = normPhase(pan);
 
-  auto waveformPath = findWaveformFile(signature);
-  if (waveformPath.empty()) {
-    std::cerr << "Error, no waveform files found\n";
-    return -1;
-  }
-  std::cout << "Got wbf path: " << waveformPath << std::endl;
-
-  auto* waveformData = readWbf(waveformPath.c_str());
-  if (waveformData == nullptr) {
-    return -1;
+  if (false /* TODO: verify */) {
+    memcpy(fb_map_ptr + phase * pan_buffer_size * pan_line_size,
+           zeroBuffer,
+           pan_line_size * pan_buffer_size);
+    return;
   }
 
-  uint8_t* tempTable = waveformData + 0x30;
-  int tempTableSize = *(waveformData + 0x26);
+  auto* fbLinePtr = // Skip the 3 preamble lines
+    *fb_map_ptr + phase * pan_buffer_size * pan_line_size + 3 * pan_line_size;
+  auto* dirtyPtr = dirtyColumns + phase * SCREEN_WIDTH;
+  const auto* endDirtyPtr = dirtyColumns + (phase + 1) * SCREEN_WIDTH;
 
-  for (int i = 0; i <= tempTableSize; i++) {
-    auto* globalTablePtr = globalTempTable + i * 26;
-    globalTablePtr[0] = tempTable[i];
-    globalTablePtr[1] = i == tempTableSize ? 100 : tempTable[i + 1];
+  while (dirtyPtr != endDirtyPtr) {
+    if (*dirtyPtr != 0) {
+      // zero one line
+      memcpy(fbLinePtr, zeroBuffer + 3 * pan_line_size, pan_line_size);
+    }
 
-#ifndef NDEBUG
-    std::cout << "temp range " << i << ": " << globalTablePtr[0] << " - " << globalTablePtr[1]
-              << std::endl;
-#endif
+    fbLinePtr += pan_line_size;
+    dirtyPtr += 1;
   }
 
-  if (readInitTable(waveformData) != 0) {
-    // if (readInitTableFn(waveformData) != 0) {
-    std::cerr << "Error reading waveform init table\n";
-    free(waveformData);
-    return -1;
-  }
+  // Set all dirty values to zero.
+  memset(dirtyColumns + phase * SCREEN_WIDTH, 0, SCREEN_WIDTH);
+}
 
-  readWaveformTable(0, waveformData, 1, false, false);
-  readWaveformTable(1, waveformData, 2, true, false);
-  readWaveformTable(2, waveformData, 3, true, false);
-  readWaveformTable(3, waveformData, 6, false, false);
-  readWaveformTable(4, waveformData, 7, false, false);
-  readWaveformTable(5, waveformData, 1, false, true);
-  readWaveformTable(6, waveformData, 2, true, true);
-  readWaveformTable(7, waveformData, 7, false, true);
+void*
+vsyncRoutine(void* arg) {
+  while (true) {
 
-  free(waveformData);
-  return 0;
+    while (*currentPanPhase != *lastPanPhase) {
+      uint32_t normPanPhase = normPhase(*currentPanPhase);
+      fb::pan(normPanPhase);
+
+      int32_t prevPhase = *previousPanPhase;
+      bool positive = prevPhase >= 0;
+
+      *previousPanPhase = *currentPanPhase;
+      *currentPanPhase = *currentPanPhase + 1;
+
+      if (positive) {
+        clearDirtyBuffer(prevPhase);
+        *dirtyClearCount += 1;
+      }
+
+      notifyGeneratorThread();
+    }
+
+    if (!*isBlanked) {
+      fb::pan(0x10);
+    }
+
+    if (*previousPanPhase >= 0) {
+      clearDirtyBuffer(*previousPanPhase);
+      *previousPanPhase = -1;
+      *dirtyClearCount += 1;
+      notifyGeneratorThread();
+    }
+
+    timeval time;
+    gettimeofday(&time, nullptr);
+    uint32_t tempTime = (double)time.tv_sec + (double)time.tv_usec / 1000000.0;
+
+    // Adjust to temperature every minute.
+    if (tempTime - *lastTempMeasureTime > 60) {
+      waveform::updateTemperature();
+    }
+
+    pthread_mutex_lock(vsyncMutex);
+
+    timespec timeoutVal;
+    bool shouldBlank;
+    if (*vsyncBlankDelay == 0 ||
+        clock_gettime(CLOCK_REALTIME, &timeoutVal) != 0) {
+      // TODO: simplify, always sets it to false
+      shouldBlank = *isBlanked;
+      if (!*isBlanked) {
+        fb::blank();
+      } else {
+        shouldBlank = false;
+      }
+    } else {
+      timeoutVal.tv_sec += *vsyncBlankDelay;
+      shouldBlank = true;
+    }
+
+    // TODO: what is this loop?
+    while (*currentPanPhase == *lastPanPhase) {
+      bool hadClearReq = *vsyncClearRequest;
+
+      // If we should do something, break
+      if (*vsyncShutdownRequest != 0 || *vsyncClearRequest != 0) {
+        break;
+      }
+
+      // Either wait with timeout or just wait
+      if (shouldBlank) {
+        int reason =
+          pthread_cond_timedwait(vsyncCondVar, vsyncMutex, &timeoutVal);
+
+        bool wasBlanked = *isBlanked;
+
+        // If we didn't timeout (got notified) or we are blanked already,
+        // repeat.
+        if (reason != ETIMEDOUT || (shouldBlank = hadClearReq, *isBlanked)) {
+          continue;
+        }
+
+        // Otherwise, blank
+        fb::blank();
+
+        // Use timeout in next loop if we timed out and were blanked.
+        shouldBlank = wasBlanked;
+      } else {
+        pthread_cond_wait(vsyncCondVar, vsyncMutex);
+      }
+    }
+
+    pthread_mutex_unlock(vsyncMutex);
+
+    if (*isBlanked && *vsyncShutdownRequest == 0 && *vsyncClearRequest == 0) {
+      // We're blanked but don't have to clear or shutdown -> unblank.
+
+      auto phase = normPhase(*currentPanPhase);
+      fb::unblank(phase);
+      *previousPanPhase = *currentPanPhase;
+      *currentPanPhase += 1;
+    }
+
+    if (!*isBlanked) {
+      // Move to the 'empty' phase
+      fb::pan(0x10);
+    }
+
+    if (*vsyncClearRequest != 0) {
+      // Do clear
+      auto* clearInfo = waveform::getInitWaveform(*currentTempWaveform);
+      if (clearInfo == nullptr) {
+        std::cerr << "Couldn't fetch init waveform\n";
+      } else {
+        if (*fb_fd < 0) {
+          std::cerr << "Fb device is not open\n";
+        } else {
+          fb::fillPanBuffer(*fb_map_ptr, 0);
+          fb::fillPanBuffer(*fb_map_ptr + pan_buffer_size * pan_line_size,
+                            0x5555);
+          fb::fillPanBuffer(*fb_map_ptr + 2 * pan_line_size * pan_buffer_size,
+                            0xaaaa);
+
+          fb::unblank(clearInfo->phaseData[0]);
+          fb::pan(0x10);
+          std::cout << "Running init (" << clearInfo->phases << " phases)\n";
+
+          for (int i = 1; i < clearInfo->phases; i++) {
+            fb::pan(clearInfo->phaseData[i] & 0xf);
+          }
+
+          fb::pan(0x10);
+          if (!*isBlanked) {
+            fb::blank();
+          }
+
+          memcpy(*fb_map_ptr, zeroBuffer, pan_buffer_size * pan_line_size);
+          memcpy(*fb_map_ptr + pan_buffer_size * pan_line_size,
+                 zeroBuffer,
+                 pan_buffer_size * pan_line_size);
+          memcpy(*fb_map_ptr + 2 * pan_buffer_size * pan_line_size,
+                 zeroBuffer,
+                 pan_buffer_size * pan_line_size);
+        }
+      }
+      *vsyncClearRequest = 0;
+    }
+
+    if (*vsyncShutdownRequest != 0) {
+      pthread_exit(nullptr);
+    }
+
+  } // end while(true)
 }
 
 int
@@ -524,69 +241,13 @@ setPriority(pthread_t thread, int priority) {
   return 0;
 }
 
-int
-getTemperaturePath() {
-  // TODO: fix this
-  *tempPath = std::string("/sys/class/hwmon/hwmon0/temp0");
-  return 0;
-}
-
-int
-getTemperatureIdx(float temp) {
-  for (int i = 0; i < 14; i++) {
-    auto* globalTablePtr = globalTempTable + i * 26;
-    if (temp < globalTablePtr[1]) {
-      return i;
-    }
+void
+clear() {
+  *vsyncClearRequest = 1;
+  notifyVsyncThread();
+  while (*vsyncClearRequest == 1) {
+    usleep(1000);
   }
-
-  std::cerr << "Temperature out of range?\n";
-
-  return 13;
-}
-
-int
-readTemperature(long* temperature) {
-  if (!*haveTempPath) {
-    if (getTemperaturePath() != 0) {
-      std::cerr << "Error getting temp reader path\n";
-      return -1;
-    }
-    *haveTempPath = true;
-  }
-
-  auto* file = fopen(tempPath->c_str(), "r");
-  if (file == nullptr) {
-    std::cerr << "Error reading temperature from: " << *tempPath << std::endl;
-    *haveTempPath = false;
-    return -1;
-  }
-
-  char buf[16] = { 0 };
-  fread(buf, 1, 0xf, file);
-  fclose(file);
-
-  long val = strtol(buf, nullptr, 10);
-  // TODO: error handling
-  *temperature = val;
-  return 0;
-}
-
-int
-updateTemperature() {
-  long temperature;
-  int result = readTemperature(&temperature);
-  if (result == 0) {
-    *currentTempWaveform = getTemperatureIdx((float)temperature - 2);
-    *currentTemperature = (float)temperature;
-    std::cout << "Got current temperature: " << temperature << ", idx: " << *currentTempWaveform
-              << " from path: " << *tempPath << std::endl;
-  }
-
-  timeval time;
-  gettimeofday(&time, nullptr);
-  *lastTempMeasureTime = (uint32_t)((double)time.tv_usec / 1000000.0 + (double)time.tv_sec);
-  return result;
 }
 
 void
@@ -599,10 +260,11 @@ createThreads(const char* path, uint8_t* imageData) {
   fb::fillPanBuffer(zeroBuffer, 0);
 
   for (int x = 1; x <= SCREEN_WIDTH; x++) {
-    auto* changePtrY =
-      &(*changeTrackingBuffer)[SCREEN_HEIGHT * SCREEN_WIDTH - x * SCREEN_HEIGHT - 1];
+    auto* changePtrY = &(*changeTrackingBuffer)[SCREEN_HEIGHT * SCREEN_WIDTH -
+                                                x * SCREEN_HEIGHT - 1];
 
-    auto* imagePtrY = &imageData[2 * SCREEN_HEIGHT * SCREEN_WIDTH - x * 2]; // 2 bytes per pixel
+    auto* imagePtrY =
+      &imageData[2 * SCREEN_HEIGHT * SCREEN_WIDTH - x * 2]; // 2 bytes per pixel
 
     for (int y = 0; y < SCREEN_HEIGHT; y++) {
       auto* changePtr = &changePtrY[y + 1];
@@ -614,8 +276,7 @@ createThreads(const char* path, uint8_t* imageData) {
     }
   }
 
-  // if (initWaveformsFn() != 0) {
-  if (initWaveforms() != 0) {
+  if (waveform::initWaveforms() != 0) {
     std::cerr << "Error loading waveform data" << std::endl;
     std::exit(-1);
   }
@@ -627,8 +288,7 @@ createThreads(const char* path, uint8_t* imageData) {
 
   if (true) { // TODO
     fb::unblank(0x10);
-    // updateTemperatureFn();
-    updateTemperature();
+    waveform::updateTemperature();
 
     if (*isBlanked == 0) {
       fb::blank();
@@ -638,7 +298,8 @@ createThreads(const char* path, uint8_t* imageData) {
   pthread_mutex_init(lastPanMutex, nullptr);
   pthread_mutex_init(vsyncMutex, nullptr);
   pthread_cond_init(vsyncCondVar, nullptr);
-  if (pthread_create(vsyncThread, nullptr, vsyncFn, nullptr) != 0) {
+  if (pthread_create(vsyncThread, nullptr, /*vsyncFn*/ vsyncRoutine, nullptr) !=
+      0) {
     std::cerr << "Error creating vsync thread" << std::endl;
     std::exit(-1);
   }
@@ -666,44 +327,6 @@ createThreads(const char* path, uint8_t* imageData) {
 }
 
 void
-notifyVsyncThread() {
-  pthread_mutex_lock(vsyncMutex);
-  pthread_cond_broadcast(vsyncCondVar);
-  pthread_mutex_unlock(vsyncMutex);
-}
-
-void
-notifyGeneratorThread() {
-  pthread_mutex_lock(generatorMutex);
-  pthread_cond_broadcast(generatorCondVar);
-  pthread_mutex_unlock(generatorMutex);
-}
-
-void
-clear() {
-  *vsyncClearRequest = 1;
-  notifyVsyncThread();
-  while (*vsyncClearRequest == 1) {
-    usleep(1000);
-  }
-}
-
-void
-freeWaveforms() {
-  // TODO: why hardcode temp range here?
-  for (int tempIdx = 0; tempIdx < 14; tempIdx++) {
-    auto* tempTablePtr = globalTempTable + tempIdx * 26;
-    for (int i = 0; i < 8; i++) {
-      auto* waveformPtr = tempTablePtr + i * 3;
-      free((void*)waveformPtr[3]);
-      if (waveformPtr[3] != waveformPtr[4]) {
-        free((void*)waveformPtr[4]);
-      }
-    }
-  }
-}
-
-void
 shutdown() {
   std::cout << "Shutting down swtcon threads" << std::endl;
 
@@ -715,7 +338,7 @@ shutdown() {
   notifyVsyncThread();
   pthread_join(*vsyncThread, nullptr);
 
-  freeWaveforms();
+  waveform::freeWaveforms();
   fb::unmap();
 }
 
@@ -725,7 +348,6 @@ SwtconState::SwtconState(const char* path) : fbPath(path) {
   imageData = (uint8_t*)malloc(SCREEN_HEIGHT * SCREEN_WIDTH * sizeof(uint16_t));
   memset(imageData, 0xFF, SCREEN_WIDTH * SCREEN_HEIGHT * sizeof(uint16_t));
 
-  // createThreadsFn(fbPath, imageData);
   createThreads(fbPath, imageData);
   clear();
 }
@@ -761,7 +383,8 @@ SwtconState::doUpdate(Rect rect, Waveform waveform, int flags) const {
 void
 SwtconState::dump() {
   std::cerr << "Framebuffer path: " << fbPath << std::endl;
-  std::cerr << "Image address: " << std::hex << (void*)getBuffer() << std::dec << std::endl;
+  std::cerr << "Image address: " << std::hex << (void*)getBuffer() << std::dec
+            << std::endl;
 }
 
 } // namespace swtcon
