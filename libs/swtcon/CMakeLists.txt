@@ -4,7 +4,8 @@ add_library(${PROJECT_NAME} STATIC
   SwtconState.cpp
   swtcon.cpp
   fb.cpp
-  Waveforms.cpp)
+  Waveforms.cpp
+  Vsync.cpp)
 
 set_property(TARGET ${PROJECT_NAME}
   PROPERTY

@@ -351,7 +351,7 @@ void
 readWaveformTable(int idx,
                   uint8_t* waveformData,
                   int mode,
-                  bool a,
+                  bool separatePartialTable,
                   bool skipInit) {
   uint32_t elementSize;
   uint32_t ptr1Inc;
@@ -391,7 +391,7 @@ readWaveformTable(int idx,
     auto* table1 = (uint8_t*)calloc(totalSize, 1);
     // 0 and 1 are temp range, 2, 3 and 4 are table size and two pointers.
     destPtr[2] = elementCount;
-    destPtr[3] = (int)table1;
+    destPtr[3] = (int)table1; // Full update table
 
     int iVar1;
 
@@ -435,7 +435,8 @@ readWaveformTable(int idx,
       }
     }
 
-    if (!a) {
+    // Set partial table:
+    if (!separatePartialTable) {
       destPtr[4] = (int)table1;
     } else {
       auto* table2 = (uint16_t*)malloc(totalSize);
@@ -447,7 +448,7 @@ readWaveformTable(int idx,
            table2Ptr += 0x100) {
         for (auto* table2Ptr2 = table2Ptr; table2Ptr2 != table2Ptr + 0x110;
              table2Ptr2 += 0x11) {
-          *table2Ptr2 = 0;
+          *table2Ptr2 = 0; // clear top 8 bits of short?
         }
       }
     }
@@ -502,14 +503,15 @@ initWaveforms() {
     return -1;
   }
 
-  readWaveformTable(0, waveformData, 1, false, false);
-  readWaveformTable(1, waveformData, 2, true, false);
-  readWaveformTable(2, waveformData, 3, true, false);
-  readWaveformTable(3, waveformData, 6, false, false);
-  readWaveformTable(4, waveformData, 7, false, false);
-  readWaveformTable(5, waveformData, 1, false, true);
-  readWaveformTable(6, waveformData, 2, true, true);
-  readWaveformTable(7, waveformData, 7, false, true);
+  readWaveformTable(0, waveformData, 1, /* sep. partial */ false, false); // DU
+  readWaveformTable(1, waveformData, 2, /* sep. partial */ true, false); // GC16
+  readWaveformTable(2, waveformData, 3, /* sep. partial */ true, false); // FAST
+  readWaveformTable(3, waveformData, 6, /* sep. partial */ false, false); // GLF
+  readWaveformTable(4, waveformData, 7, /* sep. partial */ false, false); // DU4
+
+  readWaveformTable(5, waveformData, 1, /* sep. partial */ false, true); // DU
+  readWaveformTable(6, waveformData, 2, /* sep. partial */ true, true);  // GC16
+  readWaveformTable(7, waveformData, 7, /* sep. partial */ false, true); // DU4
 
   free(waveformData);
   return 0;
