@@ -3,6 +3,7 @@
 #include "fb.h"
 
 #include <atomic>
+#include <list>
 #include <pthread.h>
 #include <stdint.h>
 #include <string>
@@ -16,6 +17,50 @@ struct UpdateParams {
   int y2;
   int flags;
   int waveform;
+};
+
+struct ShortPoint {
+  // Top 3 bits are used for something?
+  short x;
+  short y;
+};
+
+struct ShortRect {
+  ShortPoint topLeft;
+  ShortPoint bottomRight;
+};
+
+struct UpdateInfo {
+  uint8_t* buffer;
+  ShortRect rect;
+
+  short width;
+
+  short refCount;
+
+  uint8_t* waveformPtr;
+  short waveformIdx;
+  short waveformSize;
+  bool fullRefresh;
+  bool stroke;
+
+  bool unknown1;
+  bool unknown2;
+};
+
+struct UpdateMsg {
+  UpdateInfo* info;
+  int msgCount;
+  int nextUpdatePhase;
+  int someWaveformCounter;
+
+  ShortRect rect;
+
+  short waveformCounter;
+  bool unknown;
+  bool hasBeenCopied;
+
+  uint8_t* buffer;
 };
 
 using ActualUpdateFn = int(UpdateParams*);
@@ -76,5 +121,9 @@ auto* const generatorCondVar = (pthread_cond_t*)0x41e7c8;
 auto* const generatorThread = (pthread_t*)0x41e854;
 
 auto* const generatorNotifyVar = (int*)0x41e7c0;
+
+auto* const globalMsgCounter = (uint32_t*)0x589838;
+
+auto* const globalMsgList2 = (std::list<UpdateMsg>*)0x41e844;
 
 } // namespace swtcon

@@ -18,6 +18,130 @@
 namespace swtcon {
 
 namespace {
+
+void
+initUpdateMsg(UpdateMsg& msg) {
+  *globalMsgCounter += 1;
+  msg.msgCount = *globalMsgCounter;
+
+  msg.info = (UpdateInfo*)calloc(1, 0x1c);
+  static_assert(sizeof(UpdateInfo) == 0x1c);
+
+  msg.info->rect = msg.rect;
+
+  auto width = msg.rect.bottomRight.x - msg.rect.topLeft.x + 1;
+  auto height = msg.rect.bottomRight.y - msg.rect.topLeft.y + 1;
+  msg.info->width = width;
+
+  msg.buffer = (uint8_t*)malloc(width * height);
+  msg.info->buffer = msg.buffer;
+
+  msg.info->refCount = 1;
+}
+
+void
+setWaveforms(UpdateMsg& msg, int waveform, int tempIdx, bool fullRefresh) {
+  if (!fullRefresh) {
+    msg.info->waveformPtr =
+      (uint8_t*)globalTempTable[waveform * 3 + tempIdx * 26 + 4];
+  } else {
+    msg.info->waveformPtr =
+      (uint8_t*)globalTempTable[waveform * 3 + tempIdx * 26 + 3];
+  }
+  msg.info->waveformSize = globalTempTable[waveform * 3 + tempIdx * 26 + 2];
+}
+
+void
+actualUpdate(const UpdateParams& params) {
+  auto invY1 = 1403 - params.y1;
+  auto invX1 = 1871 - params.x1;
+  if (invY1 >= 1403) {
+    invY1 = 1403;
+  }
+
+  if (invX1 >= 1871) {
+    invX1 = 1871;
+  }
+
+  auto invY2 = 1403 - params.y2;
+  auto invX2 = 1871 - params.x2;
+  if (invY2 < 0) {
+    invY2 = 0;
+  }
+
+  if (invX2 < 0) {
+    invX2 = 0;
+  }
+
+  if (invX2 > 1872 || invX1 < 0 || invY2 > 1404 || invY1 < 0) {
+    return;
+  }
+
+  UpdateMsg msg;
+  msg.info = nullptr;
+  msg.msgCount = 0;
+  msg.nextUpdatePhase = 0;
+  msg.someWaveformCounter = 0;
+  msg.waveformCounter = 0;
+  msg.unknown = false;
+  msg.hasBeenCopied = 0;
+  msg.buffer = 0;
+
+  // Mirror both axis -> top left and bottom right switch.
+  // TODO: figure out what the three bits do?
+  msg.rect.topLeft.x = invX2 & 0xfff8;
+  msg.rect.topLeft.y = invY2;
+  msg.rect.bottomRight.x = invX1 | 0x7;
+  msg.rect.bottomRight.y = invY1;
+
+  if (false /* TODO */) {
+    msg.rect.topLeft.y = invY2 & 0xfff8;
+    msg.rect.bottomRight.y = invY1 | 0x7;
+  }
+
+  initUpdateMsg(msg);
+
+  // Set waveform info.
+  bool fullRefresh = params.flags & 0x1;
+  setWaveforms(msg, params.waveform, *currentTempWaveform, fullRefresh);
+  msg.info->fullRefresh = fullRefresh;
+  msg.info->stroke = params.flags & 0x4;
+
+  // Copy over from image buffer to msg buffer.
+  for (short y = msg.rect.topLeft.y; y <= msg.rect.bottomRight.y; y++) {
+    auto invY = 1403 - y;
+    auto* imagePtr =
+      ((uint16_t*)*globalImageData) + (1871 - msg.rect.topLeft.x) * 1404 + invY;
+    for (short x = msg.rect.topLeft.x; x <= msg.rect.bottomRight.x;
+         x++, imagePtr -= 1404) {
+      auto* bufPtr = msg.buffer + msg.info->width * (y - msg.rect.topLeft.y) +
+                     (x - msg.rect.topLeft.x);
+      auto byte = *(uint8_t*)imagePtr;
+      *bufPtr = (byte >> 1) & 0xf;
+    }
+  }
+
+  pthread_mutex_lock(msgListmutex);
+  if (false /* TODO */) {
+    // Copy to the buffer here already.
+    msg.hasBeenCopied = true;
+    msg.buffer = nullptr;
+  }
+
+  if (false /* TODO: implement this */) {
+  }
+
+  globalMsgList2->push_back(msg);
+  pthread_mutex_unlock(msgListmutex);
+  generator::notifyGeneratorThread();
+  if (params.flags & 0x1) {
+    // TODO: sync. msg list 1
+    while (!globalMsgList2->empty()) {
+      usleep(1000);
+    }
+  }
+}
+
 int
 setPriority(pthread_t thread, int priority) {
   sched_param param;
@@ -169,7 +293,8 @@ SwtconState::doUpdate(Rect rect, Waveform waveform, int flags) const {
   params.flags = flags;
   params.waveform = waveform;
 
-  actualUpdateFn(&params);
+  // actualUpdateFn(&params);
+  actualUpdate(params);
 }
 
 void
