@@ -1,8 +1,9 @@
 #include "mxcfb.h"
 
-#include "interface.h"
 #define LCD_WIDTH 128
 #define LCD_HEIGHT 64
+
+#include "tilem.h"
 
 #include <iostream>
 
@@ -37,6 +38,8 @@ constexpr auto keymap_scale = 2;
 
 int lcd_x = -1;
 int lcd_y = -1;
+
+TilemCalc* calc = nullptr;
 
 constexpr auto fb_path = "/dev/fb0";
 constexpr auto input_path = "/dev/input/event2";
@@ -231,19 +234,24 @@ read_input() {
 
   if (slots[slot].id == -1) {
     // Touch up
+    auto scancode = slots[slot].group << 3 | (slots[slot].bit + 1);
     std::cout << "touch up " << slots[slot].group << " " << slots[slot].bit
-              << std::endl;
-    if (slots[slot].group != -1) {
-      calcinterface_release_key(slots[slot].group, slots[slot].bit);
+              << " scancode " << scancode << std::endl;
+    if (slots[slot].group != -1 && calc != nullptr) {
+      tilem_keypad_release_key(calc, scancode);
+      // calcinterface_release_key(slots[slot].group, slots[slot].bit);
     }
   } else if (newId) {
     auto [group, bit] = get_key(slots[slot].x, slots[slot].y);
     slots[slot].group = group;
     slots[slot].bit = bit;
+    auto scancode = slots[slot].group << 3 | (slots[slot].bit + 1);
     std::cout << "Touch down " << slot << " at " << slots[slot].x << " "
-              << slots[slot].y << " group " << group << " " << bit << std::endl;
-    if (group != -1) {
-      calcinterface_press_key(group, bit);
+              << slots[slot].y << " group " << group << " " << bit
+              << " scancode " << scancode << std::endl;
+    if (group != -1 && calc != nullptr) {
+      tilem_keypad_press_key(calc, scancode);
+      // calcinterface_press_key(group, bit);
     }
   }
 
@@ -290,15 +298,34 @@ main(int argc, char* argv[]) {
     return -1;
   }
 
-  calcinterface_init();
-  if (calcinterface_load_file("ti84p.rom") != 0) {
-    std::cerr << "Error loading rom\n";
+  calc = tilem_calc_new(TILEM_CALC_TI84P);
+  if (calc == nullptr) {
+    std::cerr << "Error init calc\n";
     return -1;
   }
-  if (calcinterface_getmodel() != 8) {
-    std::cerr << "Error loading rom\n";
+
+  FILE* rom = fopen("ti84p.rom", "r");
+  if (rom == nullptr) {
+    perror("Error opening rom file");
     return -1;
   }
+
+  if (tilem_calc_load_state(calc, rom, nullptr) != 0) {
+    perror("Error reading rom");
+    return -1;
+  }
+  fclose(rom);
+
+  auto* lcd = tilem_lcd_buffer_new();
+  if (lcd == nullptr) {
+    perror("Error alloc lcd bufer");
+    return -1;
+  }
+
+  // if (calcinterface_getmodel() != 6) {
+  //   std::cerr << "Error loading rom\n";
+  //   return -1;
+  // }
 
   // calcinterface_reset();
 
@@ -313,7 +340,7 @@ main(int argc, char* argv[]) {
 
     timeval tv;
     tv.tv_sec = 0;
-    tv.tv_usec = 33 * 1000; // 33 ms
+    tv.tv_usec = 40 * 1000; // 33 ms
 
     auto ret = select(inputFd + 1, &fds, nullptr, nullptr, &tv);
     if (ret < 0) {
@@ -329,19 +356,22 @@ main(int argc, char* argv[]) {
     diff += (time - lastUpdateT);
     lastUpdateT = time;
     while (diff > TPS) {
-      calcinterface_run();
+      tilem_z80_run_time(calc, TPS * 1000000, nullptr);
       diff -= TPS;
     }
 
-    auto* screen = (uint8_t*)calcinterface_get_lcd();
-    for (int y = 0; y < LCD_HEIGHT; y++) {
-      for (int x = 0; x < LCD_WIDTH; x++) {
-        uint8_t pixel = 0xff - screen[y * LCD_WIDTH + x];
+    tilem_lcd_get_frame(calc, lcd);
+    std::cout << "cont: " << (int)lcd->contrast << std::endl;
+
+    for (int y = 0; y < lcd->height; y++) {
+      for (int x = 0; x < lcd->width; x++) {
+        uint8_t pixel =
+          lcd->contrast == 0 ? 0 : 0xff - lcd->data[y * lcd->rowstride + x];
         fbMem[(y + lcd_y) * screen_width + (x + lcd_x)] = (pixel / 16) << 1;
       }
     }
     doUpdate(lcd_x, lcd_y, LCD_WIDTH, LCD_HEIGHT, mode_gray, false);
-    free(screen);
+    // free(screen);
   }
 
   close_fb();

@@ -12,4 +12,4 @@ target_include_directories(${PROJECT_NAME} PRIVATE ${WABBIT_INCLUDE})
 
 target_link_libraries(${PROJECT_NAME}
   PRIVATE
-    z)
+    tiemu)
