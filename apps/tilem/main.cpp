@@ -1,11 +1,12 @@
-#include "mxcfb.h"
-
-#define LCD_WIDTH 128
-#define LCD_HEIGHT 64
+#include <FrameBuffer.h>
+#include <Input.h>
 
 #include "tilem.h"
 
+#include <atomic>
+#include <csignal>
 #include <iostream>
+#include <optional>
 
 #include <fcntl.h>
 #include <stdlib.h>
@@ -13,254 +14,219 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-#include <linux/input.h>
+using namespace rmlib;
+using namespace rmlib::input;
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
+volatile std::atomic_bool shouldStop = false;
 
-constexpr auto screen_width = 1404;
-constexpr auto screen_height = 1872;
-constexpr auto mode_du = 1;
-constexpr auto mode_hd = 2;
-constexpr auto mode_gray = 3;
-
-int fbFd = -1;
 int inputFd = -1;
-uint16_t* fbMem = nullptr;
 
-int keymap_width;
-int keymap_height;
-int keymap_bytepp;
-uint8_t* keymapMem = nullptr;
+std::optional<rmlib::ImageCanvas> keymap;
 
 // TODO: don't hardcode this
 constexpr auto keymap_scale = 2;
 
-int lcd_x = -1;
-int lcd_y = -1;
+std::optional<rmlib::Rect> lcd_rect = std::nullopt;
 
 TilemCalc* calc = nullptr;
 
-constexpr auto fb_path = "/dev/fb0";
-constexpr auto input_path = "/dev/input/event2";
 constexpr auto calc_skin_path = "ti84p.png";
 constexpr auto calc_key_path = "ti84p-key.png";
-
-bool
-open_fb() {
-  fbFd = open(fb_path, O_RDWR);
-  if (fbFd < 0) {
-    std::cerr << "Cannot open fb\n";
-    return false;
-  }
-
-  fbMem = (uint16_t*)mmap(nullptr,
-                          screen_height * screen_width * sizeof(uint16_t),
-                          PROT_READ | PROT_WRITE,
-                          MAP_SHARED,
-                          fbFd,
-                          0);
-  if (fbMem == nullptr) {
-    std::cerr << "Cannot map fb\n";
-    return false;
-  }
-
-  return true;
-}
+constexpr auto calc_save_name = "ti84p.sav";
 
 void
-close_fb() {
-  munmap(fbMem, 0);
-  close(fbFd);
-}
-
-void
-doUpdate(int x, int y, int width, int height, int waveform, bool full) {
-  mxcfb_update_data update;
-  update.waveform_mode = waveform;
-  update.update_mode = full ? 1 : 0;
-  update.update_region.top = y;
-  update.update_region.left = x;
-  update.update_region.width = width;
-  update.update_region.height = height;
-
-  ioctl(fbFd, MXCFB_SEND_UPDATE, &update);
-}
-
-void
-clearScreen() {
-  for (int y = 0; y < screen_height; y++) {
-    for (int x = 0; x < screen_width; x++) {
-      fbMem[y * screen_width + x] = 0xFFFF; // white
-    }
-  }
-  doUpdate(0, 0, screen_width, screen_height, mode_hd, true);
+clearScreen(rmlib::fb::FrameBuffer& fb) {
+  fb.canvas.set(0xFFFF);
+  fb.doUpdate(fb.canvas.rect(),
+              rmlib::fb::Waveform::GC16,
+              rmlib::fb::UpdateFlags::FullRefresh);
 }
 
 bool
-showCalculator() {
-  int imgWidth;
-  int imgHeight;
-  int n;
-  auto* image = stbi_load(calc_skin_path, &imgWidth, &imgHeight, &n, 1);
-  if (image == nullptr) {
+showCalculator(rmlib::fb::FrameBuffer& fb) {
+  auto image = rmlib::ImageCanvas::load(calc_skin_path, 1);
+  if (!image.has_value()) {
     std::cerr << "Error loading image\n";
     return false;
   }
 
-  std::cout << "calc skin size: " << imgWidth << "x" << imgHeight << std::endl;
+  std::cout << "calc skin size: " << image->canvas.width << "x"
+            << image->canvas.height << std::endl;
 
-  for (int y = 0; y < imgHeight; y++) {
-    for (int x = 0; x < imgWidth; x++) {
-      auto pixel = image[y * imgWidth + x];
-      fbMem[y * screen_width + x] = (pixel / 16) << 1;
-    }
-  }
+  rmlib::transform(fb.canvas,
+                   { 0, 0 },
+                   image->canvas,
+                   image->canvas.rect(),
+                   [](int x, int y, int val) { return (val / 16) << 1; });
 
-  doUpdate(0, 0, imgWidth, imgHeight, mode_gray, true);
-  stbi_image_free(image);
+  fb.doUpdate(image->canvas.rect(),
+              rmlib::fb::Waveform::GC16Fast,
+              rmlib::fb::UpdateFlags::FullRefresh);
   return true;
+}
+
+void
+updateRect(rmlib::Rect& rect, int x, int y) {
+  rect.topLeft.x = std::min(rect.topLeft.x, x);
+  rect.topLeft.y = std::min(rect.topLeft.y, y);
+  rect.bottomRight.x = std::max(rect.bottomRight.x, x);
+  rect.bottomRight.y = std::max(rect.bottomRight.y, y);
 }
 
 bool
 findLcd() {
   // find first red pixel
-  for (int y = 0; y < keymap_height; y++) {
-    for (int x = 0; x < keymap_width; x++) {
-      auto* pixel =
-        &keymapMem[y * keymap_width * keymap_bytepp + x * keymap_bytepp];
-      if (pixel[0] == 0xff && pixel[1] == 0 && pixel[2] == 0) {
-        lcd_x = x * keymap_scale;
-        lcd_y = y * keymap_scale;
-        return true;
+  keymap->canvas.forEach([](int x, int y, int val) {
+    if ((val & 0xffffff) == 0x0000ff) {
+      if (lcd_rect.has_value()) {
+        updateRect(*lcd_rect, x, y);
+      } else {
+        lcd_rect = { { x, y }, { x, y } };
       }
     }
+  });
+
+  if (lcd_rect.has_value()) {
+    *lcd_rect *= keymap_scale;
+
+    std::cout << "LCD pos: " << lcd_rect->topLeft.x << " "
+              << lcd_rect->topLeft.y << std::endl;
+    std::cout << "LCD end: " << lcd_rect->bottomRight.x << " "
+              << lcd_rect->bottomRight.y << std::endl;
+    return true;
   }
+
   return false;
 }
 
 bool
 loadKeymap() {
-  auto* image =
-    stbi_load(calc_key_path, &keymap_width, &keymap_height, &keymap_bytepp, 0);
-  if (image == nullptr) {
+  auto image = rmlib::ImageCanvas::load(calc_key_path);
+  if (!image.has_value()) {
     std::cerr << "Error loading keymap\n";
     return false;
   }
-  keymapMem = image;
-
-  std::cout << "keymap bpp: " << keymap_bytepp << std::endl;
+  std::cout << "keymap bpp: " << image->canvas.components << std::endl;
+  keymap = std::move(image);
 
   findLcd();
 
-  std::cout << "LCD pos: " << lcd_x << " " << lcd_y << std::endl;
-
   return true;
 }
 
-bool
-openInput() {
-
-  inputFd = open(input_path, O_RDONLY);
-  if (inputFd < 0) {
-    std::cerr << "Cannot open touch input\n";
-    return false;
-  }
-  return true;
+constexpr int
+toScanCode(int group, int bit) {
+  auto scancode = (group << 3) | bit;
+  return scancode + 1;
 }
 
-struct SlotInfo {
-  int id = -5;
-  int x = 0;
-  int y = 0;
-
-  int group;
-  int bit;
-};
-
-std::pair<int, int>
-get_key(int x, int y) {
+int
+get_scancode(int x, int y) {
   int scaledX = x / keymap_scale;
   int scaledY = y / keymap_scale;
-  if (scaledX >= keymap_width || scaledY >= keymap_height) {
-    return { -1, -1 };
+  if (scaledX >= keymap->canvas.width || scaledY >= keymap->canvas.height) {
+    return -1;
   }
 
-  auto* pixel = &keymapMem[scaledY * keymap_width * keymap_bytepp +
-                           scaledX * keymap_bytepp];
-
-  if (pixel[0] == 0xff) {
-    return { -1, -1 };
+  auto pixel = keymap->canvas.getPixel(scaledX, scaledY);
+  if ((pixel & 0xff) == 0xff) {
+    return -1;
   }
 
-  int group = pixel[1] >> 4;
-  int bit = pixel[2] >> 4;
+  int group = ((pixel >> 8) & 0xff) >> 4;
+  int bit = ((pixel >> 16) & 0xff) >> 4;
   if (group > 7 || bit > 7) {
-    return { -1, -1 };
+    return -1;
   }
 
-  return { group, bit };
-}
-
-bool
-read_input() {
-  static int slot = 0;
-  static SlotInfo slots[10];
-
-  bool newId = false;
-  while (true) {
-    input_event event;
-    auto size = read(inputFd, &event, sizeof(input_event));
-    if (size != sizeof(input_event)) {
-      std::cerr << "Error reading: " << size << std::endl;
-      return false;
-    }
-
-    if (event.type == EV_SYN && event.code == SYN_REPORT) {
-      break;
-    } else if (event.type == EV_ABS) {
-      if (event.code == ABS_MT_POSITION_X) {
-        slots[slot].x = event.value;
-      } else if (event.code == ABS_MT_POSITION_Y) {
-        slots[slot].y = screen_height - event.value;
-      } else if (event.code == ABS_MT_TRACKING_ID) {
-        newId = slots[slot].id != event.value;
-        slots[slot].id = event.value;
-      } else if (event.code == ABS_MT_SLOT) {
-        slot = event.value;
-      }
-    }
-  }
-
-  if (slots[slot].id == -1) {
-    // Touch up
-    auto scancode = slots[slot].group << 3 | (slots[slot].bit + 1);
-    std::cout << "touch up " << slots[slot].group << " " << slots[slot].bit
-              << " scancode " << scancode << std::endl;
-    if (slots[slot].group != -1 && calc != nullptr) {
-      tilem_keypad_release_key(calc, scancode);
-      // calcinterface_release_key(slots[slot].group, slots[slot].bit);
-    }
-  } else if (newId) {
-    auto [group, bit] = get_key(slots[slot].x, slots[slot].y);
-    slots[slot].group = group;
-    slots[slot].bit = bit;
-    auto scancode = slots[slot].group << 3 | (slots[slot].bit + 1);
-    std::cout << "Touch down " << slot << " at " << slots[slot].x << " "
-              << slots[slot].y << " group " << group << " " << bit
-              << " scancode " << scancode << std::endl;
-    if (group != -1 && calc != nullptr) {
-      tilem_keypad_press_key(calc, scancode);
-      // calcinterface_press_key(group, bit);
-    }
-  }
-
-  return true;
+  return toScanCode(group, bit);
 }
 
 void
-close_input() {
-  close(inputFd);
+printEvent(const PenEvent& ev) {
+  std::cout << "Pen ";
+  switch (ev.type) {
+    case PenEvent::ToolClose:
+      std::cout << "ToolClose";
+      break;
+    case PenEvent::ToolLeave:
+      std::cout << "ToolLeave";
+      break;
+    case PenEvent::TouchDown:
+      std::cout << "TouchDown";
+      break;
+    case PenEvent::TouchUp:
+      std::cout << "TouchUp";
+      break;
+    case PenEvent::Move:
+      std::cout << "Move";
+      break;
+  }
+  std::cout << " at " << ev.location.x << "x" << ev.location.y;
+  std::cout << " dist " << ev.distance << " pres " << ev.pressure << std::endl;
+}
+void
+handleEvent(rmlib::fb::FrameBuffer& fb, rmlib::input::Event ev) {
+  static int scanCodes[10];
+  if (std::holds_alternative<rmlib::input::KeyEvent>(ev)) {
+    std::cout << "key ev " << std::get<rmlib::input::KeyEvent>(ev).keyCode
+              << std::endl;
+    return;
+  }
+
+  if (std::holds_alternative<rmlib::input::PenEvent>(ev)) {
+    static int scancode = -1;
+    static bool penDown = false;
+    auto penEv = std::get<rmlib::input::PenEvent>(ev);
+    if (penEv.type != PenEvent::Move) {
+      printEvent(penEv);
+    }
+
+    if (penEv.type == PenEvent::TouchDown) {
+      penDown = true;
+
+      if (scancode != -1) {
+        tilem_keypad_release_key(calc, scancode);
+      }
+
+      scancode = get_scancode(penEv.location.x, penEv.location.y);
+      std::cout << "pen down " << scancode << std::endl;
+
+      if (scancode != -1) {
+        tilem_keypad_press_key(calc, scancode);
+      }
+    } else if (penEv.type == PenEvent::TouchUp/*penDown == true &&
+               (penEv.pressure == 0 ||
+                penEv.type == rmlib::input::PenEvent::TouchUp ||
+                penEv.type == rmlib::input::PenEvent::ToolLeave)*/) {
+      penDown = false;
+      std::cout << "pen up " << scancode << std::endl;
+      if (scancode != -1) {
+        tilem_keypad_release_key(calc, scancode);
+        scancode = -1;
+      }
+    }
+    return;
+  }
+
+  auto touchEv = std::get<rmlib::input::TouchEvent>(ev);
+  if (touchEv.type == rmlib::input::TouchEvent::Down) {
+    auto scancode = get_scancode(touchEv.location.x, touchEv.location.y);
+    std::cout << "touch down " << scancode << std::endl;
+    scanCodes[touchEv.slot] = scancode;
+    if (scancode != -1) {
+      tilem_keypad_press_key(calc, scancode);
+    } else if (lcd_rect->contains(touchEv.location)) {
+      std::cout << "lcd redraw\n";
+      showCalculator(fb);
+    }
+  } else if (touchEv.type == rmlib::input::TouchEvent::Up) {
+    auto scancode = scanCodes[touchEv.slot];
+    std::cout << "touch up " << scancode << std::endl;
+    if (scancode != -1) {
+      tilem_keypad_release_key(calc, scancode);
+    }
+  }
 }
 
 float
@@ -271,26 +237,62 @@ getTime() {
   return result;
 }
 
-const auto FPS = 50;
+const auto FPS = 100;
 const auto TPS = 1.0f / FPS;
+
+const auto frame_time = 50 * 1000; // 50 ms in us, 20 fps
+
+void
+frameCallback(TilemCalc* calc, void* data) {
+  auto* fb = reinterpret_cast<fb::FrameBuffer*>(data);
+  static auto* lcd = [] {
+    auto* lcd = tilem_lcd_buffer_new();
+    if (lcd == nullptr) {
+      perror("Error alloc lcd bufer");
+      std::exit(-1);
+    }
+    return lcd;
+  }();
+
+  tilem_lcd_get_frame(calc, lcd);
+
+  float scale_x = (float)lcd_rect->width() / lcd->width;
+  float scale_y = (float)lcd_rect->height() / lcd->height;
+  fb->canvas.transform(
+    [&](int x, int y, int) {
+      int subY = (y - lcd_rect->topLeft.y) / scale_y;
+      int subX = (x - lcd_rect->topLeft.x) / scale_x;
+      uint8_t data = lcd->data[subY * lcd->rowstride + subX];
+      uint8_t pixel = lcd->contrast == 0 ? 0 : data ? 0 : 0xff;
+      return (pixel / 16) << 1;
+    },
+    *lcd_rect);
+
+  fb->doUpdate(
+    *lcd_rect, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::None);
+}
+
+void
+intHandler(int sig) {
+  shouldStop = true;
+}
 
 int
 main(int argc, char* argv[]) {
-  if (getenv("RM2FB_SHIM") == nullptr) {
-    std::cerr << "REQUIRES SHIM\n";
+  auto fb = rmlib::fb::FrameBuffer::open();
+  if (!fb.has_value()) {
     return -1;
   }
 
-  if (!open_fb()) {
-    return -1;
-  }
+  rmlib::input::InputManager input;
 
-  if (!openInput()) {
+  if (!input.openAll()) {
+    std::cerr << "Error opening input\n";
     return -1;
   }
 
   // clearScreen();
-  if (!showCalculator()) {
+  if (!showCalculator(*fb)) {
     return -1;
   }
 
@@ -310,71 +312,54 @@ main(int argc, char* argv[]) {
     return -1;
   }
 
-  if (tilem_calc_load_state(calc, rom, nullptr) != 0) {
+  FILE* save = fopen(calc_save_name, "r");
+  if (save == nullptr) {
+    perror("No save file");
+  }
+
+  if (tilem_calc_load_state(calc, rom, save) != 0) {
     perror("Error reading rom");
     return -1;
   }
   fclose(rom);
-
-  auto* lcd = tilem_lcd_buffer_new();
-  if (lcd == nullptr) {
-    perror("Error alloc lcd bufer");
-    return -1;
+  if (save != nullptr) {
+    fclose(save);
   }
 
-  // if (calcinterface_getmodel() != 6) {
-  //   std::cerr << "Error loading rom\n";
-  //   return -1;
-  // }
-
-  // calcinterface_reset();
+  tilem_z80_add_timer(calc,
+                      frame_time,
+                      frame_time,
+                      /* real time */ 1,
+                      frameCallback,
+                      &fb.value());
 
   std::cout << "loaded rom, entering mainloop\n";
 
+  std::signal(SIGINT, intHandler);
+
   auto lastUpdateT = getTime();
-  float diff = 0;
-  while (true) {
-    fd_set fds;
-    FD_ZERO(&fds);
-    FD_SET(inputFd, &fds);
-
-    timeval tv;
-    tv.tv_sec = 0;
-    tv.tv_usec = 40 * 1000; // 33 ms
-
-    auto ret = select(inputFd + 1, &fds, nullptr, nullptr, &tv);
-    if (ret < 0) {
-      perror("input select failed");
-      break;
-    }
-
-    if (ret > 0) {
-      read_input();
+  while (!shouldStop) {
+    auto event = input.waitForInput(0.01f);
+    if (event.has_value()) {
+      handleEvent(*fb, *event);
     }
 
     const auto time = getTime();
-    diff += (time - lastUpdateT);
-    lastUpdateT = time;
-    while (diff > TPS) {
-      tilem_z80_run_time(calc, TPS * 1000000, nullptr);
-      diff -= TPS;
+    const auto diff = time - lastUpdateT;
+    if (diff > TPS) {
+      tilem_z80_run_time(calc, diff * 1000000, nullptr);
+      lastUpdateT = time;
     }
-
-    tilem_lcd_get_frame(calc, lcd);
-    std::cout << "cont: " << (int)lcd->contrast << std::endl;
-
-    for (int y = 0; y < lcd->height; y++) {
-      for (int x = 0; x < lcd->width; x++) {
-        uint8_t pixel =
-          lcd->contrast == 0 ? 0 : 0xff - lcd->data[y * lcd->rowstride + x];
-        fbMem[(y + lcd_y) * screen_width + (x + lcd_x)] = (pixel / 16) << 1;
-      }
-    }
-    doUpdate(lcd_x, lcd_y, LCD_WIDTH, LCD_HEIGHT, mode_gray, false);
-    // free(screen);
   }
 
-  close_fb();
-  close_input();
+  std::cout << "Saving state\n";
+  save = fopen(calc_save_name, "w");
+  if (save == nullptr) {
+    perror("Error opening save file");
+    return -1;
+  }
+
+  tilem_calc_save_state(calc, nullptr, save);
+
   return 0;
 }
