@@ -76,8 +76,8 @@ InputManager::closeAll() {
   maxFd = 0;
 }
 
-std::optional<Event>
-InputManager::waitForInput(double timeout) {
+std::optional<std::vector<Event>>
+InputManager::waitForInput(std::optional<std::chrono::microseconds> timeout) {
   if (devices.empty()) {
     return std::nullopt;
   }
@@ -90,11 +90,16 @@ InputManager::waitForInput(double timeout) {
   }
 
   timeval tv;
-  tv.tv_sec = timeout;
-  tv.tv_usec = (timeout - tv.tv_sec) * 1000000.0;
+  if (timeout.has_value()) {
+    constexpr auto second_in_usec =
+      std::chrono::microseconds(std::chrono::seconds(1)).count();
+    tv.tv_sec =
+      std::chrono::duration_cast<std::chrono::seconds>(*timeout).count();
+    tv.tv_usec = timeout->count() - (tv.tv_sec * second_in_usec);
+  }
 
   auto ret =
-    select(maxFd, &fds, nullptr, nullptr, timeout == 0.0 ? nullptr : &tv);
+    select(maxFd, &fds, nullptr, nullptr, !timeout.has_value() ? nullptr : &tv);
   if (ret < 0) {
     perror("Select on input failed");
     return std::nullopt;
@@ -105,7 +110,7 @@ InputManager::waitForInput(double timeout) {
     return std::nullopt;
   }
 
-  // Return the first event we see.
+  // Return the first device we see.
   for (auto& [fd, device] : devices) {
     if (!FD_ISSET(fd, &fds)) {
       continue;
@@ -117,36 +122,51 @@ InputManager::waitForInput(double timeout) {
   return std::nullopt;
 }
 
-std::optional<Event>
+std::optional<std::vector<Event>>
 InputManager::readEvent(InputDevice& device) {
-  bool setType = false;
+  input_event events[64];
+  auto size = read(device.fd, &events, 64 * sizeof(input_event));
+  if (size == 0 || size == -1 || size % sizeof(input_event) != 0) {
+    perror("Error reading input");
+    return std::nullopt;
+  }
 
   // Read until SYN.
-  while (true) {
-    input_event event;
-    auto size = read(device.fd, &event, sizeof(input_event));
-    if (size != sizeof(input_event)) {
-      perror("Error reading input");
-      return std::nullopt;
-    }
+  for (size_t i = 0; i < size / sizeof(input_event); i++) {
+    const auto& event = events[i];
 
     if (event.type == EV_SYN && event.code == SYN_REPORT) {
-      break;
+      for (auto slot : device.changedSlots) {
+        device.events.push_back(device.slots[slot]);
+        std::visit(
+          [](auto& r) {
+            using Type = std::decay_t<decltype(r)>;
+            if constexpr (!std::is_same_v<Type, KeyEvent>) {
+              r.type = Type::Move;
+            }
+          },
+          device.slots[slot]);
+      }
+      device.changedSlots.clear();
+      continue;
     }
 
+    if (event.type == EV_ABS && event.code == ABS_MT_SLOT) {
+      device.slot = event.value;
+      device.getSlot<TouchEvent>().slot = event.value;
+    }
+    device.changedSlots.insert(device.slot);
+
     if (event.type == EV_ABS) {
-      if (event.code == ABS_MT_SLOT) {
-        device.slot = event.value;
-        device.getSlot<TouchEvent>().slot = event.value;
-      } else if (event.code == ABS_MT_TRACKING_ID) {
+      if (event.code == ABS_MT_TRACKING_ID) {
         auto& slot = device.getSlot<TouchEvent>();
         if (event.value == -1) {
           slot.type = TouchEvent::Up;
-          setType = true;
+          // setType = true;
         } else if (event.value != slot.id) {
           slot.type = TouchEvent::Down;
           slot.id = event.value;
-          setType = true;
+          // setType = true;
         }
       } else if (event.code == ABS_MT_POSITION_X) {
         auto& slot = device.getSlot<TouchEvent>();
@@ -169,19 +189,18 @@ InputManager::readEvent(InputDevice& device) {
       if (event.code == BTN_TOOL_PEN) {
         if (event.value == KeyEvent::Press) {
           device.getSlot<PenEvent>().type = PenEvent::ToolClose;
-          setType = true;
+          // setType = true;
         } else {
           device.getSlot<PenEvent>().type = PenEvent::ToolLeave;
-          setType = true;
+          // setType = true;
         }
       } else if (event.code == BTN_TOUCH) {
-        std::cout << "TOUCH\n";
         if (event.value == KeyEvent::Press) {
           device.getSlot<PenEvent>().type = PenEvent::TouchDown;
-          setType = true;
+          // setType = true;
         } else {
           device.getSlot<PenEvent>().type = PenEvent::TouchUp;
-          setType = true;
+          // setType = true;
         }
       } else {
         auto& slot = device.getSlot<KeyEvent>();
@@ -191,30 +210,169 @@ InputManager::readEvent(InputDevice& device) {
     }
   }
 
-  auto result = device.slots[device.slot];
+  auto results = std::move(device.events);
+  device.events.clear();
 
-  // Set type to move if we didn't set it to up or down.
-  if (!setType) {
+  for (auto& result : results) {
+    // Transform result if needed
     std::visit(
-      [](auto& r) {
+      [&device](auto& r) {
         using Type = std::decay_t<decltype(r)>;
         if constexpr (!std::is_same_v<Type, KeyEvent>) {
-          r.type = Type::Move;
+          r.location = device.transform * r.location;
         }
       },
       result);
   }
 
-  // Transform result if needed
-  std::visit(
-    [&device](auto& r) {
-      using Type = std::decay_t<decltype(r)>;
-      if constexpr (!std::is_same_v<Type, KeyEvent>) {
-        r.location = device.transform * r.location;
+  return results;
+}
+
+namespace {
+SwipeGesture::Direction
+getSwipeDirection(Point delta) {
+  if (std::abs(delta.x) > std::abs(delta.y)) {
+    return delta.x > 0 ? SwipeGesture::Right : SwipeGesture::Left;
+  }
+
+  return delta.y > 0 ? SwipeGesture::Down : SwipeGesture::Up;
+}
+
+PinchGesture::Direction
+getPinchDirection() {
+  // TODO
+  return PinchGesture::In;
+}
+} // namespace
+
+Gesture
+GestureController::getGesture(Point currentDelta) {
+  const auto [avgStart, delta] = [this] {
+    std::vector<Point> delta;
+    Point avgStart;
+    int nActive = 0;
+
+#ifndef NDEBUG
+    std::cout << "- delta: ";
+#endif
+
+    for (const auto& slot : slots) {
+      if (slot.active) {
+        delta.push_back(slot.currentPos - slot.startPos);
+
+#ifndef NDEBUG
+        std::cout << delta.back().x << "x" << delta.back().y << " ";
+#endif
+
+        avgStart += slot.startPos;
+        nActive++;
       }
-    },
-    result);
+    }
+
+#ifndef NDEBUG
+    std::cout << std::endl;
+#endif
+
+    avgStart /= nActive;
+    return std::make_pair(avgStart, std::move(delta));
+  }();
+
+  const auto isSwipe =
+    std::all_of(
+      delta.cbegin(), delta.cend(), [](auto& p) { return p.x >= 0; }) ||
+    std::all_of(
+      delta.cbegin(), delta.cend(), [](auto& p) { return p.x <= 0; }) ||
+    std::all_of(
+      delta.cbegin(), delta.cend(), [](auto& p) { return p.y >= 0; }) ||
+    std::all_of(delta.cbegin(), delta.cend(), [](auto& p) { return p.y <= 0; });
+
+  if (isSwipe) {
+    return SwipeGesture{
+      getSwipeDirection(currentDelta), avgStart, /* endPos */ {}, currentFinger
+    };
+  } else {
+    return PinchGesture{ getPinchDirection(), avgStart, currentFinger };
+  };
+}
+
+void
+GestureController::handleTouchDown(const TouchEvent& event) {
+  currentFinger++;
+
+  auto& slot = slots[event.slot];
+  slot.active = true;
+  slot.currentPos = event.location;
+  slot.startPos = event.location;
+}
+
+std::optional<Gesture>
+GestureController::handleTouchUp(const TouchEvent& event) {
+  std::optional<Gesture> result;
+
+  currentFinger--;
+
+  slots[event.slot].active = false;
+
+  if (!started && currentFinger == 0) {
+    // TODO: tap, make sure time is less than threshold.
+    reset();
+  }
+
+  if (started && currentFinger == 1) {
+    result = std::move(gesture);
+    reset();
+  }
 
   return result;
 }
+
+void
+GestureController::handleTouchMove(const TouchEvent& event) {
+  auto slot = event.slot;
+  slots[slot].currentPos = event.location;
+  auto delta = event.location - slots[slot].startPos;
+
+  if (!started) {
+    if (currentFinger >= 2 && (std::abs(delta.x) >= start_threshold ||
+                               std::abs(delta.y) >= start_threshold)) {
+
+      started = true;
+      gesture = getGesture(delta);
+    }
+
+    return;
+  }
+
+  // Started, calc percentage (TODO)
+}
+
+std::vector<Gesture>
+GestureController::handleEvents(const std::vector<Event>& events) {
+  std::vector<Gesture> result;
+
+  for (const auto& event : events) {
+    if (!std::holds_alternative<TouchEvent>(event)) {
+      continue;
+    }
+    const auto& touchEv = std::get<TouchEvent>(event);
+    switch (touchEv.type) {
+      case TouchEvent::Down:
+        handleTouchDown(touchEv);
+        break;
+      case TouchEvent::Move:
+        handleTouchMove(touchEv);
+        break;
+      case TouchEvent::Up: {
+        auto gesture = handleTouchUp(touchEv);
+        if (gesture.has_value()) {
+          result.emplace_back(std::move(*gesture));
+        }
+        break;
+      }
+    }
+  }
+
+  return result;
+}
+
 } // namespace rmlib::input

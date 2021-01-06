@@ -4,6 +4,7 @@
 
 #include <optional>
 #include <string_view>
+#include <vector>
 
 /// Contains any device specific information.
 namespace rmlib::device {
@@ -29,5 +30,8 @@ const InputPaths&
 getInputPaths(DeviceType type);
 
 // TODO: battery paths
+
+std::vector<std::string>
+listDirectory(std::string_view path, bool onlyFiles = true);
 
 } // namespace rmlib::device

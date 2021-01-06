@@ -93,12 +93,14 @@ main() {
   }
 
   while (true) {
-    auto event = input.waitForInput();
-    if (!event.has_value()) {
+    auto events = input.waitForInput();
+    if (!events.has_value()) {
       std::cerr << "timout or error\n";
     }
 
-    std::visit([](auto& e) { printEvent(e); }, *event);
+    for (auto& event : *events) {
+      std::visit([](auto& e) { printEvent(e); }, event);
+    }
   }
 
   return 0;

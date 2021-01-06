@@ -13,6 +13,24 @@ struct Point {
     y *= val;
     return *this;
   }
+
+  constexpr Point& operator-=(const Point& o) {
+    x -= o.x;
+    y -= o.y;
+    return *this;
+  }
+
+  constexpr Point& operator+=(const Point& o) {
+    x += o.x;
+    y += o.y;
+    return *this;
+  }
+
+  constexpr Point& operator/=(int val) {
+    x /= val;
+    y /= val;
+    return *this;
+  }
 };
 
 constexpr bool
@@ -23,6 +41,12 @@ operator==(const Point& a, const Point& b) {
 constexpr bool
 operator!=(const Point& a, const Point& b) {
   return a.x != b.x || a.y != b.y;
+}
+
+constexpr Point
+operator-(Point a, const Point& b) {
+  a -= b;
+  return a;
 }
 
 struct Transform {
@@ -77,8 +101,8 @@ struct Rect {
   Point topLeft;
   Point bottomRight;
 
-  constexpr int width() { return bottomRight.x - topLeft.x + 1; }
-  constexpr int height() { return bottomRight.y - topLeft.y + 1; }
+  constexpr int width() const { return bottomRight.x - topLeft.x + 1; }
+  constexpr int height() const { return bottomRight.y - topLeft.y + 1; }
 
   /// Scale the rect by an integer.
   constexpr Rect& operator*=(int val) {

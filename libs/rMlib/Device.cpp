@@ -1,5 +1,6 @@
 #include "Device.h"
 
+#include <dirent.h>
 #include <fstream>
 
 namespace rmlib::device {
@@ -77,4 +78,23 @@ getInputPaths(DeviceType type) {
       return rm2_paths;
   }
 }
+
+std::vector<std::string>
+listDirectory(std::string_view path, bool onlyFiles) {
+  auto* dir = opendir(path.data());
+  if (dir == nullptr) {
+    return {};
+  }
+
+  std::vector<std::string> result;
+  for (auto* dirent = readdir(dir); dirent != nullptr; dirent = readdir(dir)) {
+    if (onlyFiles && dirent->d_type != DT_REG) {
+      continue;
+    }
+    result.push_back(std::string(path) + "/" + std::string(dirent->d_name));
+  }
+
+  return result;
+}
+
 } // namespace rmlib::device

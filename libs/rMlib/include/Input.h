@@ -2,9 +2,12 @@
 
 #include "MathUtil.h"
 
+#include <chrono>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
+#include <vector>
 
 namespace rmlib::input {
 struct TouchEvent {
@@ -38,6 +41,9 @@ struct InputManager {
 
     int slot = 0;
     Event slots[10];
+
+    std::unordered_set<int> changedSlots;
+    std::vector<Event> events;
 
     template<typename T>
     T& getSlot() {
@@ -74,11 +80,62 @@ struct InputManager {
   InputManager(const InputManager&) = delete;
   InputManager& operator=(const InputManager&) = delete;
 
-  std::optional<Event> waitForInput(double timeout = 0);
-  static std::optional<Event> readEvent(InputDevice& device);
+  std::optional<std::vector<Event>> waitForInput(
+    std::optional<std::chrono::microseconds> timeout = std::nullopt);
+  static std::optional<std::vector<Event>> readEvent(InputDevice& device);
 
   int maxFd = 0;
   std::unordered_map<int, InputDevice> devices;
+};
+
+struct SwipeGesture {
+  enum Direction { Up, Down, Left, Right };
+
+  Direction direction;
+  Point startPosition;
+  Point endPosition;
+  int fingers;
+};
+
+struct PinchGesture {
+  enum Direction { In, Out };
+  Direction direction;
+  Point position;
+  int fingers;
+};
+
+struct TapGesture {
+  int fingers;
+};
+
+using Gesture = std::variant<SwipeGesture, PinchGesture, TapGesture>;
+
+struct GestureController {
+  // pixels to move before detecting swipe or pinch
+  constexpr static auto num_slots = 50;
+  constexpr static int start_threshold = 50;
+
+  struct SlotState {
+    bool active = false;
+    Point currentPos;
+    Point startPos;
+  };
+
+  Gesture getGesture(Point currentDelta);
+  void handleTouchDown(const TouchEvent& event);
+  void handleTouchMove(const TouchEvent& event);
+  std::optional<Gesture> handleTouchUp(const TouchEvent& event);
+
+  std::vector<Gesture> handleEvents(const std::vector<Event>& events);
+
+  void reset() { started = false; }
+
+  int currentFinger = 0;
+
+  std::array<SlotState, num_slots> slots;
+
+  bool started = false;
+  Gesture gesture;
 };
 
 } // namespace rmlib::input

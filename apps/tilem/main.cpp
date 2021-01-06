@@ -1,6 +1,7 @@
 #include <FrameBuffer.h>
 #include <Input.h>
 
+#include "scancodes.h"
 #include "tilem.h"
 
 #include <atomic>
@@ -14,6 +15,8 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include "skin.h"
+
 using namespace rmlib;
 using namespace rmlib::input;
 
@@ -21,17 +24,12 @@ volatile std::atomic_bool shouldStop = false;
 
 int inputFd = -1;
 
-std::optional<rmlib::ImageCanvas> keymap;
-
-// TODO: don't hardcode this
-constexpr auto keymap_scale = 2;
+std::optional<rmlib::ImageCanvas> skin;
 
 std::optional<rmlib::Rect> lcd_rect = std::nullopt;
 
 TilemCalc* calc = nullptr;
 
-constexpr auto calc_skin_path = "ti84p.png";
-constexpr auto calc_key_path = "ti84p-key.png";
 constexpr auto calc_save_name = "ti84p.sav";
 
 void
@@ -44,22 +42,25 @@ clearScreen(rmlib::fb::FrameBuffer& fb) {
 
 bool
 showCalculator(rmlib::fb::FrameBuffer& fb) {
-  auto image = rmlib::ImageCanvas::load(calc_skin_path, 1);
-  if (!image.has_value()) {
-    std::cerr << "Error loading image\n";
-    return false;
+  if (!skin.has_value()) {
+    skin = rmlib::ImageCanvas::load(assets_skin_png, assets_skin_png_len);
+    if (!skin.has_value()) {
+      std::cerr << "Error loading image\n";
+      return false;
+    }
   }
 
-  std::cout << "calc skin size: " << image->canvas.width << "x"
-            << image->canvas.height << std::endl;
+  std::cout << "calc skin size: " << skin->canvas.width << "x"
+            << skin->canvas.height << std::endl;
 
-  rmlib::transform(fb.canvas,
-                   { 0, 0 },
-                   image->canvas,
-                   image->canvas.rect(),
-                   [](int x, int y, int val) { return (val / 16) << 1; });
+  rmlib::transform(
+    fb.canvas,
+    { 0, 0 },
+    skin->canvas,
+    skin->canvas.rect(),
+    [](int x, int y, int val) { return ((val & 0xff) / 16) << 1; });
 
-  fb.doUpdate(image->canvas.rect(),
+  fb.doUpdate(skin->canvas.rect(),
               rmlib::fb::Waveform::GC16Fast,
               rmlib::fb::UpdateFlags::FullRefresh);
   return true;
@@ -76,8 +77,8 @@ updateRect(rmlib::Rect& rect, int x, int y) {
 bool
 findLcd() {
   // find first red pixel
-  keymap->canvas.forEach([](int x, int y, int val) {
-    if ((val & 0xffffff) == 0x0000ff) {
+  skin->canvas.forEach([](int x, int y, int val) {
+    if ((val & 0x00ff00) == 0x00ff00) {
       if (lcd_rect.has_value()) {
         updateRect(*lcd_rect, x, y);
       } else {
@@ -87,8 +88,6 @@ findLcd() {
   });
 
   if (lcd_rect.has_value()) {
-    *lcd_rect *= keymap_scale;
-
     std::cout << "LCD pos: " << lcd_rect->topLeft.x << " "
               << lcd_rect->topLeft.y << std::endl;
     std::cout << "LCD end: " << lcd_rect->bottomRight.x << " "
@@ -101,14 +100,6 @@ findLcd() {
 
 bool
 loadKeymap() {
-  auto image = rmlib::ImageCanvas::load(calc_key_path);
-  if (!image.has_value()) {
-    std::cerr << "Error loading keymap\n";
-    return false;
-  }
-  std::cout << "keymap bpp: " << image->canvas.components << std::endl;
-  keymap = std::move(image);
-
   findLcd();
 
   return true;
@@ -122,24 +113,23 @@ toScanCode(int group, int bit) {
 
 int
 get_scancode(int x, int y) {
-  int scaledX = x / keymap_scale;
-  int scaledY = y / keymap_scale;
-  if (scaledX >= keymap->canvas.width || scaledY >= keymap->canvas.height) {
+  if (x >= skin->canvas.width || y >= skin->canvas.height) {
     return -1;
   }
 
-  auto pixel = keymap->canvas.getPixel(scaledX, scaledY);
-  if ((pixel & 0xff) == 0xff) {
+  auto pixel = skin->canvas.getPixel(x, y);
+  auto code = (pixel & 0x00ff00) >> 8;
+
+  // TODO: move to better location.
+  if (code == 0xfe) {
+    shouldStop = true;
     return -1;
   }
 
-  int group = ((pixel >> 8) & 0xff) >> 4;
-  int bit = ((pixel >> 16) & 0xff) >> 4;
-  if (group > 7 || bit > 7) {
+  if (code == 0 || code > TILEM_KEY_DEL) {
     return -1;
   }
-
-  return toScanCode(group, bit);
+  return code;
 }
 
 void
@@ -176,14 +166,12 @@ handleEvent(rmlib::fb::FrameBuffer& fb, rmlib::input::Event ev) {
 
   if (std::holds_alternative<rmlib::input::PenEvent>(ev)) {
     static int scancode = -1;
-    static bool penDown = false;
     auto penEv = std::get<rmlib::input::PenEvent>(ev);
     if (penEv.type != PenEvent::Move) {
       printEvent(penEv);
     }
 
     if (penEv.type == PenEvent::TouchDown) {
-      penDown = true;
 
       if (scancode != -1) {
         tilem_keypad_release_key(calc, scancode);
@@ -199,7 +187,6 @@ handleEvent(rmlib::fb::FrameBuffer& fb, rmlib::input::Event ev) {
                (penEv.pressure == 0 ||
                 penEv.type == rmlib::input::PenEvent::TouchUp ||
                 penEv.type == rmlib::input::PenEvent::ToolLeave)*/) {
-      penDown = false;
       std::cout << "pen up " << scancode << std::endl;
       if (scancode != -1) {
         tilem_keypad_release_key(calc, scancode);
@@ -229,18 +216,15 @@ handleEvent(rmlib::fb::FrameBuffer& fb, rmlib::input::Event ev) {
   }
 }
 
-float
+std::chrono::steady_clock::time_point
 getTime() {
-  timespec tv;
-  clock_gettime(CLOCK_MONOTONIC, &tv);
-  const double result = (double)tv.tv_sec + (double)tv.tv_nsec / 1.0e9;
-  return result;
+  return std::chrono::steady_clock::now();
 }
 
 const auto FPS = 100;
-const auto TPS = 1.0f / FPS;
+const auto TPS = std::chrono::milliseconds(1000) / FPS;
 
-const auto frame_time = 50 * 1000; // 50 ms in us, 20 fps
+const auto frame_time = std::chrono::milliseconds(50); // 50 ms in us, 20 fps
 
 void
 frameCallback(TilemCalc* calc, void* data) {
@@ -283,6 +267,9 @@ main(int argc, char* argv[]) {
   if (!fb.has_value()) {
     return -1;
   }
+
+  /// TODO: launcher should do this.
+  auto fbBackup = MemoryCanvas(fb->canvas);
 
   rmlib::input::InputManager input;
 
@@ -327,8 +314,8 @@ main(int argc, char* argv[]) {
   }
 
   tilem_z80_add_timer(calc,
-                      frame_time,
-                      frame_time,
+                      std::chrono::microseconds(frame_time).count(),
+                      std::chrono::microseconds(frame_time).count(),
                       /* real time */ 1,
                       frameCallback,
                       &fb.value());
@@ -339,15 +326,21 @@ main(int argc, char* argv[]) {
 
   auto lastUpdateT = getTime();
   while (!shouldStop) {
-    auto event = input.waitForInput(0.01f);
-    if (event.has_value()) {
-      handleEvent(*fb, *event);
+    constexpr auto wait_time = std::chrono::milliseconds(10);
+    auto events = input.waitForInput(wait_time);
+    if (events.has_value()) {
+      for (const auto& event : *events) {
+        handleEvent(*fb, event);
+      }
     }
 
     const auto time = getTime();
     const auto diff = time - lastUpdateT;
     if (diff > TPS) {
-      tilem_z80_run_time(calc, diff * 1000000, nullptr);
+      tilem_z80_run_time(
+        calc,
+        std::chrono::duration_cast<std::chrono::microseconds>(diff).count(),
+        nullptr);
       lastUpdateT = time;
     }
   }
@@ -360,6 +353,9 @@ main(int argc, char* argv[]) {
   }
 
   tilem_calc_save_state(calc, nullptr, save);
+  copy(fb->canvas, { 0, 0 }, fbBackup.canvas, fbBackup.canvas.rect());
+  fb->doUpdate(
+    fb->canvas.rect(), fb::Waveform::GC16Fast, fb::UpdateFlags::FullRefresh);
 
   return 0;
 }

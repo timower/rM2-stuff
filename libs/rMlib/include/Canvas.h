@@ -2,6 +2,7 @@
 
 #include "MathUtil.h"
 
+#include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -74,6 +75,9 @@ struct Canvas {
 
 struct ImageCanvas {
   static std::optional<ImageCanvas> load(const char* path, int components = 0);
+  static std::optional<ImageCanvas> load(uint8_t* data,
+                                         int size,
+                                         int components = 0);
 
   ImageCanvas(ImageCanvas&& other) : canvas(other.canvas) {
     other.canvas.memory = nullptr;
@@ -98,6 +102,30 @@ private:
   void release();
 };
 
+struct MemoryCanvas {
+  MemoryCanvas(const Canvas& other);
+
+  std::unique_ptr<uint8_t[]> memory;
+  Canvas canvas;
+};
+
+inline void
+copy(Canvas& dest,
+     const Point& destOffset,
+     const Canvas& src,
+     const Rect& srcRect) {
+  assert(dest.components == src.components);
+
+  for (int y = srcRect.topLeft.y; y <= srcRect.bottomRight.y; y++) {
+    auto* srcPixel =
+      &src.memory[y * src.lineSize() + srcRect.topLeft.x * src.components];
+    auto* destPixel =
+      &dest.memory[(y - srcRect.topLeft.y + destOffset.y) * dest.lineSize() +
+                   destOffset.x * dest.components];
+    memcpy(destPixel, srcPixel, srcRect.width() * src.components);
+  }
+}
+
 template<typename Func>
 void
 transform(Canvas& dest,
@@ -107,10 +135,11 @@ transform(Canvas& dest,
           Func&& f) {
   for (int y = srcRect.topLeft.y; y <= srcRect.bottomRight.y; y++) {
     for (int x = srcRect.topLeft.x; x <= srcRect.bottomRight.x; x++) {
-      // TODO: correct offsets
       auto* srcPixel = &src.memory[y * src.lineSize() + x * src.components];
-      auto* destPixel = &dest.memory[(y + destOffset.y) * dest.lineSize() +
-                                     (x + destOffset.x) * dest.components];
+      // TODO: correct offsets
+      auto* destPixel =
+        &dest.memory[(y + destOffset.y - srcRect.topLeft.y) * dest.lineSize() +
+                     (x + destOffset.x - srcRect.topLeft.x) * dest.components];
       int value = 0;
       memcpy(&value, srcPixel, src.components);
       value = f(x, y, value);

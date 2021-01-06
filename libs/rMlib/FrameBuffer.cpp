@@ -118,7 +118,7 @@ FrameBuffer::doUpdate(Rect region, Waveform waveform, UpdateFlags flags) {
       mxcfb_update_data update;
       update.waveform_mode = static_cast<int>(waveform);
       update.update_mode = flags & UpdateFlags::FullRefresh ? 1 : 0;
-      update.update_region.top = region.topLeft.x;
+      update.update_region.top = region.topLeft.y;
       update.update_region.left = region.topLeft.x;
       update.update_region.width = region.width();
       update.update_region.height = region.height();
