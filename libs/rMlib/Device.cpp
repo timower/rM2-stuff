@@ -94,6 +94,8 @@ listDirectory(std::string_view path, bool onlyFiles) {
     result.push_back(std::string(path) + "/" + std::string(dirent->d_name));
   }
 
+  closedir(dir);
+
   return result;
 }
 

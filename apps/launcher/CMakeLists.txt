@@ -1,7 +1,8 @@
 project(launcher)
 
 add_executable(${PROJECT_NAME}
-  main.cpp)
+  main.cpp
+  App.cpp)
 
 target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_17)
 

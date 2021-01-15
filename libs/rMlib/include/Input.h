@@ -84,6 +84,11 @@ struct InputManager {
     std::optional<std::chrono::microseconds> timeout = std::nullopt);
   static std::optional<std::vector<Event>> readEvent(InputDevice& device);
 
+  void grab();
+  void ungrab();
+  void flood();
+
+  /// members
   int maxFd = 0;
   std::unordered_map<int, InputDevice> devices;
 };
@@ -106,6 +111,7 @@ struct PinchGesture {
 
 struct TapGesture {
   int fingers;
+  Point position;
 };
 
 using Gesture = std::variant<SwipeGesture, PinchGesture, TapGesture>;
@@ -114,11 +120,13 @@ struct GestureController {
   // pixels to move before detecting swipe or pinch
   constexpr static auto num_slots = 50;
   constexpr static int start_threshold = 50;
+  constexpr static auto tap_time = std::chrono::milliseconds(150);
 
   struct SlotState {
     bool active = false;
     Point currentPos;
     Point startPos;
+    std::chrono::steady_clock::time_point time;
   };
 
   Gesture getGesture(Point currentDelta);
@@ -128,9 +136,14 @@ struct GestureController {
 
   std::vector<Gesture> handleEvents(const std::vector<Event>& events);
 
-  void reset() { started = false; }
+  void reset() {
+    started = false;
+    tapFingers = 0;
+  }
 
+  // members
   int currentFinger = 0;
+  int tapFingers = 0;
 
   std::array<SlotState, num_slots> slots;
 

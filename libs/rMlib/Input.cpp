@@ -7,15 +7,18 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <cstring>
+
 #include <linux/input.h>
 
 #include <iostream>
+#include <memory>
 
 namespace rmlib::input {
 
 std::optional<int>
 InputManager::open(const char* input, Transform inputTransform) {
-  int fd = ::open(input, O_RDONLY);
+  int fd = ::open(input, O_RDWR);
   if (fd < 0) {
     return std::nullopt;
   }
@@ -161,9 +164,11 @@ InputManager::readEvent(InputDevice& device) {
       if (event.code == ABS_MT_TRACKING_ID) {
         auto& slot = device.getSlot<TouchEvent>();
         if (event.value == -1) {
+          std::cout << "Touch down" << std::endl;
           slot.type = TouchEvent::Up;
           // setType = true;
-        } else if (event.value != slot.id) {
+        } else {
+          std::cout << "Touch Up" << std::endl;
           slot.type = TouchEvent::Down;
           slot.id = event.value;
           // setType = true;
@@ -228,7 +233,55 @@ InputManager::readEvent(InputDevice& device) {
   return results;
 }
 
+void
+InputManager::grab() {
+  for (const auto& [_, device] : devices) {
+    ioctl(device.fd, EVIOCGRAB, (void*)1);
+  }
+}
+
+void
+InputManager::ungrab() {
+  for (const auto& [_, device] : devices) {
+    ioctl(device.fd, EVIOCGRAB, nullptr);
+  }
+}
+
+void
+InputManager::flood() {
+  constexpr auto size = 8 * 512 * 4;
+  static const auto* flood_buffer = [] {
+    static const auto ret = std::make_unique<input_event[]>(size);
+
+    constexpr auto mk_input_ev = [](int a, int b, int v) {
+      input_event r;
+      r.type = a;
+      r.code = b;
+      r.value = v;
+      r.time = { 0, 0 };
+      return r;
+    };
+
+    for (int i = 0; i < size;) {
+      ret[i++] = mk_input_ev(EV_ABS, ABS_DISTANCE, 1);
+      ret[i++] = mk_input_ev(EV_SYN, 0, 0);
+      ret[i++] = mk_input_ev(EV_ABS, ABS_DISTANCE, 0);
+      ret[i++] = mk_input_ev(EV_SYN, 0, 0);
+    }
+
+    return ret.get();
+  }();
+
+  std::cout << "FLOODING" << std::endl;
+  for (const auto& [_, device] : devices) {
+    if (write(device.fd, flood_buffer, size * sizeof(input_event)) == -1) {
+      perror("Error writing");
+    }
+  }
+}
+
 namespace {
+
 SwipeGesture::Direction
 getSwipeDirection(Point delta) {
   if (std::abs(delta.x) > std::abs(delta.y)) {
@@ -243,6 +296,7 @@ getPinchDirection() {
   // TODO
   return PinchGesture::In;
 }
+
 } // namespace
 
 Gesture
@@ -261,7 +315,7 @@ GestureController::getGesture(Point currentDelta) {
         delta.push_back(slot.currentPos - slot.startPos);
 
 #ifndef NDEBUG
-        std::cout << delta.back().x << "x" << delta.back().y << " ";
+        std::cout << delta.back() << " ";
 #endif
 
         avgStart += slot.startPos;
@@ -303,6 +357,9 @@ GestureController::handleTouchDown(const TouchEvent& event) {
   slot.active = true;
   slot.currentPos = event.location;
   slot.startPos = event.location;
+  slot.time = std::chrono::steady_clock::now();
+
+  tapFingers = currentFinger;
 }
 
 std::optional<Gesture>
@@ -313,13 +370,17 @@ GestureController::handleTouchUp(const TouchEvent& event) {
 
   slots[event.slot].active = false;
 
-  if (!started && currentFinger == 0) {
-    // TODO: tap, make sure time is less than threshold.
-    reset();
-  }
+  if (currentFinger == 0) {
+    if (!started) {
+      // TODO: do we need a time limit?
+      // auto delta = std::chrono::steady_clock::now() - slots[event.slot].time;
+      // if (delta < tap_time) {
+      result = TapGesture{ tapFingers, slots[event.slot].startPos };
+      //}
+    } else {
+      result = std::move(gesture);
+    }
 
-  if (started && currentFinger == 1) {
-    result = std::move(gesture);
     reset();
   }
 

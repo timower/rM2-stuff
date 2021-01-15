@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cmath>
+#include <ostream>
 
 namespace rmlib {
 
@@ -47,6 +48,19 @@ constexpr Point
 operator-(Point a, const Point& b) {
   a -= b;
   return a;
+}
+
+constexpr Point
+operator+(Point a, const Point& b) {
+  a += b;
+  return a;
+}
+
+template<typename T>
+std::basic_ostream<char, T>&
+operator<<(std::basic_ostream<char, T>& os, const Point& p) {
+  os << "{ " << p.x << ", " << p.y << " }";
+  return os;
 }
 
 struct Transform {
@@ -111,11 +125,36 @@ struct Rect {
     return *this;
   }
 
+  constexpr Rect& operator+=(const Point& p) {
+    topLeft += p;
+    bottomRight += p;
+    return *this;
+  }
+
   constexpr bool contains(Point p) const {
     return topLeft.x <= p.x && p.x <= bottomRight.x && topLeft.y <= p.y &&
            p.y <= bottomRight.y;
   }
 };
+
+constexpr Rect
+operator+(Rect r, const Point& p) {
+  r += p;
+  return r;
+}
+
+constexpr Rect
+operator+(const Point& p, Rect r) {
+  r += p;
+  return r;
+}
+
+template<typename T>
+std::basic_ostream<char, T>&
+operator<<(std::basic_ostream<char, T>& os, const Rect& r) {
+  os << "{ " << r.topLeft << ", " << r.bottomRight << " }";
+  return os;
+}
 
 namespace static_tests {
 static_assert(Transform::identity() * Point{ 4, 10 } == Point{ 4, 10 });

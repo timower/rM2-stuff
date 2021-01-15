@@ -35,6 +35,17 @@ struct FrameBuffer {
 
   void doUpdate(Rect region, Waveform waveform, UpdateFlags flags);
 
+  void drawText(std::string_view text,
+                Point location,
+                int size = default_text_size,
+                Waveform waveform = Waveform::GC16Fast,
+                UpdateFlags flags = UpdateFlags::None) {
+    auto textSize = Canvas::getTextSize(text, size);
+    canvas.drawText(text, location, size);
+    doUpdate({ location, location + textSize }, waveform, flags);
+  }
+
+  // members
   Type type;
   int fd = -1;
   Canvas canvas;

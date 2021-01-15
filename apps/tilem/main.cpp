@@ -88,10 +88,7 @@ findLcd() {
   });
 
   if (lcd_rect.has_value()) {
-    std::cout << "LCD pos: " << lcd_rect->topLeft.x << " "
-              << lcd_rect->topLeft.y << std::endl;
-    std::cout << "LCD end: " << lcd_rect->bottomRight.x << " "
-              << lcd_rect->bottomRight.y << std::endl;
+    std::cout << "LCD rect: " << *lcd_rect << std::endl;
     return true;
   }
 
@@ -152,7 +149,7 @@ printEvent(const PenEvent& ev) {
       std::cout << "Move";
       break;
   }
-  std::cout << " at " << ev.location.x << "x" << ev.location.y;
+  std::cout << " at " << ev.location;
   std::cout << " dist " << ev.distance << " pres " << ev.pressure << std::endl;
 }
 void
@@ -269,7 +266,7 @@ main(int argc, char* argv[]) {
   }
 
   /// TODO: launcher should do this.
-  auto fbBackup = MemoryCanvas(fb->canvas);
+  // auto fbBackup = MemoryCanvas(fb->canvas);
 
   rmlib::input::InputManager input;
 
@@ -335,8 +332,13 @@ main(int argc, char* argv[]) {
     }
 
     const auto time = getTime();
-    const auto diff = time - lastUpdateT;
+    auto diff = time - lastUpdateT;
     if (diff > TPS) {
+      // Skip frames if we were paused.
+      if (diff > std::chrono::seconds(1)) {
+        diff = TPS;
+      }
+
       tilem_z80_run_time(
         calc,
         std::chrono::duration_cast<std::chrono::microseconds>(diff).count(),
@@ -353,9 +355,10 @@ main(int argc, char* argv[]) {
   }
 
   tilem_calc_save_state(calc, nullptr, save);
-  copy(fb->canvas, { 0, 0 }, fbBackup.canvas, fbBackup.canvas.rect());
-  fb->doUpdate(
-    fb->canvas.rect(), fb::Waveform::GC16Fast, fb::UpdateFlags::FullRefresh);
+
+  // copy(fb->canvas, { 0, 0 }, fbBackup.canvas, fbBackup.canvas.rect());
+  // fb->doUpdate(
+  //   fb->canvas.rect(), fb::Waveform::GC16Fast, fb::UpdateFlags::FullRefresh);
 
   return 0;
 }

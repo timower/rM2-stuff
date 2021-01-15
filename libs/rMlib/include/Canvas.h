@@ -7,9 +7,12 @@
 #include <cstring>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <type_traits>
 
 namespace rmlib {
+
+constexpr auto default_text_size = 24;
 
 struct Canvas {
   int lineSize() const { return width * components; }
@@ -22,6 +25,11 @@ struct Canvas {
     auto* pixel = &memory[y * lineSize() + x * components];
     memcpy(&result, pixel, components);
     return result;
+  }
+
+  void setPixel(Point p, int val) {
+    auto* pixel = &memory[p.y * lineSize() + p.x * components];
+    memcpy(pixel, &val, components);
   }
 
   template<typename Func>
@@ -64,8 +72,18 @@ struct Canvas {
   void set(Rect rect, int value) {
     transform([value](int x, int y, int val) { return value; }, rect);
   }
+
   void set(int value) { set(rect(), value); }
 
+  static Point getTextSize(std::string_view text, int size = default_text_size);
+
+  void drawText(std::string_view text,
+                Point location,
+                int size = default_text_size);
+
+  void drawLine(Point start, Point end, int val);
+
+  // members
   uint8_t* memory = nullptr;
 
   int width;
@@ -103,7 +121,8 @@ private:
 };
 
 struct MemoryCanvas {
-  MemoryCanvas(const Canvas& other);
+  MemoryCanvas(const Canvas& other) : MemoryCanvas(other, other.rect()) {}
+  MemoryCanvas(const Canvas& other, Rect rect);
 
   std::unique_ptr<uint8_t[]> memory;
   Canvas canvas;
