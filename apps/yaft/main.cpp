@@ -9,15 +9,15 @@
 #include "fb/common.h"
 #include "terminal.h"
 
-#include "ctrlseq/esc.h"
-
-#include "ctrlseq/csi.h"
-#include "ctrlseq/dcs.h"
-#include "ctrlseq/osc.h"
-
 #include "parse.h"
 
-void sig_handler(int signo) {
+volatile sig_atomic_t vt_active = true;    /* SIGUSR1: vt is active or not */
+volatile sig_atomic_t need_redraw = false; /* SIGUSR1: vt activated */
+volatile sig_atomic_t child_alive =
+  false; /* SIGCHLD: child process (shell) is alive or not */
+
+void
+sig_handler(int signo) {
   sigset_t sigset;
   /* global */
   extern volatile sig_atomic_t vt_active;
@@ -47,7 +47,8 @@ void sig_handler(int signo) {
   }
 }
 
-void set_rawmode(int fd, struct termios *save_tm) {
+void
+set_rawmode(int fd, struct termios* save_tm) {
   struct termios tm;
 
   tm = *save_tm;
@@ -60,7 +61,8 @@ void set_rawmode(int fd, struct termios *save_tm) {
   etcsetattr(fd, TCSAFLUSH, &tm);
 }
 
-bool tty_init(struct termios *termios_orig) {
+bool
+tty_init(struct termios* termios_orig) {
   struct sigaction sigact;
 
   memset(&sigact, 0, sizeof(struct sigaction));
@@ -95,7 +97,8 @@ bool tty_init(struct termios *termios_orig) {
   return true;
 }
 
-void tty_die(struct termios *termios_orig) {
+void
+tty_die(struct termios* termios_orig) {
   /* no error handling */
   struct sigaction sigact;
   struct vt_mode vtm;
@@ -123,15 +126,20 @@ void tty_die(struct termios *termios_orig) {
   ewrite(STDIN_FILENO, "\033[?25h", 6); /* make cursor visible */
 }
 
-bool fork_and_exec(int *master, const char *cmd, char *const argv[], int lines,
-                   int cols) {
+bool
+fork_and_exec(int* master,
+              const char* cmd,
+              const char* const argv[],
+              int lines,
+              int cols) {
   pid_t pid;
-  struct winsize ws = {.ws_row = lines,
-                       .ws_col = cols,
-                       /* XXX: this variables are UNUSED (man tty_ioctl),
-                               but useful for calculating terminal cell size */
-                       .ws_ypixel = CELL_HEIGHT * lines,
-                       .ws_xpixel = CELL_WIDTH * cols};
+  struct winsize ws;
+  ws.ws_row = lines;
+  ws.ws_col = cols;
+  /* XXX: this variables are UNUSED (man tty_ioctl),
+          but useful for calculating terminal cell size */
+  ws.ws_ypixel = CELL_HEIGHT * lines;
+  ws.ws_xpixel = CELL_WIDTH * cols;
 
   pid = eforkpty(master, NULL, NULL, &ws);
   if (pid < 0)
@@ -145,7 +153,8 @@ bool fork_and_exec(int *master, const char *cmd, char *const argv[], int lines,
   return true;
 }
 
-int check_fds(fd_set *fds, struct timeval *tv, int input, int master) {
+int
+check_fds(fd_set* fds, struct timeval* tv, int input, int master) {
   FD_ZERO(fds);
   FD_SET(input, fds);
   FD_SET(master, fds);
@@ -154,10 +163,11 @@ int check_fds(fd_set *fds, struct timeval *tv, int input, int master) {
   return eselect(master + 1, fds, NULL, NULL, tv);
 }
 
-int main(int argc, char *argv[]) {
-  extern const char *shell_cmd; /* defined in conf.h */
-  const char *cmd;
-  char **args;
+int
+main(int argc, const char* argv[]) {
+  extern const char* shell_cmd; /* defined in conf.h */
+  const char* cmd;
+  const char** args;
   uint8_t buf[BUFSIZE];
   ssize_t size;
   fd_set fds;
@@ -168,6 +178,7 @@ int main(int argc, char *argv[]) {
   extern volatile sig_atomic_t need_redraw;
   extern volatile sig_atomic_t child_alive;
   extern struct termios termios_orig;
+  static const char* shell_args[2] = { shell_cmd, NULL };
 
   /* init */
   if (setlocale(LC_ALL, "") == NULL) /* for wcwidth() */
@@ -194,8 +205,9 @@ int main(int argc, char *argv[]) {
     args = argv + 1;
   } else {
     cmd = shell_cmd;
-    args = (char *[2]){shell_cmd, NULL};
+    args = shell_args;
   }
+
   if (!fork_and_exec(&term.fd, cmd, args, term.lines, term.cols)) {
     logging(FATAL, "forkpty failed\n");
     goto tty_init_failed;

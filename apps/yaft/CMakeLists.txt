@@ -1,7 +1,8 @@
 project(yaft)
 
 add_executable(${PROJECT_NAME}
-  yaft.c)
+  main.cpp
+  parse.c)
 
 # target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_17)
 
