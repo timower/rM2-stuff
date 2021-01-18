@@ -417,7 +417,10 @@ set_mode(struct terminal_t* term, struct parm_t* parm) {
     if (*(term->esc.buf + 1) != '?')
       continue; /* not supported */
 
-    if (mode == 6) { /* private mode */
+    /* private mode */
+    if (mode == 1) {
+      term->mode |= MODE_APP_CURSOR;
+    } else if (mode == 6) {
       term->mode |= MODE_ORIGIN;
       set_cursor(term, 0, 0);
     } else if (mode == 7) {
@@ -439,7 +442,10 @@ reset_mode(struct terminal_t* term, struct parm_t* parm) {
     if (*(term->esc.buf + 1) != '?')
       continue; /* not supported */
 
-    if (mode == 6) { /* private mode */
+    /* private mode */
+    if (mode == 1) {
+      term->mode &= ~MODE_APP_CURSOR;
+    } else if (mode == 6) {
       term->mode &= ~MODE_ORIGIN;
       set_cursor(term, 0, 0);
     } else if (mode == 7) {

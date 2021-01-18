@@ -126,6 +126,13 @@ InputManager::waitForInput(std::optional<std::chrono::microseconds> timeout) {
 }
 
 std::optional<std::vector<Event>>
+InputManager::readEvents(int fd) {
+  auto it = devices.find(fd);
+  assert(it != devices.end());
+  return readEvent(it->second);
+}
+
+std::optional<std::vector<Event>>
 InputManager::readEvent(InputDevice& device) {
   input_event events[64];
   auto size = read(device.fd, &events, 64 * sizeof(input_event));

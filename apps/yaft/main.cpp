@@ -11,6 +11,14 @@
 
 #include "parse.h"
 
+#include "keyboard.h"
+
+#include <iostream>
+
+#include <linux/kd.h>
+#include <linux/vt.h>
+
+struct termios termios_orig;
 volatile sig_atomic_t vt_active = true;    /* SIGUSR1: vt is active or not */
 volatile sig_atomic_t need_redraw = false; /* SIGUSR1: vt activated */
 volatile sig_atomic_t child_alive =
@@ -29,20 +37,24 @@ sig_handler(int signo) {
   if (signo == SIGCHLD) {
     child_alive = false;
     wait(NULL);
-  } else if (signo == SIGUSR1) { /* vt activate */
-    vt_active = true;
-    need_redraw = true;
-    ioctl(STDIN_FILENO, VT_RELDISP, VT_ACKACQ);
-  } else if (signo == SIGUSR2) { /* vt deactivate */
-    vt_active = false;
-    ioctl(STDIN_FILENO, VT_RELDISP, 1);
+  }
 
-    if (BACKGROUND_DRAW) { /* update passive cursor */
+  if constexpr (VT_CONTROL) {
+    if (signo == SIGUSR1) { /* vt activate */
+      vt_active = true;
       need_redraw = true;
-    } else { /* sleep until next vt switching */
-      sigfillset(&sigset);
-      sigdelset(&sigset, SIGUSR1);
-      sigsuspend(&sigset);
+      ioctl(STDIN_FILENO, VT_RELDISP, VT_ACKACQ);
+    } else if (signo == SIGUSR2) { /* vt deactivate */
+      vt_active = false;
+      ioctl(STDIN_FILENO, VT_RELDISP, 1);
+
+      if (BACKGROUND_DRAW) { /* update passive cursor */
+        need_redraw = true;
+      } else { /* sleep until next vt switching */
+        sigfillset(&sigset);
+        sigdelset(&sigset, SIGUSR1);
+        sigsuspend(&sigset);
+      }
     }
   }
 }
@@ -70,29 +82,37 @@ tty_init(struct termios* termios_orig) {
   sigact.sa_flags = SA_RESTART;
   esigaction(SIGCHLD, &sigact, NULL);
 
-  if (VT_CONTROL) {
-    esigaction(SIGUSR1, &sigact, NULL);
-    esigaction(SIGUSR2, &sigact, NULL);
+  if (USE_STDIN) {
+    if (VT_CONTROL) {
+      esigaction(SIGUSR1, &sigact, NULL);
+      esigaction(SIGUSR2, &sigact, NULL);
 
-    struct vt_mode vtm;
-    vtm.mode = VT_PROCESS;
-    vtm.waitv = 0;
-    vtm.acqsig = SIGUSR1;
-    vtm.relsig = SIGUSR2;
-    vtm.frsig = 0;
+      struct vt_mode vtm;
+      vtm.mode = VT_PROCESS;
+      vtm.waitv = 0;
+      vtm.acqsig = SIGUSR1;
+      vtm.relsig = SIGUSR2;
+      vtm.frsig = 0;
 
-    if (ioctl(STDIN_FILENO, VT_SETMODE, &vtm))
-      logging(WARN, "ioctl: VT_SETMODE failed (maybe here is not console)\n");
+      if (ioctl(STDIN_FILENO, VT_SETMODE, &vtm)) {
+        logging(WARN,
+                "ioctl: VT_SETMODE failed (maybe here is not console)\n ");
+      }
 
-    if (FORCE_TEXT_MODE == false) {
-      if (ioctl(STDIN_FILENO, KDSETMODE, KD_GRAPHICS))
-        logging(WARN, "ioctl: KDSETMODE failed (maybe here is not console)\n");
+      if (FORCE_TEXT_MODE == false) {
+        if (ioctl(STDIN_FILENO, KDSETMODE, KD_GRAPHICS)) {
+          logging(WARN,
+                  "ioctl: KDSETMODE failed (maybe here is not console)\n ");
+        }
+      }
     }
-  }
 
-  etcgetattr(STDIN_FILENO, termios_orig);
-  set_rawmode(STDIN_FILENO, termios_orig);
-  ewrite(STDIN_FILENO, "\033[?25l", 6); /* make cusor invisible */
+    etcgetattr(STDIN_FILENO, termios_orig);
+
+    set_rawmode(STDIN_FILENO, termios_orig);
+
+    ewrite(STDIN_FILENO, "\033[?25l", 6); /* make cusor invisible */
+  }
 
   return true;
 }
@@ -107,23 +127,25 @@ tty_die(struct termios* termios_orig) {
   sigact.sa_handler = SIG_DFL;
   sigaction(SIGCHLD, &sigact, NULL);
 
-  if (VT_CONTROL) {
-    sigaction(SIGUSR1, &sigact, NULL);
-    sigaction(SIGUSR2, &sigact, NULL);
+  if (USE_STDIN) {
+    if (VT_CONTROL) {
+      sigaction(SIGUSR1, &sigact, NULL);
+      sigaction(SIGUSR2, &sigact, NULL);
 
-    vtm.mode = VT_AUTO;
-    vtm.waitv = 0;
-    vtm.relsig = vtm.acqsig = vtm.frsig = 0;
+      vtm.mode = VT_AUTO;
+      vtm.waitv = 0;
+      vtm.relsig = vtm.acqsig = vtm.frsig = 0;
 
-    ioctl(STDIN_FILENO, VT_SETMODE, &vtm);
+      ioctl(STDIN_FILENO, VT_SETMODE, &vtm);
 
-    if (FORCE_TEXT_MODE == false)
-      ioctl(STDIN_FILENO, KDSETMODE, KD_TEXT);
+      if (FORCE_TEXT_MODE == false)
+        ioctl(STDIN_FILENO, KDSETMODE, KD_TEXT);
+    }
+
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, termios_orig);
+    fflush(stdout);
+    ewrite(STDIN_FILENO, "\033[?25h", 6); /* make cursor visible */
   }
-
-  tcsetattr(STDIN_FILENO, TCSAFLUSH, termios_orig);
-  fflush(stdout);
-  ewrite(STDIN_FILENO, "\033[?25h", 6); /* make cursor visible */
 }
 
 bool
@@ -154,13 +176,19 @@ fork_and_exec(int* master,
 }
 
 int
-check_fds(fd_set* fds, struct timeval* tv, int input, int master) {
+check_fds(fd_set* fds, int input, int master, int touch) {
+  struct timeval tv;
+
   FD_ZERO(fds);
-  FD_SET(input, fds);
+  if constexpr (USE_STDIN) {
+    FD_SET(input, fds);
+  }
   FD_SET(master, fds);
-  tv->tv_sec = 0;
-  tv->tv_usec = SELECT_TIMEOUT;
-  return eselect(master + 1, fds, NULL, NULL, tv);
+  FD_SET(touch, fds);
+
+  tv.tv_sec = 0;
+  tv.tv_usec = SELECT_TIMEOUT;
+  return eselect(std::max(master, touch) + 1, fds, NULL, NULL, &tv);
 }
 
 int
@@ -171,8 +199,6 @@ main(int argc, const char* argv[]) {
   uint8_t buf[BUFSIZE];
   ssize_t size;
   fd_set fds;
-  struct timeval tv;
-  struct framebuffer_t fb;
   struct terminal_t term;
   /* global */
   extern volatile sig_atomic_t need_redraw;
@@ -180,16 +206,20 @@ main(int argc, const char* argv[]) {
   extern struct termios termios_orig;
   static const char* shell_args[2] = { shell_cmd, NULL };
 
+  Keyboard keyboard;
+
   /* init */
   if (setlocale(LC_ALL, "") == NULL) /* for wcwidth() */
     logging(WARN, "setlocale falied\n");
 
-  if (!fb_init(&fb)) {
+  auto fb = rmlib::fb::FrameBuffer::open();
+  if (!fb.has_value()) {
     logging(FATAL, "framebuffer initialize failed\n");
     goto fb_init_failed;
   }
 
-  if (!term_init(&term, fb.info.width, fb.info.height)) {
+  if (!term_init(
+        &term, fb->canvas.width, fb->canvas.height - keyboard_height)) {
     logging(FATAL, "terminal initialize failed\n");
     goto term_init_failed;
   }
@@ -214,23 +244,32 @@ main(int argc, const char* argv[]) {
   }
   child_alive = true;
 
+  if (!keyboard.init(*fb, term)) {
+    logging(FATAL, "Keyboard failed\n");
+    goto tty_init_failed;
+  }
+
+  keyboard.draw();
+
   /* main loop */
   while (child_alive) {
     if (need_redraw) {
       need_redraw = false;
-      cmap_update(fb.fd, fb.cmap); /* after VT switching, need to restore cmap
-                                      (in 8bpp mode) */
       redraw(&term);
-      refresh(&fb, &term);
+      refresh(*fb, &term);
     }
 
-    if (check_fds(&fds, &tv, STDIN_FILENO, term.fd) == -1)
+    if (check_fds(&fds, STDIN_FILENO, term.fd, keyboard.touchFd) == -1) {
       continue;
-
-    if (FD_ISSET(STDIN_FILENO, &fds)) {
-      if ((size = read(STDIN_FILENO, buf, BUFSIZE)) > 0)
-        ewrite(term.fd, buf, size);
     }
+
+    if constexpr (USE_STDIN) {
+      if (FD_ISSET(STDIN_FILENO, &fds)) {
+        if ((size = read(STDIN_FILENO, buf, BUFSIZE)) > 0)
+          ewrite(term.fd, buf, size);
+      }
+    }
+
     if (FD_ISSET(term.fd, &fds)) {
       if ((size = read(term.fd, buf, BUFSIZE)) > 0) {
         if (VERBOSE)
@@ -238,22 +277,26 @@ main(int argc, const char* argv[]) {
         parse(&term, buf, size);
         if (LAZY_DRAW && size == BUFSIZE)
           continue; /* maybe more data arrives soon */
-        refresh(&fb, &term);
+        refresh(*fb, &term);
       }
     }
+
+    if (FD_ISSET(keyboard.touchFd, &fds)) {
+      keyboard.readEvents();
+    }
+
+    keyboard.updateRepeat();
   }
 
   /* normal exit */
   tty_die(&termios_orig);
   term_die(&term);
-  fb_die(&fb);
   return EXIT_SUCCESS;
 
   /* error exit */
 tty_init_failed:
   term_die(&term);
 term_init_failed:
-  fb_die(&fb);
 fb_init_failed:
   return EXIT_FAILURE;
 }

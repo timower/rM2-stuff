@@ -82,6 +82,8 @@ struct InputManager {
 
   std::optional<std::vector<Event>> waitForInput(
     std::optional<std::chrono::microseconds> timeout = std::nullopt);
+
+  std::optional<std::vector<Event>> readEvents(int);
   static std::optional<std::vector<Event>> readEvent(InputDevice& device);
 
   void grab();

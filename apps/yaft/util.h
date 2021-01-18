@@ -7,7 +7,7 @@ enum loglevel_t {
   FATAL,
 };
 
-void
+static inline void
 logging(enum loglevel_t loglevel, const char* format, ...) {
   va_list arg;
   static const char* loglevel2str[] = {
@@ -29,7 +29,7 @@ logging(enum loglevel_t loglevel, const char* format, ...) {
 }
 
 /* wrapper of C functions */
-int
+static inline int
 eopen(const char* path, int flag) {
   int fd;
   errno = 0;
@@ -41,7 +41,7 @@ eopen(const char* path, int flag) {
   return fd;
 }
 
-int
+static inline int
 eclose(int fd) {
   int ret;
   errno = 0;
@@ -52,7 +52,7 @@ eclose(int fd) {
   return ret;
 }
 
-FILE*
+static inline FILE*
 efopen(const char* path, char* mode) {
   FILE* fp;
   errno = 0;
@@ -64,7 +64,7 @@ efopen(const char* path, char* mode) {
   return fp;
 }
 
-int
+static inline int
 efclose(FILE* fp) {
   int ret;
   errno = 0;
@@ -75,7 +75,7 @@ efclose(FILE* fp) {
   return ret;
 }
 
-void*
+static inline void*
 emmap(void* addr, size_t len, int prot, int flag, int fd, off_t offset) {
   void* fp;
   errno = 0;
@@ -86,7 +86,7 @@ emmap(void* addr, size_t len, int prot, int flag, int fd, off_t offset) {
   return fp;
 }
 
-int
+static inline int
 emunmap(void* ptr, size_t len) {
   int ret;
   errno = 0;
@@ -97,7 +97,7 @@ emunmap(void* ptr, size_t len) {
   return ret;
 }
 
-void*
+static inline void*
 ecalloc(size_t nmemb, size_t size) {
   void* ptr;
   errno = 0;
@@ -108,7 +108,7 @@ ecalloc(size_t nmemb, size_t size) {
   return ptr;
 }
 
-void*
+static inline void*
 erealloc(void* ptr, size_t size) {
   void* nw;
   errno = 0;
@@ -119,7 +119,7 @@ erealloc(void* ptr, size_t size) {
   return nw;
 }
 
-int
+static inline int
 eselect(int maxfd,
         fd_set* readfds,
         fd_set* writefds,
@@ -137,7 +137,7 @@ eselect(int maxfd,
   return ret;
 }
 
-ssize_t
+static inline ssize_t
 ewrite(int fd, const void* buf, size_t size) {
   ssize_t ret;
   errno = 0;
@@ -163,7 +163,7 @@ ewrite(int fd, const void* buf, size_t size) {
   return ret;
 }
 
-int
+static inline int
 esigaction(int signo, struct sigaction* act, struct sigaction* oact) {
   int ret;
   errno = 0;
@@ -174,7 +174,7 @@ esigaction(int signo, struct sigaction* act, struct sigaction* oact) {
   return ret;
 }
 
-int
+static inline int
 etcgetattr(int fd, struct termios* tm) {
   int ret;
   errno = 0;
@@ -185,7 +185,7 @@ etcgetattr(int fd, struct termios* tm) {
   return ret;
 }
 
-int
+static inline int
 etcsetattr(int fd, int action, const struct termios* tm) {
   int ret;
   errno = 0;
@@ -196,7 +196,7 @@ etcsetattr(int fd, int action, const struct termios* tm) {
   return ret;
 }
 
-int
+static inline int
 eopenpty(int* amaster,
          int* aslave,
          char* aname,
@@ -227,7 +227,7 @@ eopenpty(int* amaster,
   return 0;
 }
 
-pid_t
+static inline pid_t
 eforkpty(int* amaster,
          char* name,
          const struct termios* termp,
@@ -267,7 +267,7 @@ eforkpty(int* amaster,
   return pid;
 }
 
-int
+static inline int
 esetenv(const char* name, const char* value, int overwrite) {
   int ret;
   errno = 0;
@@ -278,7 +278,7 @@ esetenv(const char* name, const char* value, int overwrite) {
   return ret;
 }
 
-int
+static inline int
 eexecvp(const char* file, const char* const argv[]) {
   int ret;
   errno = 0;
@@ -289,7 +289,7 @@ eexecvp(const char* file, const char* const argv[]) {
   return ret;
 }
 
-int
+static inline int
 eexecl(const char* path) {
   int ret;
   errno = 0;
@@ -301,7 +301,7 @@ eexecl(const char* path) {
   return ret;
 }
 
-long
+static inline long
 estrtol(const char* nptr, char** endptr, int base) {
   long int ret;
   errno = 0;
@@ -316,14 +316,14 @@ estrtol(const char* nptr, char** endptr, int base) {
 }
 
 /* parse_arg functions */
-void
+static inline void
 reset_parm(struct parm_t* pt) {
   pt->argc = 0;
   for (int i = 0; i < MAX_ARGS; i++)
     pt->argv[i] = NULL;
 }
 
-void
+static inline void
 add_parm(struct parm_t* pt, char* cp) {
   if (pt->argc >= MAX_ARGS)
     return;
@@ -334,7 +334,7 @@ add_parm(struct parm_t* pt, char* cp) {
   pt->argc++;
 }
 
-void
+static inline void
 parse_arg(char* buf, struct parm_t* pt, int delim, int(is_valid)(int c)) {
   /*
           v..........v d           v.....v d v.....v ... d
@@ -371,7 +371,7 @@ parse_arg(char* buf, struct parm_t* pt, int delim, int(is_valid)(int c)) {
 }
 
 /* other functions */
-int
+static inline int
 my_ceil(int val, int div) {
   if (div == 0)
     return 0;
@@ -379,7 +379,7 @@ my_ceil(int val, int div) {
     return (val + div - 1) / div;
 }
 
-int
+static inline int
 dec2num(char* str) {
   if (str == NULL)
     return 0;
@@ -387,7 +387,7 @@ dec2num(char* str) {
   return estrtol(str, NULL, 10);
 }
 
-int
+static inline int
 hex2num(char* str) {
   if (str == NULL)
     return 0;
@@ -395,7 +395,7 @@ hex2num(char* str) {
   return estrtol(str, NULL, 16);
 }
 
-int
+static inline int
 sum(struct parm_t* parm) {
   int sum = 0;
 

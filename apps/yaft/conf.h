@@ -12,7 +12,7 @@ enum {
 /* misc */
 enum {
   /* write dump of input to stdout, debug message to stderr */
-  VERBOSE = true,
+  VERBOSE = false,
   /* hardware tabstop */
   TABSTOP = 8,
   /* don't draw when input data size is larger than BUFSIZE */
@@ -30,24 +30,13 @@ enum {
   /* used for malformed UTF-8 sequence   : U+003F (QUESTION MARK) */
   REPLACEMENT_CHAR = 0x003F,
 
-  REMARKABLE = true
+  /* Should we read input from stdin (enabling this can cause problems with
+     launchers) */
+  USE_STDIN = false,
 };
 
 /* TERM value */
-static const char* term_name = "yaft-256color";
-
-/* framubuffer device */
-#if defined(__linux__)
-static const char* fb_path = "/dev/fb0";
-#elif defined(__FreeBSD__)
-static const char* fb_path = "/dev/ttyv0";
-#elif defined(__NetBSD__)
-static const char* fb_path = "/dev/ttyE0";
-#elif defined(__OpenBSD__)
-static const char* fb_path = "/dev/ttyC0";
-#elif defined(__ANDROID__)
-static const char* fb_path = "/dev/graphics/fb0";
-#endif
+static const char* term_name = "xterm";
 
 /* shell */
 #if defined(__linux__) || defined(__MACH__)

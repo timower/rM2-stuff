@@ -1,3 +1,5 @@
+#pragma once
+
 /* See LICENSE for licence details. */
 #define _XOPEN_SOURCE 600
 #include <ctype.h>
@@ -115,10 +117,11 @@ enum osc {
 
 enum term_mode {
   MODE_RESET = 0x00,
-  MODE_ORIGIN = 0x01,  /* origin mode: DECOM */
-  MODE_CURSOR = 0x02,  /* cursor visible: DECTCEM */
-  MODE_AMRIGHT = 0x04, /* auto wrap: DECAWM */
-  MODE_VWBS = 0x08,    /* variable-width backspace */
+  MODE_ORIGIN = 0x01,     /* origin mode: DECOM */
+  MODE_CURSOR = 0x02,     /* cursor visible: DECTCEM */
+  MODE_AMRIGHT = 0x04,    /* auto wrap: DECAWM */
+  MODE_VWBS = 0x08,       /* variable-width backspace */
+  MODE_APP_CURSOR = 0x10, /* app cursor mode */
 };
 
 #ifdef __cplusplus
@@ -244,5 +247,3 @@ struct parm_t { /* for parse_arg() */
 volatile extern sig_atomic_t vt_active;   /* SIGUSR1: vt is active or not */
 volatile extern sig_atomic_t need_redraw; /* SIGUSR1: vt activated */
 volatile extern sig_atomic_t child_alive;
-
-struct termios termios_orig;
