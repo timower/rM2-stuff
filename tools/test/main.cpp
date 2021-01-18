@@ -7,8 +7,12 @@ main() {
 
   swtcon_dump(state);
   Rect rect{ 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT };
+
   uint8_t* buffer = swtcon_getbuffer(state);
-  swtcon_update(state, rect, Waveform::INIT, UpdateFlags::FullRefresh | UpdateFlags::Sync);
+  (void)buffer;
+
+  swtcon_update(
+    state, rect, Waveform::INIT, UpdateFlags::FullRefresh | UpdateFlags::Sync);
 
   swtcon_destroy(state);
 

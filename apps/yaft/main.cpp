@@ -18,6 +18,9 @@
 #include <linux/kd.h>
 #include <linux/vt.h>
 
+static const char* term_name = "xterm";
+static const char* shell_cmd = "/bin/bash";
+
 struct termios termios_orig;
 volatile sig_atomic_t vt_active = true;    /* SIGUSR1: vt is active or not */
 volatile sig_atomic_t need_redraw = false; /* SIGUSR1: vt activated */

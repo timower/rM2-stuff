@@ -243,6 +243,7 @@ InputManager::readEvent(InputDevice& device) {
 void
 InputManager::grab() {
   for (const auto& [_, device] : devices) {
+    (void)_;
     ioctl(device.fd, EVIOCGRAB, (void*)1);
   }
 }
@@ -250,6 +251,7 @@ InputManager::grab() {
 void
 InputManager::ungrab() {
   for (const auto& [_, device] : devices) {
+    (void)_;
     ioctl(device.fd, EVIOCGRAB, nullptr);
   }
 }
@@ -281,6 +283,7 @@ InputManager::flood() {
 
   std::cout << "FLOODING" << std::endl;
   for (const auto& [_, device] : devices) {
+    (void)_;
     if (write(device.fd, flood_buffer, size * sizeof(input_event)) == -1) {
       perror("Error writing");
     }

@@ -34,15 +34,3 @@ enum {
      launchers) */
   USE_STDIN = false,
 };
-
-/* TERM value */
-static const char* term_name = "xterm";
-
-/* shell */
-#if defined(__linux__) || defined(__MACH__)
-static const char* shell_cmd = "/bin/bash";
-#elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
-static const char* shell_cmd = "/bin/csh";
-#elif defined(__ANDROID__)
-static const char* shell_cmd = "/system/bin/sh";
-#endif
