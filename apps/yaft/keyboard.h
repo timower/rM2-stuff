@@ -30,6 +30,7 @@ constexpr auto repeat_delay = std::chrono::seconds(1);
 constexpr auto repeat_time = std::chrono::milliseconds(100);
 
 struct Keyboard {
+
   struct Key {
     Key(const KeyInfo& info, rmlib::Rect rect);
     const KeyInfo& info;
@@ -54,7 +55,7 @@ struct Keyboard {
 
   Key* getKey(rmlib::Point location);
 
-  void sendKeyDown(const Key& key);
+  void sendKeyDown(const Key& key) const;
 
   // members
   int baseKeyWidth;

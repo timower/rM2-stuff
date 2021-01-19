@@ -3,12 +3,14 @@
 #include "Device.h"
 
 #include <algorithm>
-#include <assert.h>
+#include <cassert>
+
 #include <fcntl.h>
 #include <unistd.h>
 
 #include <cstring>
 
+#include <libevdev.h>
 #include <linux/input.h>
 
 #include <iostream>
@@ -18,12 +20,17 @@ namespace rmlib::input {
 
 std::optional<int>
 InputManager::open(const char* input, Transform inputTransform) {
-  int fd = ::open(input, O_RDWR);
+  int fd = ::open(input, O_RDWR | O_NONBLOCK);
   if (fd < 0) {
     return std::nullopt;
   }
 
-  devices.emplace(fd, InputDevice{ fd, std::move(inputTransform) });
+  libevdev* dev = nullptr;
+  if (libevdev_new_from_fd(fd, &dev) < 0) {
+    return std::nullopt;
+  }
+
+  devices.emplace(fd, InputDevice{ fd, dev, inputTransform });
   maxFd = std::max(maxFd, fd + 1);
   return fd;
 }
@@ -58,6 +65,10 @@ InputManager::close(int fd) {
   if (it == devices.end()) {
     return;
   }
+
+  libevdev_free(it->second.dev);
+  ::close(fd);
+
   devices.erase(it);
   maxFd = devices.empty() ? 0
                           : std::max_element(
@@ -71,8 +82,8 @@ InputManager::close(int fd) {
 
 void
 InputManager::closeAll() {
-  for (const auto& [fd, _] : devices) {
-    (void)_;
+  for (const auto& [fd, dev] : devices) {
+    libevdev_free(dev.dev);
     ::close(fd);
   }
   devices.clear();
@@ -86,13 +97,13 @@ InputManager::waitForInput(std::optional<std::chrono::microseconds> timeout) {
   }
 
   fd_set fds;
-  FD_ZERO(&fds);
+  FD_ZERO(&fds); // NOLINT
   for (auto& [fd, _] : devices) {
     (void)_;
-    FD_SET(fd, &fds);
+    FD_SET(fd, &fds); // NOLINT
   }
 
-  timeval tv;
+  auto tv = timeval{ 0, 0 };
   if (timeout.has_value()) {
     constexpr auto second_in_usec =
       std::chrono::microseconds(std::chrono::seconds(1)).count();
@@ -115,7 +126,7 @@ InputManager::waitForInput(std::optional<std::chrono::microseconds> timeout) {
 
   // Return the first device we see.
   for (auto& [fd, device] : devices) {
-    if (!FD_ISSET(fd, &fds)) {
+    if (!FD_ISSET(fd, &fds)) { // NOLINT
       continue;
     }
 
@@ -132,95 +143,104 @@ InputManager::readEvents(int fd) {
   return readEvent(it->second);
 }
 
+namespace {
+void
+handleEvent(InputManager::InputDevice& device, const input_event& event) {
+  if (event.type == EV_SYN && event.code == SYN_REPORT) {
+    for (auto slotIdx : device.changedSlots) {
+      auto& slot = device.slots.at(slotIdx);
+      device.events.push_back(slot);
+      std::visit(
+        [](auto& r) {
+          using Type = std::decay_t<decltype(r)>;
+          if constexpr (!std::is_same_v<Type, KeyEvent>) {
+            r.type = Type::Move;
+          }
+        },
+        slot);
+    }
+    device.changedSlots.clear();
+    return;
+  }
+
+  if (event.type == EV_ABS && event.code == ABS_MT_SLOT) {
+    device.slot = event.value;
+    device.getSlot<TouchEvent>().slot = event.value;
+  }
+  device.changedSlots.insert(device.slot);
+
+  if (event.type == EV_ABS) {
+    if (event.code == ABS_MT_TRACKING_ID) {
+      auto& slot = device.getSlot<TouchEvent>();
+      if (event.value == -1) {
+        std::cout << "Touch down" << std::endl;
+        slot.type = TouchEvent::Up;
+        // setType = true;
+      } else {
+        std::cout << "Touch Up" << std::endl;
+        slot.type = TouchEvent::Down;
+        slot.id = event.value;
+        // setType = true;
+      }
+    } else if (event.code == ABS_MT_POSITION_X) {
+      auto& slot = device.getSlot<TouchEvent>();
+      slot.location.x = event.value;
+    } else if (event.code == ABS_MT_POSITION_Y) {
+      auto& slot = device.getSlot<TouchEvent>();
+      slot.location.y = event.value;
+    } else if (event.code == ABS_X) {
+      device.getSlot<PenEvent>().location.x = event.value;
+    } else if (event.code == ABS_Y) {
+      device.getSlot<PenEvent>().location.y = event.value;
+    } else if (event.code == ABS_DISTANCE) {
+      device.getSlot<PenEvent>().distance = event.value;
+    } else if (event.code == ABS_PRESSURE) {
+      device.getSlot<PenEvent>().pressure = event.value;
+    }
+  }
+
+  if (event.type == EV_KEY) {
+    if (event.code == BTN_TOOL_PEN) {
+      if (event.value == KeyEvent::Press) {
+        device.getSlot<PenEvent>().type = PenEvent::ToolClose;
+        // setType = true;
+      } else {
+        device.getSlot<PenEvent>().type = PenEvent::ToolLeave;
+        // setType = true;
+      }
+    } else if (event.code == BTN_TOUCH) {
+      if (event.value == KeyEvent::Press) {
+        device.getSlot<PenEvent>().type = PenEvent::TouchDown;
+        // setType = true;
+      } else {
+        device.getSlot<PenEvent>().type = PenEvent::TouchUp;
+        // setType = true;
+      }
+    } else {
+      auto& slot = device.getSlot<KeyEvent>();
+      slot.type = static_cast<decltype(slot.type)>(event.value);
+      slot.keyCode = event.code;
+    }
+  }
+}
+} // namespace
+
 std::optional<std::vector<Event>>
 InputManager::readEvent(InputDevice& device) {
-  input_event events[64];
-  auto size = read(device.fd, &events, 64 * sizeof(input_event));
-  if (size == 0 || size == -1 || size % sizeof(input_event) != 0) {
-    perror("Error reading input");
-    return std::nullopt;
-  }
-
-  // Read until SYN.
-  for (size_t i = 0; i < size / sizeof(input_event); i++) {
-    const auto& event = events[i];
-
-    if (event.type == EV_SYN && event.code == SYN_REPORT) {
-      for (auto slot : device.changedSlots) {
-        device.events.push_back(device.slots[slot]);
-        std::visit(
-          [](auto& r) {
-            using Type = std::decay_t<decltype(r)>;
-            if constexpr (!std::is_same_v<Type, KeyEvent>) {
-              r.type = Type::Move;
-            }
-          },
-          device.slots[slot]);
-      }
-      device.changedSlots.clear();
-      continue;
-    }
-
-    if (event.type == EV_ABS && event.code == ABS_MT_SLOT) {
-      device.slot = event.value;
-      device.getSlot<TouchEvent>().slot = event.value;
-    }
-    device.changedSlots.insert(device.slot);
-
-    if (event.type == EV_ABS) {
-      if (event.code == ABS_MT_TRACKING_ID) {
-        auto& slot = device.getSlot<TouchEvent>();
-        if (event.value == -1) {
-          std::cout << "Touch down" << std::endl;
-          slot.type = TouchEvent::Up;
-          // setType = true;
-        } else {
-          std::cout << "Touch Up" << std::endl;
-          slot.type = TouchEvent::Down;
-          slot.id = event.value;
-          // setType = true;
-        }
-      } else if (event.code == ABS_MT_POSITION_X) {
-        auto& slot = device.getSlot<TouchEvent>();
-        slot.location.x = event.value;
-      } else if (event.code == ABS_MT_POSITION_Y) {
-        auto& slot = device.getSlot<TouchEvent>();
-        slot.location.y = event.value;
-      } else if (event.code == ABS_X) {
-        device.getSlot<PenEvent>().location.x = event.value;
-      } else if (event.code == ABS_Y) {
-        device.getSlot<PenEvent>().location.y = event.value;
-      } else if (event.code == ABS_DISTANCE) {
-        device.getSlot<PenEvent>().distance = event.value;
-      } else if (event.code == ABS_PRESSURE) {
-        device.getSlot<PenEvent>().pressure = event.value;
+  int rc = 0;
+  do {
+    auto event = input_event{};
+    rc = libevdev_next_event(device.dev, LIBEVDEV_READ_FLAG_NORMAL, &event);
+    if (rc == LIBEVDEV_READ_STATUS_SUCCESS) {
+      handleEvent(device, event);
+    } else if (rc == LIBEVDEV_READ_STATUS_SYNC) {
+      while (rc == LIBEVDEV_READ_STATUS_SYNC) {
+        handleEvent(device, event);
+        rc = libevdev_next_event(device.dev, LIBEVDEV_READ_FLAG_SYNC, &event);
       }
     }
-
-    if (event.type == EV_KEY) {
-      if (event.code == BTN_TOOL_PEN) {
-        if (event.value == KeyEvent::Press) {
-          device.getSlot<PenEvent>().type = PenEvent::ToolClose;
-          // setType = true;
-        } else {
-          device.getSlot<PenEvent>().type = PenEvent::ToolLeave;
-          // setType = true;
-        }
-      } else if (event.code == BTN_TOUCH) {
-        if (event.value == KeyEvent::Press) {
-          device.getSlot<PenEvent>().type = PenEvent::TouchDown;
-          // setType = true;
-        } else {
-          device.getSlot<PenEvent>().type = PenEvent::TouchUp;
-          // setType = true;
-        }
-      } else {
-        auto& slot = device.getSlot<KeyEvent>();
-        slot.type = static_cast<decltype(slot.type)>(event.value);
-        slot.keyCode = event.code;
-      }
-    }
-  }
+  } while (rc == LIBEVDEV_READ_STATUS_SYNC ||
+           rc == LIBEVDEV_READ_STATUS_SUCCESS);
 
   auto results = std::move(device.events);
   device.events.clear();
@@ -244,7 +264,7 @@ void
 InputManager::grab() {
   for (const auto& [_, device] : devices) {
     (void)_;
-    ioctl(device.fd, EVIOCGRAB, (void*)1);
+    libevdev_grab(device.dev, libevdev_grab_mode::LIBEVDEV_GRAB);
   }
 }
 
@@ -252,18 +272,19 @@ void
 InputManager::ungrab() {
   for (const auto& [_, device] : devices) {
     (void)_;
-    ioctl(device.fd, EVIOCGRAB, nullptr);
+    libevdev_grab(device.dev, libevdev_grab_mode::LIBEVDEV_UNGRAB);
   }
 }
 
 void
 InputManager::flood() {
   constexpr auto size = 8 * 512 * 4;
-  static const auto* flood_buffer = [] {
+  static const auto* floodBuffer = [] {
+    // NOLINTNEXTLINE
     static const auto ret = std::make_unique<input_event[]>(size);
 
     constexpr auto mk_input_ev = [](int a, int b, int v) {
-      input_event r;
+      input_event r{};
       r.type = a;
       r.code = b;
       r.value = v;
@@ -284,7 +305,7 @@ InputManager::flood() {
   std::cout << "FLOODING" << std::endl;
   for (const auto& [_, device] : devices) {
     (void)_;
-    if (write(device.fd, flood_buffer, size * sizeof(input_event)) == -1) {
+    if (write(device.fd, floodBuffer, size * sizeof(input_event)) == -1) {
       perror("Error writing");
     }
   }
@@ -354,16 +375,16 @@ GestureController::getGesture(Point currentDelta) {
     return SwipeGesture{
       getSwipeDirection(currentDelta), avgStart, /* endPos */ {}, currentFinger
     };
-  } else {
-    return PinchGesture{ getPinchDirection(), avgStart, currentFinger };
-  };
+  }
+
+  return PinchGesture{ getPinchDirection(), avgStart, currentFinger };
 }
 
 void
 GestureController::handleTouchDown(const TouchEvent& event) {
   currentFinger++;
 
-  auto& slot = slots[event.slot];
+  auto& slot = slots.at(event.slot);
   slot.active = true;
   slot.currentPos = event.location;
   slot.startPos = event.location;
@@ -378,17 +399,18 @@ GestureController::handleTouchUp(const TouchEvent& event) {
 
   currentFinger--;
 
-  slots[event.slot].active = false;
+  auto& slot = slots.at(event.slot);
+  slot.active = false;
 
   if (currentFinger == 0) {
     if (!started) {
       // TODO: do we need a time limit?
       // auto delta = std::chrono::steady_clock::now() - slots[event.slot].time;
       // if (delta < tap_time) {
-      result = TapGesture{ tapFingers, slots[event.slot].startPos };
+      result = TapGesture{ tapFingers, slot.startPos };
       //}
     } else {
-      result = std::move(gesture);
+      result = gesture;
     }
 
     reset();
@@ -399,9 +421,9 @@ GestureController::handleTouchUp(const TouchEvent& event) {
 
 void
 GestureController::handleTouchMove(const TouchEvent& event) {
-  auto slot = event.slot;
-  slots[slot].currentPos = event.location;
-  auto delta = event.location - slots[slot].startPos;
+  auto& slot = slots.at(event.slot);
+  slot.currentPos = event.location;
+  auto delta = event.location - slot.startPos;
 
   if (!started) {
     if (currentFinger >= 2 && (std::abs(delta.x) >= start_threshold ||
@@ -436,7 +458,7 @@ GestureController::handleEvents(const std::vector<Event>& events) {
       case TouchEvent::Up: {
         auto gesture = handleTouchUp(touchEv);
         if (gesture.has_value()) {
-          result.emplace_back(std::move(*gesture));
+          result.emplace_back(*gesture);
         }
         break;
       }

@@ -15,37 +15,39 @@ namespace rmlib {
 
 namespace {
 constexpr auto font_path = "/usr/share/fonts/ttf/noto/NotoMono-Regular.ttf";
-uint8_t font_buffer[24 << 20] = { 0 };
-stbtt_fontinfo font;
 
 stbtt_fontinfo*
 getFont() {
-  static auto f = [] {
-    auto* fp = fopen(font_path, "r");
+  static auto* font = [] {
+    static std::array<uint8_t, 24 << 20> fontBuffer = { 0 };
+    static stbtt_fontinfo font;
+
+    auto* fp = fopen(font_path, "r"); // NOLINT
     if (fp == nullptr) {
       std::cerr << "Error opening font\n";
     }
-    auto len = fread(font_buffer, 1, 24 << 20, fp);
+    auto len = fread(fontBuffer.data(), 1, fontBuffer.size(), fp);
     if (len == static_cast<decltype(len)>(-1)) {
       std::cerr << "Error reading font\n";
     }
 
-    stbtt_InitFont(&font, font_buffer, 0);
-    fclose(fp);
+    stbtt_InitFont(&font, fontBuffer.data(), 0);
+    fclose(fp); // NOLINT
     return &font;
   }();
-  return f;
+
+  return font;
 }
 } // namespace
 
 Point
 Canvas::getTextSize(std::string_view text, int size) {
   const auto* font = getFont();
-  auto scale = stbtt_ScaleForPixelHeight(font, size);
+  auto scale = stbtt_ScaleForPixelHeight(font, float(size));
 
-  int ascent;
+  int ascent = 0;
   stbtt_GetFontVMetrics(font, &ascent, nullptr, nullptr);
-  auto baseline = static_cast<int>(ascent * scale);
+  auto baseline = static_cast<int>(float(ascent) * scale);
 
   auto utf32 =
     std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t>{}.from_bytes(
@@ -53,21 +55,26 @@ Canvas::getTextSize(std::string_view text, int size) {
 
   int maxY = 0;
   float xpos = 0;
-  for (int ch = 0; utf32[ch]; ch++) {
-    int advance, lsb;
+  for (int ch = 0; utf32[ch] != 0; ch++) {
+    int advance = 0;
+    int lsb = 0;
     stbtt_GetCodepointHMetrics(font, utf32[ch], &advance, &lsb);
 
-    int x0, x1, y0, y1;
+    int x0 = 0;
+    int x1 = 0;
+    int y0 = 0;
+    int y1 = 0;
     stbtt_GetCodepointBitmapBox(
       font, utf32[ch], scale, scale, &x0, &y0, &x1, &y1);
 
     auto y = baseline + y1;
     maxY = std::max(maxY, y);
 
-    xpos += advance * scale;
-    if (utf32[ch + 1]) {
+    xpos += float(advance) * scale;
+    if (utf32[ch + 1] != 0) {
       xpos +=
-        scale * stbtt_GetCodepointKernAdvance(font, utf32[ch], utf32[ch + 1]);
+        scale *
+        float(stbtt_GetCodepointKernAdvance(font, utf32[ch], utf32[ch + 1]));
     }
   }
 
@@ -75,13 +82,13 @@ Canvas::getTextSize(std::string_view text, int size) {
 }
 
 void
-Canvas::drawText(std::string_view text, Point location, int size) {
+Canvas::drawText(std::string_view text, Point location, int size) { // NOLINT
   const auto* font = getFont();
-  auto scale = stbtt_ScaleForPixelHeight(font, size);
+  auto scale = stbtt_ScaleForPixelHeight(font, float(size));
 
-  int ascent;
+  int ascent = 0;
   stbtt_GetFontVMetrics(font, &ascent, nullptr, nullptr);
-  auto baseline = static_cast<int>(ascent * scale);
+  auto baseline = static_cast<int>(float(ascent) * scale);
 
   auto utf32 =
     std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t>{}.from_bytes(
@@ -90,13 +97,17 @@ Canvas::drawText(std::string_view text, Point location, int size) {
   std::vector<uint8_t> textBuffer;
 
   float xpos = 0;
-  for (int ch = 0; utf32[ch]; ch++) {
-    float x_shift = xpos - (float)floor(xpos);
+  for (int ch = 0; utf32[ch] != 0; ch++) {
+    float xShift = xpos - floorf(xpos);
 
-    int advance, lsb;
+    int advance = 0;
+    int lsb = 0;
     stbtt_GetCodepointHMetrics(font, utf32[ch], &advance, &lsb);
 
-    int x0, y0, x1, y1;
+    int x0 = 0;
+    int x1 = 0;
+    int y0 = 0;
+    int y1 = 0;
     stbtt_GetCodepointBitmapBox(
       font, utf32[ch], scale, scale, &x0, &y0, &x1, &y1);
 
@@ -108,7 +119,7 @@ Canvas::drawText(std::string_view text, Point location, int size) {
     }
 
     stbtt_MakeCodepointBitmapSubpixel(
-      font, textBuffer.data(), w, h, w, scale, scale, x_shift, 0, utf32[ch]);
+      font, textBuffer.data(), w, h, w, scale, scale, xShift, 0, utf32[ch]);
 
     // Draw the bitmap to canvas.
     for (int y = 0; y < h; y++) {
@@ -118,6 +129,7 @@ Canvas::drawText(std::string_view text, Point location, int size) {
         auto memY = location.y + baseline + y0 + y;
         auto memX = location.x + static_cast<int>(xpos) + x0 + x;
 
+        // NOLINTNEXTLINE
         memory[(memY)*lineSize() + (memX)*components] = (pixel / 16) << 1;
       }
     }
@@ -127,10 +139,11 @@ Canvas::drawText(std::string_view text, Point location, int size) {
     // bitmaps into textures. if you want to render a sequence of characters,
     // you really need to render each bitmap to a temp font_buffer, then "alpha
     // blend" that into the working font_buffer
-    xpos += advance * scale;
-    if (utf32[ch + 1]) {
+    xpos += float(advance) * scale;
+    if (utf32[ch + 1] != 0) {
       xpos +=
-        scale * stbtt_GetCodepointKernAdvance(font, utf32[ch], utf32[ch + 1]);
+        scale *
+        float(stbtt_GetCodepointKernAdvance(font, utf32[ch], utf32[ch + 1]));
     }
   }
 }
@@ -204,6 +217,7 @@ ImageCanvas::release() {
 }
 
 MemoryCanvas::MemoryCanvas(const Canvas& other, Rect rect) {
+  // NOLINTNEXTLINE
   memory = std::make_unique<uint8_t[]>(rect.width() * rect.height() *
                                        other.components);
   canvas = other;

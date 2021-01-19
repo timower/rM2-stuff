@@ -15,7 +15,7 @@
 
 namespace rmlib::fb {
 namespace {
-constexpr auto shmPath = "/dev/shm/swtfb.01";
+constexpr auto shm_path = "/dev/shm/swtfb.01";
 }
 
 std::optional<FrameBuffer>
@@ -37,7 +37,7 @@ FrameBuffer::open() {
         }
 
         // check if shared mem exists
-        if (access(shmPath, F_OK) == 0) {
+        if (access(shm_path, F_OK) == 0) {
           std::cerr << "Using rm2fb ipc\n";
           return rM2fb;
         }
@@ -54,14 +54,14 @@ FrameBuffer::open() {
     return std::nullopt;
   }
 
-  const auto path = [fbType] {
+  const auto* path = [fbType] {
     switch (fbType) {
       case rM1:
       case Shim:
         return "/dev/fb0";
 
       case rM2fb:
-        return shmPath;
+        return shm_path;
 
       case Swtcon:
       default:
@@ -110,24 +110,24 @@ FrameBuffer::~FrameBuffer() {
 }
 
 void
-FrameBuffer::doUpdate(Rect region, Waveform waveform, UpdateFlags flags) {
+FrameBuffer::doUpdate(Rect region, Waveform waveform, UpdateFlags flags) const {
 
   switch (type) {
     case rM1:
-    case Shim:
-      mxcfb_update_data update;
+    case Shim: {
+      auto update = mxcfb_update_data{};
       update.waveform_mode = static_cast<int>(waveform);
-      update.update_mode = flags & UpdateFlags::FullRefresh ? 1 : 0;
+      update.update_mode = (flags & UpdateFlags::FullRefresh) != 0 ? 1 : 0;
       update.update_region.top = region.topLeft.y;
       update.update_region.left = region.topLeft.x;
       update.update_region.width = region.width();
       update.update_region.height = region.height();
 
       ioctl(fd, MXCFB_SEND_UPDATE, &update);
-      break;
+    } break;
     case rM2fb:
-      break;
     case Swtcon:
+      // TODO: implement this
       break;
   }
 }

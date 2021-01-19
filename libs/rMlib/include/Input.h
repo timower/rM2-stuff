@@ -9,7 +9,11 @@
 #include <variant>
 #include <vector>
 
+struct libevdev;
+
 namespace rmlib::input {
+constexpr static auto max_num_slots = 32;
+
 struct TouchEvent {
   enum { Down, Up, Move } type;
   int id;
@@ -37,10 +41,11 @@ using Event = std::variant<TouchEvent, PenEvent, KeyEvent>;
 struct InputManager {
   struct InputDevice {
     int fd;
+    libevdev* dev;
     Transform transform;
 
     int slot = 0;
-    Event slots[10];
+    std::array<Event, max_num_slots> slots;
 
     std::unordered_set<int> changedSlots;
     std::vector<Event> events;
@@ -120,7 +125,6 @@ using Gesture = std::variant<SwipeGesture, PinchGesture, TapGesture>;
 
 struct GestureController {
   // pixels to move before detecting swipe or pinch
-  constexpr static auto num_slots = 50;
   constexpr static int start_threshold = 50;
   constexpr static auto tap_time = std::chrono::milliseconds(150);
 
@@ -147,7 +151,7 @@ struct GestureController {
   int currentFinger = 0;
   int tapFingers = 0;
 
-  std::array<SlotState, num_slots> slots;
+  std::array<SlotState, max_num_slots> slots;
 
   bool started = false;
   Gesture gesture;

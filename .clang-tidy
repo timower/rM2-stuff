@@ -1,5 +1,5 @@
 Checks:
-'-*,clang-diagnostic-*,readability-*,modernize-*,cppcoreguidelines-*,google-readability-*,-google-readability-todo,-cppcoreguidelines-pro-bounds-array-to-pointer-decay,-modernize-use-nodiscard,-cppcoreguidelines-macro-usage,-*-magic-numbers,performance-*,bugprone-*,-cppcoreguidelines-non-private-member-variables-in-classes,-bugprone-exception-escape,-modernize-use-trailing-return-type'
+'-*,clang-diagnostic-*,readability-*,modernize-*,cppcoreguidelines-*,google-readability-*,-google-readability-todo,-cppcoreguidelines-pro-bounds-array-to-pointer-decay,-modernize-use-nodiscard,-cppcoreguidelines-macro-usage,-*-magic-numbers,performance-*,bugprone-*,-cppcoreguidelines-non-private-member-variables-in-classes,-bugprone-exception-escape,-modernize-use-trailing-return-type,-cppcoreguidelines-pro-type-vararg,-cppcoreguidelines-pro-bounds-pointer-arithmetic'
 CheckOptions:
   - key: readability-identifier-naming.AbstractClassCase
     value: CamelCase
@@ -22,7 +22,7 @@ CheckOptions:
   - key: readability-identifier-naming.EnumCase
     value: CamelCase
   - key: readability-identifier-naming.EnumConstantCase
-    value: UPPER_CASE
+    value: CamelCase
   - key: readability-identifier-naming.FunctionCase
     value: camelBack
   - key: readability-identifier-naming.GlobalConstantCase

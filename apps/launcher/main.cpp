@@ -120,7 +120,7 @@ Launcher::readApps() {
   }
 }
 
-const static Config default_config = { {
+const Config default_config = { {
   { GestureConfig::Swipe, SwipeGesture::Down, 2, GestureConfig::ShowApps, "" },
 
   { GestureConfig::Swipe,
@@ -147,16 +147,18 @@ runCommand(std::string_view cmd) {
   if (pid == -1) {
     perror("Error launching");
     return -1;
-  } else if (pid > 0) {
+  }
+
+  if (pid > 0) {
     // Parent process, pid is the child pid
     return pid;
-  } else {
-    std::cout << "Running: " << cmd << std::endl;
-    setpgid(0, 0);
-    execlp("/bin/sh", "/bin/sh", "-c", cmd.data(), nullptr);
-    perror("Error running process");
-    return -1;
   }
+
+  std::cout << "Running: " << cmd << std::endl;
+  setpgid(0, 0);
+  execlp("/bin/sh", "/bin/sh", "-c", cmd.data(), nullptr);
+  perror("Error running process");
+  return -1;
 }
 
 App*
@@ -250,8 +252,8 @@ Launcher::drawAppsLauncher() {
   constexpr auto text_margin = 10;
 
   static constexpr auto kill_text = "[x]";
-  static const auto killSize = Canvas::getTextSize(kill_text, name_size);
-  static const auto indSize = Canvas::getTextSize(">", name_size);
+  static const auto kill_size = Canvas::getTextSize(kill_text, name_size);
+  static const auto ind_size = Canvas::getTextSize(">", name_size);
 
   if (state == State::ShowingLauncher) {
     return;
@@ -274,10 +276,10 @@ Launcher::drawAppsLauncher() {
     assert(longestApp != apps.end());
 
     auto size = Canvas::getTextSize(longestApp->description.name, name_size);
-    size.x += killSize.x + indSize.x;
+    size.x += kill_size.x + ind_size.x;
 
     int width = size.x + 2 * margin;
-    int height = name_size * apps.size() + text_margin * apps.size();
+    int height = (name_size + text_margin) * int(apps.size());
     // size.y * apps.size() + text_margin * apps.size(); // - 1) + 3 * margin;
 
     auto topLeft = Point{ (frameBuffer->canvas.width / 2) - (width / 2), 0 };
@@ -301,7 +303,7 @@ Launcher::drawAppsLauncher() {
 
     int xoffset = (frameBuffer->canvas.width / 2) - (textSize.x / 2);
     if (app.runInfo.has_value()) {
-      xoffset -= (killSize.x / 2) + margin / 2;
+      xoffset -= (kill_size.x / 2) + margin / 2;
     }
 
     yoffset += text_margin / 2;
@@ -315,7 +317,7 @@ Launcher::drawAppsLauncher() {
       auto killPosition = Point{ xoffset + textSize.x + margin / 2, yoffset };
       frameBuffer->canvas.drawText(kill_text, killPosition, name_size);
 
-      app.killRect = { killPosition, killPosition + killSize };
+      app.killRect = { killPosition, killPosition + kill_size };
     }
 
     yoffset += name_size;
@@ -503,8 +505,8 @@ Launcher launcher;
 
 void
 cleanup(int signal) {
-  pid_t childPid;
-  while ((childPid = waitpid((pid_t)(-1), 0, WNOHANG)) > 0) {
+  pid_t childPid = 0;
+  while ((childPid = waitpid(static_cast<pid_t>(-1), nullptr, WNOHANG)) > 0) {
     std::cout << "Exited: " << childPid << std::endl;
 
     auto app = std::find_if(

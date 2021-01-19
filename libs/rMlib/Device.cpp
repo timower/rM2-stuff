@@ -16,15 +16,15 @@ constexpr auto wacom_width = 15725;
 constexpr auto wacom_height = 20967;
 
 constexpr auto wacom_transform =
-  Transform{ { { 0, (float)screen_width / wacom_width },
-               { -(float)screen_height / wacom_height, 0 } },
+  Transform{ { { 0, float(screen_width) / wacom_width },
+               { -float(screen_height) / wacom_height, 0 } },
              { 0, screen_height } };
 
 const InputPaths rm1_paths = {
   // touch
   "/dev/input/event1",
-  Transform{ { { -(float)screen_width / rm1_touch_width, 0 },
-               { 0, -(float)screen_height / rm1_touch_height } },
+  Transform{ { { -float(screen_width) / rm1_touch_width, 0 },
+               { 0, -float(screen_height) / rm1_touch_height } },
              { screen_width, screen_height } },
 
   // pen

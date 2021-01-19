@@ -33,7 +33,7 @@ struct FrameBuffer {
   /// Closes the framebuffer and unmaps the memory.
   ~FrameBuffer();
 
-  void doUpdate(Rect region, Waveform waveform, UpdateFlags flags);
+  void doUpdate(Rect region, Waveform waveform, UpdateFlags flags) const;
 
   void drawText(std::string_view text,
                 Point location,

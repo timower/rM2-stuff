@@ -13,7 +13,7 @@ AppDescription::read(std::string_view path) {
   result.path = path;
 
   for (std::string line; std::getline(ifs, line);) {
-    auto eq = line.find("=");
+    auto eq = line.find('=');
     if (eq == std::string::npos) {
       continue;
     }

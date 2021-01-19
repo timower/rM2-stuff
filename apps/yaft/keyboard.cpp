@@ -11,7 +11,8 @@ using namespace rmlib;
 using namespace rmlib::input;
 
 namespace {
-constexpr char escChr = '\x1b';
+constexpr auto pen_slot = 0x1000;
+constexpr char esc_char = '\x1b';
 
 constexpr std::initializer_list<std::pair<std::string_view, std::string_view>>
   print_names = {
@@ -130,81 +131,79 @@ static_assert(
   })->size() == row_size);
 #endif
 
-constexpr void
-writeVtCode(char* buf, char code) {
-  buf[0] = escChr;
-  buf[1] = '[';
-  buf[2] = code;
-  buf[3] = '~';
-  buf[4] = 0;
-}
-
-constexpr void
-writeXtCode(char* buf, char code, bool appCursor) {
-  buf[0] = escChr;
-  buf[1] = appCursor ? 'O' : '[';
-  buf[2] = code;
-  buf[3] = 0;
-}
-
 const char*
 getKeyCodeStr(int scancode, bool shift, bool alt, bool ctrl, bool appCursor) {
-  static char buf[512];
+  static std::array<char, 512> buf;
+
+  constexpr auto write_vt_code = [](char code) {
+    buf[0] = esc_char;
+    buf[1] = '[';
+    buf[2] = code;
+    buf[3] = '~';
+    buf[4] = 0;
+  };
+
+  constexpr auto write_xt_code = [](char code, bool appCursor) {
+    buf[0] = esc_char;
+    buf[1] = appCursor ? 'O' : '[';
+    buf[2] = code;
+    buf[3] = 0;
+  };
 
   if (scancode > 0xFF) {
     // TODO: support modifiers.
     switch (scancode) {
       case Escape:
-        buf[0] = escChr;
+        buf[0] = esc_char;
         buf[1] = 0;
-        return buf;
+        return buf.data();
       case Tab:
         buf[0] = '\t';
         buf[1] = 0;
-        return buf;
+        return buf.data();
       case Backspace:
         buf[0] = '\x7f';
         buf[1] = 0;
-        return buf;
+        return buf.data();
       case Enter:
         buf[0] = '\r'; // TODO: support newline mode
         buf[1] = 0;
-        return buf;
+        return buf.data();
       case Del:
-        writeVtCode(buf, '3');
-        return buf;
+        write_vt_code('3');
+        return buf.data();
       case Home:
-        writeVtCode(buf, '1');
-        return buf;
+        write_vt_code('1');
+        return buf.data();
       case End:
-        writeVtCode(buf, '4');
-        return buf;
+        write_vt_code('4');
+        return buf.data();
 
       case Left:
-        writeXtCode(buf, 'D', appCursor);
-        return buf;
+        write_xt_code('D', appCursor);
+        return buf.data();
       case Up:
-        writeXtCode(buf, 'A', appCursor);
-        return buf;
+        write_xt_code('A', appCursor);
+        return buf.data();
       case Right:
-        writeXtCode(buf, 'C', appCursor);
-        return buf;
+        write_xt_code('C', appCursor);
+        return buf.data();
       case Down:
-        writeXtCode(buf, 'B', appCursor);
-        return buf;
+        write_xt_code('B', appCursor);
+        return buf.data();
 
       case PageUp:
-        writeVtCode(buf, '5');
-        return buf;
+        write_vt_code('5');
+        return buf.data();
       case PageDown:
-        writeVtCode(buf, '6');
-        return buf;
+        write_vt_code('6');
+        return buf.data();
     }
 
     return nullptr;
   }
 
-  if (isprint(scancode)) {
+  if (isprint(scancode) != 0) {
     if (ctrl) {
       if (0x41 <= scancode && scancode <= 0x5f) {
         scancode -= 0x40;
@@ -213,19 +212,19 @@ getKeyCodeStr(int scancode, bool shift, bool alt, bool ctrl, bool appCursor) {
       }
     }
 
-    if (isalpha(scancode) && !shift) {
+    if (isalpha(scancode) != 0 && !shift) {
       scancode = tolower(scancode);
     }
 
     if (alt) {
-      buf[0] = escChr;
-      buf[1] = (char)scancode;
+      buf[0] = esc_char;
+      buf[1] = char(scancode);
       buf[2] = 0;
     } else {
-      buf[0] = (char)scancode;
+      buf[0] = char(scancode);
       buf[1] = 0;
     }
-    return buf;
+    return buf.data();
   }
 
   return nullptr;
@@ -300,7 +299,7 @@ Keyboard::drawKey(const Key& key) const {
     if (key.name[0] != ':' || key.name.size() == 1) {
       return key.name;
     }
-    auto it =
+    const auto* it =
       std::find_if(print_names.begin(),
                    print_names.end(),
                    [&key](const auto& pair) { return pair.first == key.name; });
@@ -361,7 +360,7 @@ Keyboard::getKey(Point location) {
 }
 
 void
-Keyboard::sendKeyDown(const Key& key) {
+Keyboard::sendKeyDown(const Key& key) const {
 
   // No code for modifiers.
   if (isModifier(key.info.code)) {
@@ -373,13 +372,13 @@ Keyboard::sendKeyDown(const Key& key) {
   bool alt = altKey->isDown();
   bool ctrl = ctrlKey->isDown();
 
-  bool appCursor = !!(term->mode & MODE_APP_CURSOR);
+  bool appCursor = (term->mode & MODE_APP_CURSOR) != 0;
 
   // scancode, use alt code if shift is pressed.
   auto scancode =
     (key.info.altCode != 0 && shift) ? key.info.altCode : key.info.code;
 
-  auto* code = getKeyCodeStr(scancode, shift, alt, ctrl, appCursor);
+  const auto* code = getKeyCodeStr(scancode, shift, alt, ctrl, appCursor);
   if (code != nullptr) {
     write(term->fd, code, strlen(code));
   } else {
