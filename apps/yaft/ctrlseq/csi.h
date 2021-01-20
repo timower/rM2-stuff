@@ -429,6 +429,8 @@ set_mode(struct terminal_t* term, struct parm_t* parm) {
       term->mode |= MODE_CURSOR;
     } else if (mode == 8901) {
       term->mode |= MODE_VWBS;
+    } else if (mode == 1000) {
+      term->mode |= MODE_MOUSE;
     } else {
       printf("UNKNOWN MODE: %d\n", mode);
     }
@@ -457,6 +459,8 @@ reset_mode(struct terminal_t* term, struct parm_t* parm) {
       term->mode &= ~MODE_CURSOR;
     } else if (mode == 8901) {
       term->mode &= ~MODE_VWBS;
+    } else if (mode == 1000) {
+      term->mode &= ~MODE_MOUSE;
     }
   }
 }

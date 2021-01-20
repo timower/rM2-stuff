@@ -125,6 +125,7 @@ enum term_mode {
   MODE_AMRIGHT = 0x04,    /* auto wrap: DECAWM */
   MODE_VWBS = 0x08,       /* variable-width backspace */
   MODE_APP_CURSOR = 0x10, /* app cursor mode */
+  MODE_MOUSE = 0x20,      /* enable xterm mouse */
 };
 
 #ifdef __cplusplus
@@ -240,6 +241,8 @@ struct terminal_t {
   const struct glyph_t* glyph[UCS2_CHARS]; /* array of pointer to glyphs[] */
   struct glyph_t drcs[DRCS_CHARS];         /* DRCS chars */
   struct sixel_canvas_t sixel;
+
+  int marginTop;
 };
 
 struct parm_t { /* for parse_arg() */

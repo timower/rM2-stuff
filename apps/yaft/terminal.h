@@ -359,6 +359,8 @@ term_init(struct terminal_t* term, int width, int height) {
   term->cols = term->width / CELL_WIDTH;
   term->lines = term->height / CELL_HEIGHT;
 
+  term->marginTop = (term->height - term->lines * CELL_HEIGHT);
+
   term->esc.size = ESCSEQ_SIZE;
 
   logging(DEBUG, "terminal cols:%d lines:%d\n", term->cols, term->lines);

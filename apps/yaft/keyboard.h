@@ -60,14 +60,15 @@ struct Keyboard {
   // members
   int baseKeyWidth;
   int startHeight;
+  rmlib::Rect screenRect;
 
-  int touchFd;
-  int penFd;
   rmlib::input::InputManager input;
   rmlib::fb::FrameBuffer* fb;
   terminal_t* term;
 
-  // Slots for tracking modifier state.
+  int mouseSlot = -1;
+
+  // Pointers for tracking modifier state.
   Key* shiftKey = nullptr;
   Key* altKey = nullptr;
   Key* ctrlKey = nullptr;

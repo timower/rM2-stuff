@@ -20,10 +20,7 @@ color2pixel(uint32_t color) {
 }
 
 static inline void
-draw_sixel(rmlib::fb::FrameBuffer& fb,
-           int margin_top,
-           int col,
-           uint8_t* pixmap) {
+draw_sixel(rmlib::fb::FrameBuffer& fb, int y_start, int col, uint8_t* pixmap) {
   int h, w, src_offset, dst_offset;
   uint32_t pixel, color = 0;
 
@@ -32,7 +29,7 @@ draw_sixel(rmlib::fb::FrameBuffer& fb,
       src_offset = BYTES_PER_PIXEL * (h * CELL_WIDTH + w);
       memcpy(&color, pixmap + src_offset, BYTES_PER_PIXEL);
 
-      dst_offset = (margin_top + h) * fb.canvas.lineSize() +
+      dst_offset = (y_start + h) * fb.canvas.lineSize() +
                    (col * CELL_WIDTH + w) * fb.canvas.components;
       pixel = color2pixel(color);
       memcpy(fb.canvas.memory + dst_offset, &pixel, fb.canvas.components);
@@ -42,13 +39,13 @@ draw_sixel(rmlib::fb::FrameBuffer& fb,
 
 static inline void
 draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
-  int pos, bdf_padding, glyph_width, margin_right, margin_top;
+  int pos, bdf_padding, glyph_width, margin_right, y_start;
   int col, w, h;
   uint32_t pixel;
   struct color_pair_t color_pair;
   struct cell_t* cellp;
 
-  margin_top = (term->height - term->lines * CELL_HEIGHT) + line * CELL_HEIGHT;
+  y_start = term->marginTop + line * CELL_HEIGHT;
 
   for (col = term->cols - 1; col >= 0; col--) {
     margin_right = (term->cols - 1 - col) * CELL_WIDTH;
@@ -58,7 +55,7 @@ draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
 
     /* draw sixel pixmap */
     if (cellp->has_pixmap) {
-      draw_sixel(fb, margin_top, col, cellp->pixmap);
+      draw_sixel(fb, y_start, col, cellp->pixmap);
       continue;
     }
 
@@ -91,7 +88,7 @@ draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
 
       for (w = 0; w < CELL_WIDTH; w++) {
         pos = (term->width - 1 - margin_right - w) * fb.canvas.components +
-              (margin_top + h) * fb.canvas.lineSize();
+              (y_start + h) * fb.canvas.lineSize();
 
         /* set color palette */
         if (cellp->glyphp->bitmap[h] & (0x01 << (bdf_padding + w)))
@@ -106,10 +103,9 @@ draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
   }
 
   /* actual display update (bit blit) */
-  fb.doUpdate(
-    { { 0, margin_top }, { fb.canvas.width, margin_top + CELL_HEIGHT } },
-    rmlib::fb::Waveform::DU,
-    rmlib::fb::UpdateFlags::None);
+  fb.doUpdate({ { 0, y_start }, { fb.canvas.width, y_start + CELL_HEIGHT } },
+              rmlib::fb::Waveform::DU,
+              rmlib::fb::UpdateFlags::None);
 
   /* TODO: page flip
           if fb_fix_screeninfo.ypanstep > 0, we can use hardware panning.

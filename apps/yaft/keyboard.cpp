@@ -248,17 +248,16 @@ Keyboard::init(rmlib::fb::FrameBuffer& fb, terminal_t& term) {
   }
 
   auto inputs = device::getInputPaths(*dev);
-  auto fd = input.open(inputs.touchPath.data(), inputs.touchTransform);
-  if (!fd.has_value()) {
+  const auto touchFd =
+    input.open(inputs.touchPath.data(), inputs.touchTransform);
+  if (!touchFd.has_value()) {
     return false;
   }
-  this->touchFd = *fd;
 
-  fd = input.open(inputs.penPath.data(), inputs.penTransform);
-  if (!fd.has_value()) {
+  const auto penFd = input.open(inputs.penPath.data(), inputs.penTransform);
+  if (!penFd.has_value()) {
     return false;
   }
-  this->penFd = *fd;
 
   // Setup the keymap.
   int y = startHeight;
@@ -286,6 +285,10 @@ Keyboard::init(rmlib::fb::FrameBuffer& fb, terminal_t& term) {
     y += key_height;
     rowNum++;
   }
+
+  int marginLeft = term.width - term.cols * CELL_WIDTH;
+  this->screenRect =
+    Rect{ { marginLeft, term.marginTop }, { term.width - 1, term.height - 1 } };
 
   return true;
 }
@@ -393,32 +396,68 @@ Keyboard::sendKeyDown(const Key& key) const {
   }
 }
 
+namespace {
+template<typename Event>
+struct event_traits;
+
+template<>
+struct event_traits<TouchEvent> {
+  constexpr static auto up_type = TouchEvent::Up;
+  constexpr static auto down_type = TouchEvent::Down;
+
+  constexpr static auto getSlot(const TouchEvent& ev) { return ev.slot; }
+};
+
+template<>
+struct event_traits<PenEvent> {
+  constexpr static auto up_type = PenEvent::TouchUp;
+  constexpr static auto down_type = PenEvent::TouchDown;
+
+  constexpr static auto getSlot(const PenEvent& ev) { return pen_slot; }
+};
+
 template<typename Event>
 void
-handleEvent(Keyboard& kb, const Event& ev) {
-  constexpr auto down_type = [] {
-    if constexpr (std::is_same_v<Event, TouchEvent>) {
-      return TouchEvent::Down;
-    } else {
-      return PenEvent::TouchDown;
-    }
-  }();
-  constexpr auto up_type = [] {
-    if constexpr (std::is_same_v<Event, TouchEvent>) {
-      return TouchEvent::Up;
-    } else {
-      return PenEvent::TouchUp;
-    }
-  }();
-  const auto slot = [&] {
-    if constexpr (std::is_same_v<Event, TouchEvent>) {
-      return ev.slot;
-    } else {
-      return pen_slot;
-    }
-  }();
+handleScreenEvent(Keyboard& kb, const Event& ev) {
+  if ((kb.term->mode & MODE_MOUSE) == 0) {
+    return;
+  }
 
-  if (ev.type == down_type) {
+  const auto slot = event_traits<Event>::getSlot(ev);
+
+  const auto loc = ev.location - kb.screenRect.topLeft;
+  char cx = 33 + (loc.x / CELL_WIDTH);
+  char cy = 33 + (loc.y / CELL_HEIGHT);
+  char buf[] = { esc_char, '[', 'M', 32, cx, cy };
+
+  if (ev.type == event_traits<Event>::down_type) {
+    if (kb.mouseSlot != -1) {
+      return;
+    }
+
+    kb.mouseSlot = slot;
+
+    // Send mouse down code
+    buf[3] += 0; // mouse button 1
+    write(kb.term->fd, buf, 6);
+
+  } else if (ev.type == event_traits<Event>::up_type) {
+    if (kb.mouseSlot != slot) {
+      return;
+    }
+
+    kb.mouseSlot = -1;
+
+    // Send mouse up code
+    buf[3] += 3; // mouse release
+    write(kb.term->fd, buf, 6);
+  }
+}
+
+template<typename Event>
+void
+handleKeyEvent(Keyboard& kb, const Event& ev) {
+  if (ev.type == event_traits<Event>::down_type) {
     // lookup key, skip if outside
     auto* key = kb.getKey(ev.location);
     if (key == nullptr) {
@@ -427,7 +466,7 @@ handleEvent(Keyboard& kb, const Event& ev) {
 
     std::cerr << "key down: " << key->info.name << std::endl;
 
-    key->slot = slot;
+    key->slot = event_traits<Event>::getSlot(ev);
     key->nextRepeat = time_source::now() + repeat_delay;
 
     kb.drawKey(*key);
@@ -452,7 +491,8 @@ handleEvent(Keyboard& kb, const Event& ev) {
       key->stuck = false;
     }
 
-  } else if (ev.type == up_type) {
+  } else if (ev.type == event_traits<Event>::up_type) {
+    const auto slot = event_traits<Event>::getSlot(ev);
     auto keyIt =
       std::find_if(kb.keys.begin(), kb.keys.end(), [slot](const auto& key) {
         return key.slot == slot;
@@ -468,6 +508,7 @@ handleEvent(Keyboard& kb, const Event& ev) {
       keyIt->keyRect, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::None);
   }
 }
+} // namespace
 
 void
 Keyboard::handleEvents(const std::vector<rmlib::input::Event>& events) {
@@ -475,7 +516,11 @@ Keyboard::handleEvents(const std::vector<rmlib::input::Event>& events) {
     std::visit(
       [this](const auto& ev) {
         if constexpr (!std::is_same_v<std::decay_t<decltype(ev)>, KeyEvent>) {
-          handleEvent(*this, ev);
+          if (screenRect.contains(ev.location)) {
+            handleScreenEvent(*this, ev);
+          } else {
+            handleKeyEvent(*this, ev);
+          }
         }
       },
       event);
