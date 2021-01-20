@@ -295,7 +295,7 @@ InputManager::flood() {
     for (int i = 0; i < size;) {
       ret[i++] = mk_input_ev(EV_ABS, ABS_DISTANCE, 1);
       ret[i++] = mk_input_ev(EV_SYN, 0, 0);
-      ret[i++] = mk_input_ev(EV_ABS, ABS_DISTANCE, 0);
+      ret[i++] = mk_input_ev(EV_ABS, ABS_DISTANCE, 2);
       ret[i++] = mk_input_ev(EV_SYN, 0, 0);
     }
 
