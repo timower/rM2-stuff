@@ -18,7 +18,7 @@
 #include <linux/kd.h>
 #include <linux/vt.h>
 
-static const char* term_name = "xterm";
+static const char* term_name = "yaft-256color";
 static const char* shell_cmd = "/bin/bash";
 
 struct termios termios_orig;
@@ -178,21 +178,7 @@ fork_and_exec(int* master,
   return true;
 }
 
-int
-check_fds(fd_set* fds, int input, int master, int touch) {
-  struct timeval tv;
-
-  FD_ZERO(fds);
-  if constexpr (USE_STDIN) {
-    FD_SET(input, fds);
-  }
-  FD_SET(master, fds);
-  FD_SET(touch, fds);
-
-  tv.tv_sec = 0;
-  tv.tv_usec = SELECT_TIMEOUT;
-  return eselect(std::max(master, touch) + 1, fds, NULL, NULL, &tv);
-}
+constexpr auto select_timeout = std::chrono::microseconds(SELECT_TIMEOUT);
 
 int
 main(int argc, const char* argv[]) {
@@ -201,7 +187,6 @@ main(int argc, const char* argv[]) {
   const char** args;
   uint8_t buf[BUFSIZE];
   ssize_t size;
-  fd_set fds;
   struct terminal_t term;
   /* global */
   extern volatile sig_atomic_t need_redraw;
@@ -262,18 +247,26 @@ main(int argc, const char* argv[]) {
       refresh(*fb, &term);
     }
 
-    if (check_fds(&fds, STDIN_FILENO, term.fd, keyboard.touchFd) == -1) {
+    auto eventAndFds = [&] {
+      if constexpr (USE_STDIN) {
+        return keyboard.input.waitForInput(
+          select_timeout, term.fd, STDIN_FILENO);
+      } else {
+        return keyboard.input.waitForInput(select_timeout, term.fd);
+      }
+    }();
+
+    // Update repeat in any case (timeout, error or events).
+    keyboard.updateRepeat();
+
+    if (!eventAndFds.has_value()) {
       continue;
     }
 
-    if constexpr (USE_STDIN) {
-      if (FD_ISSET(STDIN_FILENO, &fds)) {
-        if ((size = read(STDIN_FILENO, buf, BUFSIZE)) > 0)
-          ewrite(term.fd, buf, size);
-      }
-    }
+    const auto& [events, fds] = *eventAndFds;
+    keyboard.handleEvents(events);
 
-    if (FD_ISSET(term.fd, &fds)) {
+    if (fds[0]) {
       if ((size = read(term.fd, buf, BUFSIZE)) > 0) {
         if (VERBOSE)
           ewrite(STDOUT_FILENO, buf, size);
@@ -284,11 +277,12 @@ main(int argc, const char* argv[]) {
       }
     }
 
-    if (FD_ISSET(keyboard.touchFd, &fds)) {
-      keyboard.readEvents();
+    if constexpr (USE_STDIN) {
+      if (fds[1]) {
+        if ((size = read(STDIN_FILENO, buf, BUFSIZE)) > 0)
+          ewrite(term.fd, buf, size);
+      }
     }
-
-    keyboard.updateRepeat();
   }
 
   /* normal exit */

@@ -91,16 +91,11 @@ InputManager::closeAll() {
 }
 
 std::optional<std::vector<Event>>
-InputManager::waitForInput(std::optional<std::chrono::microseconds> timeout) {
-  if (devices.empty()) {
-    return std::nullopt;
-  }
-
-  fd_set fds;
-  FD_ZERO(&fds); // NOLINT
+InputManager::waitForInput(fd_set& fdSet,
+                           std::optional<std::chrono::microseconds> timeout) {
   for (auto& [fd, _] : devices) {
     (void)_;
-    FD_SET(fd, &fds); // NOLINT
+    FD_SET(fd, &fdSet); // NOLINT
   }
 
   auto tv = timeval{ 0, 0 };
@@ -112,8 +107,8 @@ InputManager::waitForInput(std::optional<std::chrono::microseconds> timeout) {
     tv.tv_usec = timeout->count() - (tv.tv_sec * second_in_usec);
   }
 
-  auto ret =
-    select(maxFd, &fds, nullptr, nullptr, !timeout.has_value() ? nullptr : &tv);
+  auto ret = select(
+    maxFd, &fdSet, nullptr, nullptr, !timeout.has_value() ? nullptr : &tv);
   if (ret < 0) {
     perror("Select on input failed");
     return std::nullopt;
@@ -125,22 +120,24 @@ InputManager::waitForInput(std::optional<std::chrono::microseconds> timeout) {
   }
 
   // Return the first device we see.
+  std::vector<Event> result;
   for (auto& [fd, device] : devices) {
-    if (!FD_ISSET(fd, &fds)) { // NOLINT
+    if (!FD_ISSET(fd, &fdSet)) { // NOLINT
       continue;
     }
 
-    return readEvent(device);
+    auto res = readEvents(device);
+    result.insert(result.end(), res.begin(), res.end());
   }
 
-  return std::nullopt;
+  return result;
 }
 
-std::optional<std::vector<Event>>
+std::vector<Event>
 InputManager::readEvents(int fd) {
   auto it = devices.find(fd);
   assert(it != devices.end());
-  return readEvent(it->second);
+  return readEvents(it->second);
 }
 
 namespace {
@@ -225,8 +222,8 @@ handleEvent(InputManager::InputDevice& device, const input_event& event) {
 }
 } // namespace
 
-std::optional<std::vector<Event>>
-InputManager::readEvent(InputDevice& device) {
+std::vector<Event>
+InputManager::readEvents(InputDevice& device) {
   int rc = 0;
   do {
     auto event = input_event{};

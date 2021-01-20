@@ -48,7 +48,7 @@ struct Keyboard {
 
   void draw() const;
 
-  void readEvents();
+  void handleEvents(const std::vector<rmlib::input::Event>& events);
   void updateRepeat();
 
   void drawKey(const Key& key) const;
@@ -62,6 +62,7 @@ struct Keyboard {
   int startHeight;
 
   int touchFd;
+  int penFd;
   rmlib::input::InputManager input;
   rmlib::fb::FrameBuffer* fb;
   terminal_t* term;

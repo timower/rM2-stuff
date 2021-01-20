@@ -254,6 +254,12 @@ Keyboard::init(rmlib::fb::FrameBuffer& fb, terminal_t& term) {
   }
   this->touchFd = *fd;
 
+  fd = input.open(inputs.penPath.data(), inputs.penTransform);
+  if (!fd.has_value()) {
+    return false;
+  }
+  this->penFd = *fd;
+
   // Setup the keymap.
   int y = startHeight;
   int rowNum = 0;
@@ -387,67 +393,92 @@ Keyboard::sendKeyDown(const Key& key) const {
   }
 }
 
+template<typename Event>
 void
-Keyboard::readEvents() {
-  auto events = input.readEvents(touchFd);
-  if (!events.has_value()) {
-    std::cerr << "Error reading touch\n";
-    return;
-  }
+handleEvent(Keyboard& kb, const Event& ev) {
+  constexpr auto down_type = [] {
+    if constexpr (std::is_same_v<Event, TouchEvent>) {
+      return TouchEvent::Down;
+    } else {
+      return PenEvent::TouchDown;
+    }
+  }();
+  constexpr auto up_type = [] {
+    if constexpr (std::is_same_v<Event, TouchEvent>) {
+      return TouchEvent::Up;
+    } else {
+      return PenEvent::TouchUp;
+    }
+  }();
+  const auto slot = [&] {
+    if constexpr (std::is_same_v<Event, TouchEvent>) {
+      return ev.slot;
+    } else {
+      return pen_slot;
+    }
+  }();
 
-  for (const auto& event : *events) {
-    if (!std::holds_alternative<TouchEvent>(event)) {
-      continue;
+  if (ev.type == down_type) {
+    // lookup key, skip if outside
+    auto* key = kb.getKey(ev.location);
+    if (key == nullptr) {
+      return;
     }
 
-    auto touchEv = std::get<TouchEvent>(event);
+    std::cerr << "key down: " << key->info.name << std::endl;
 
-    if (touchEv.type == TouchEvent::Down) {
-      // lookup key, skip if outside
-      auto* key = getKey(touchEv.location);
-      if (key == nullptr) {
-        continue;
-      }
+    key->slot = slot;
+    key->nextRepeat = time_source::now() + repeat_delay;
 
-      std::cerr << "key down: " << key->info.name << std::endl;
+    kb.drawKey(*key);
+    kb.fb->doUpdate(
+      key->keyRect, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::None);
 
-      key->slot = touchEv.slot;
-      key->nextRepeat = time_source::now() + repeat_delay;
+    kb.sendKeyDown(*key);
 
-      drawKey(*key);
-      fb->doUpdate(
-        key->keyRect, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::None);
-
-      sendKeyDown(*key);
-
-      // Clear sticky keys.
-      if (!isModifier(key->info.code)) {
-        for (auto* key : { shiftKey, altKey, ctrlKey }) {
-          if (key->stuck) {
-            key->stuck = false;
-            drawKey(*key);
-            fb->doUpdate(key->keyRect,
-                         rmlib::fb::Waveform::DU,
-                         rmlib::fb::UpdateFlags::None);
-          }
+    // Clear sticky keys.
+    if (!isModifier(key->info.code)) {
+      for (auto* key : { kb.shiftKey, kb.altKey, kb.ctrlKey }) {
+        if (key->stuck) {
+          key->stuck = false;
+          key->nextRepeat = time_source::now() + repeat_delay;
+          kb.drawKey(*key);
+          kb.fb->doUpdate(key->keyRect,
+                          rmlib::fb::Waveform::DU,
+                          rmlib::fb::UpdateFlags::None);
         }
       }
-
-    } else if (touchEv.type == TouchEvent::Up) {
-      auto keyIt = std::find_if(
-        keys.begin(), keys.end(), [slot = touchEv.slot](const auto& key) {
-          return key.slot == slot;
-        });
-
-      if (keyIt == keys.end()) {
-        continue;
-      }
-
-      keyIt->slot = -1;
-      drawKey(*keyIt);
-      fb->doUpdate(
-        keyIt->keyRect, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::None);
+    } else {
+      key->stuck = false;
     }
+
+  } else if (ev.type == up_type) {
+    auto keyIt =
+      std::find_if(kb.keys.begin(), kb.keys.end(), [slot](const auto& key) {
+        return key.slot == slot;
+      });
+
+    if (keyIt == kb.keys.end()) {
+      return;
+    }
+
+    keyIt->slot = -1;
+    kb.drawKey(*keyIt);
+    kb.fb->doUpdate(
+      keyIt->keyRect, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::None);
+  }
+}
+
+void
+Keyboard::handleEvents(const std::vector<rmlib::input::Event>& events) {
+  for (const auto& event : events) {
+    std::visit(
+      [this](const auto& ev) {
+        if constexpr (!std::is_same_v<std::decay_t<decltype(ev)>, KeyEvent>) {
+          handleEvent(*this, ev);
+        }
+      },
+      event);
   }
 }
 

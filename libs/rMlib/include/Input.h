@@ -86,10 +86,42 @@ struct InputManager {
   InputManager& operator=(const InputManager&) = delete;
 
   std::optional<std::vector<Event>> waitForInput(
+    fd_set& fdSet,
     std::optional<std::chrono::microseconds> timeout = std::nullopt);
 
-  std::optional<std::vector<Event>> readEvents(int);
-  static std::optional<std::vector<Event>> readEvent(InputDevice& device);
+  template<typename... ExtraFds>
+  auto waitForInput(
+    std::optional<std::chrono::microseconds> timeout = std::nullopt,
+    ExtraFds... extraFds)
+    -> std::optional<std::conditional_t<
+      sizeof...(ExtraFds) == 0,
+      std::vector<Event>,
+      std::pair<std::vector<Event>, std::array<bool, sizeof...(ExtraFds)>>>> {
+    static_assert((std::is_same_v<ExtraFds, int> && ...));
+
+    fd_set fds;
+    FD_ZERO(&fds);
+    (FD_SET(extraFds, &fds), ...);
+
+    auto res = waitForInput(fds, timeout);
+    if constexpr (sizeof...(ExtraFds) == 0) {
+      return res;
+    } else {
+
+      if (!res.has_value()) {
+        return std::nullopt;
+      }
+
+      std::array<bool, sizeof...(extraFds)> extraResult;
+      int i = 0;
+      ((extraResult[i++] = FD_ISSET(extraFds, &fds)), ...);
+
+      return std::pair{ *res, extraResult };
+    }
+  }
+
+  std::vector<Event> readEvents(int);
+  static std::vector<Event> readEvents(InputDevice& device);
 
   void grab();
   void ungrab();
