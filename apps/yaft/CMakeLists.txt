@@ -2,6 +2,7 @@ project(yaft)
 
 add_executable(${PROJECT_NAME}
   main.cpp
+  terminal.cpp
   parse.c
   fb/common.cpp
   keyboard.cpp)

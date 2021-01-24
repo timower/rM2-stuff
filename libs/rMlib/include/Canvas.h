@@ -14,6 +14,10 @@ namespace rmlib {
 
 constexpr auto default_text_size = 24;
 
+// Returns a glyph for the given codepoint.
+bool
+getGlyph(uint32_t code, uint8_t* bitmap, int height, int* width);
+
 struct Canvas {
   int lineSize() const { return width * components; }
   int totalSize() const { return lineSize() * height; }

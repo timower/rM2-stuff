@@ -181,8 +181,13 @@ struct color_pair_t {
   uint8_t fg, bg;
 };
 
+struct glyph_info_t {
+  const struct glyph_t* regularp; /* pointer to glyph */
+  const struct glyph_t* boldp;    /* pointer to glyph */
+};
+
 struct cell_t {
-  const struct glyph_t* glyphp;   /* pointer to glyph */
+  struct glyph_info_t glyph;      /* pointer to glyph */
   struct color_pair_t color_pair; /* color (fg, bg) */
   enum char_attr attribute;       /* bold, underscore, etc... */
   enum glyph_width width;         /* wide char flag: WIDE, NEXT_TO_WIDE, HALF */
@@ -239,7 +244,9 @@ struct terminal_t {
   uint32_t virtual_palette[COLORS]; /* virtual color palette: always 32bpp */
   bool palette_modified;            /* true if palette changed by OSC 4/104 */
   const struct glyph_t* glyph[UCS2_CHARS]; /* array of pointer to glyphs[] */
-  struct glyph_t drcs[DRCS_CHARS];         /* DRCS chars */
+  const struct glyph_t*
+    bold_glyph[UCS2_CHARS];        /* array of pointer to glyphs[] */
+  struct glyph_t drcs[DRCS_CHARS]; /* DRCS chars */
   struct sixel_canvas_t sixel;
 
   int marginTop;

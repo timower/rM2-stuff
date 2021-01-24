@@ -170,11 +170,9 @@ handleEvent(InputManager::InputDevice& device, const input_event& event) {
     if (event.code == ABS_MT_TRACKING_ID) {
       auto& slot = device.getSlot<TouchEvent>();
       if (event.value == -1) {
-        std::cout << "Touch down" << std::endl;
         slot.type = TouchEvent::Up;
         // setType = true;
       } else {
-        std::cout << "Touch Up" << std::endl;
         slot.type = TouchEvent::Down;
         slot.id = event.value;
         // setType = true;
@@ -369,17 +367,19 @@ GestureController::getGesture(Point currentDelta) {
     std::all_of(delta.cbegin(), delta.cend(), [](auto& p) { return p.y <= 0; });
 
   if (isSwipe) {
-    return SwipeGesture{
-      getSwipeDirection(currentDelta), avgStart, /* endPos */ {}, currentFinger
-    };
+    return SwipeGesture{ getSwipeDirection(currentDelta),
+                         avgStart,
+                         /* endPos */ {},
+                         getCurrentFingers() };
   }
 
-  return PinchGesture{ getPinchDirection(), avgStart, currentFinger };
+  return PinchGesture{ getPinchDirection(), avgStart, getCurrentFingers() };
 }
 
 void
 GestureController::handleTouchDown(const TouchEvent& event) {
-  currentFinger++;
+  std::cerr << "Touch down, current fingers: " << getCurrentFingers()
+            << std::endl;
 
   auto& slot = slots.at(event.slot);
   slot.active = true;
@@ -387,19 +387,20 @@ GestureController::handleTouchDown(const TouchEvent& event) {
   slot.startPos = event.location;
   slot.time = std::chrono::steady_clock::now();
 
-  tapFingers = currentFinger;
+  tapFingers = getCurrentFingers();
 }
 
 std::optional<Gesture>
 GestureController::handleTouchUp(const TouchEvent& event) {
   std::optional<Gesture> result;
 
-  currentFinger--;
+  std::cerr << "Touch up, current fingers: " << getCurrentFingers()
+            << std::endl;
 
   auto& slot = slots.at(event.slot);
   slot.active = false;
 
-  if (currentFinger == 0) {
+  if (getCurrentFingers() == 0) {
     if (!started) {
       // TODO: do we need a time limit?
       // auto delta = std::chrono::steady_clock::now() - slots[event.slot].time;
@@ -423,8 +424,8 @@ GestureController::handleTouchMove(const TouchEvent& event) {
   auto delta = event.location - slot.startPos;
 
   if (!started) {
-    if (currentFinger >= 2 && (std::abs(delta.x) >= start_threshold ||
-                               std::abs(delta.y) >= start_threshold)) {
+    if (getCurrentFingers() >= 2 && (std::abs(delta.x) >= start_threshold ||
+                                     std::abs(delta.y) >= start_threshold)) {
 
       started = true;
       gesture = getGesture(delta);
@@ -463,6 +464,25 @@ GestureController::handleEvents(const std::vector<Event>& events) {
   }
 
   return result;
+}
+
+void
+GestureController::sync(InputManager::InputDevice& device) {
+  const auto maxSlots =
+    std::min<int>(int(slots.size()), libevdev_get_num_slots(device.dev));
+  for (int i = 0; i < maxSlots; i++) {
+    auto id = libevdev_get_slot_value(device.dev, i, ABS_MT_TRACKING_ID);
+    bool active = id != -1;
+    if (active != slots[i].active) {
+      std::cerr << "Desync for slot " << i << std::endl;
+      if (!active) {
+        slots[i].active = false;
+        if (getCurrentFingers() == 0) {
+          reset();
+        }
+      }
+    }
+  }
 }
 
 } // namespace rmlib::input

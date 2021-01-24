@@ -71,10 +71,10 @@ constexpr std::initializer_list<std::initializer_list<KeyInfo>> layout = {
     { "4", 0x34, "%", 0x25 },
     { "5", 0x35, "(", 0x28 },
     { "6", 0x36, ")", 0x29 },
-    { "7", 0x37, "{", 0x5b },
-    { "8", 0x38, "}", 0x5d },
-    { "9", 0x39, "[", 0x7b },
-    { "0", 0x30, "]", 0x7d } },
+    { "7", 0x37, "[", 0x5b },
+    { "8", 0x38, "]", 0x5d },
+    { "9", 0x39, "{", 0x7b },
+    { "0", 0x30, "}", 0x7d } },
 
   { { "q", 0x51 },
     { "w", 0x57 },
@@ -336,7 +336,7 @@ Keyboard::drawKey(const Key& key) const {
   // draw extra border
   if (key.isDown()) {
     auto a = key.keyRect.topLeft + Point{ 2, 2 };
-    auto b = key.keyRect.bottomRight - Point{ 2, 2 };
+    auto b = key.keyRect.bottomRight - Point{ 1, 1 };
     fb->canvas.drawLine(a, { b.x, a.y }, 0x0);
     fb->canvas.drawLine(a, { a.x, b.y }, 0x0);
     fb->canvas.drawLine(b, { b.x, a.y }, 0x0);
@@ -488,7 +488,11 @@ handleKeyEvent(Keyboard& kb, const Event& ev) {
         }
       }
     } else {
-      key->stuck = false;
+      if constexpr (std::is_same_v<Event, PenEvent>) {
+        key->stuck = !key->stuck;
+      } else {
+        key->stuck = false;
+      }
     }
 
   } else if (ev.type == event_traits<Event>::up_type) {

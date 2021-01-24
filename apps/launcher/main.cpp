@@ -121,17 +121,17 @@ Launcher::readApps() {
 }
 
 const Config default_config = { {
-  { GestureConfig::Swipe, SwipeGesture::Down, 2, GestureConfig::ShowApps, "" },
+  { GestureConfig::Swipe, SwipeGesture::Down, 3, GestureConfig::ShowApps, "" },
 
   { GestureConfig::Swipe,
     SwipeGesture::Right,
-    2,
+    3,
     GestureConfig::NextRunning,
     "" },
 
   { GestureConfig::Swipe,
     SwipeGesture::Left,
-    2,
+    3,
     GestureConfig::PrevRunning,
     "" },
 } };
@@ -567,9 +567,11 @@ Launcher::init() {
 
 void
 Launcher::run() {
+  auto lastSync = std::chrono::steady_clock::now();
   while (!shouldStop) {
     auto events = inputMgr.waitForInput();
 
+    // Switch if current app closed.
     if (auto* currentApp = getCurrentApp();
         currentApp != nullptr && !currentApp->runInfo.has_value()) {
       App* lastApp = nullptr;
@@ -589,15 +591,21 @@ Launcher::run() {
       }
     }
 
-    if (!events.has_value()) {
-      std::cerr << "Error reading event\n";
-      continue;
+    if (events.has_value()) {
+      auto gestures = gestureController.handleEvents(*events);
+
+      for (const auto& gesture : gestures) {
+        std::visit([this](const auto& g) { handleGesture(config, g); },
+                   gesture);
+      }
     }
 
-    auto gestures = gestureController.handleEvents(*events);
-
-    for (const auto& gesture : gestures) {
-      std::visit([this](const auto& g) { handleGesture(config, g); }, gesture);
+    // Sync
+    auto now = std::chrono::steady_clock::now();
+    if (now - lastSync > std::chrono::seconds(10)) {
+      std::cerr << "Syncing" << std::endl;
+      gestureController.sync(inputMgr.devices.begin()->second);
+      lastSync = now;
     }
   }
 }

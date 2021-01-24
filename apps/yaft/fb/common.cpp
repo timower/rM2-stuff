@@ -3,7 +3,8 @@
 #include "../conf.h"
 #include "../util.h"
 
-static inline uint16_t
+namespace {
+inline uint16_t
 color2pixel(uint32_t color) {
   uint32_t r, g, b;
 
@@ -19,7 +20,33 @@ color2pixel(uint32_t color) {
   return (r << 11) | (g << 5) | (b << 0);
 }
 
-static inline void
+inline uint16_t
+color2brightness(uint32_t color) {
+  int r = 0xFF & (color >> (BITS_PER_RGB * 2));
+  int g = 0xFF & (color >> BITS_PER_RGB);
+  int b = 0xFF & (color >> 0);
+
+  return (54 * r + 182 * g + 19 * b) / 255;
+}
+
+enum GrayMode {
+  Black = 0,
+  Dither = 1,
+  White = 2,
+};
+
+GrayMode
+brightness2gray(uint16_t brightness) {
+  if (brightness <= 85) {
+    return Black;
+  }
+  if (brightness < 170) {
+    return Dither;
+  }
+  return White;
+}
+
+inline void
 draw_sixel(rmlib::fb::FrameBuffer& fb, int y_start, int col, uint8_t* pixmap) {
   int h, w, src_offset, dst_offset;
   uint32_t pixel, color = 0;
@@ -31,15 +58,27 @@ draw_sixel(rmlib::fb::FrameBuffer& fb, int y_start, int col, uint8_t* pixmap) {
 
       dst_offset = (y_start + h) * fb.canvas.lineSize() +
                    (col * CELL_WIDTH + w) * fb.canvas.components;
-      pixel = color2pixel(color);
+      auto grayMode = brightness2gray(color2brightness(color));
+
+      switch (grayMode) {
+        case White:
+          pixel = 0xFFFF;
+          break;
+        case Dither:
+          pixel = (h % 2) == (w % 2) ? 0x0 : 0xFFFF;
+          break;
+        case Black:
+          pixel = 0;
+          break;
+      }
       memcpy(fb.canvas.memory + dst_offset, &pixel, fb.canvas.components);
     }
   }
 }
 
-static inline void
+inline void
 draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
-  int pos, bdf_padding, glyph_width, margin_right, y_start;
+  int pos, bdf_padding, glyph_width, margin_left, y_start;
   int col, w, h;
   uint32_t pixel;
   struct color_pair_t color_pair;
@@ -47,8 +86,9 @@ draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
 
   y_start = term->marginTop + line * CELL_HEIGHT;
 
-  for (col = term->cols - 1; col >= 0; col--) {
-    margin_right = (term->cols - 1 - col) * CELL_WIDTH;
+  for (col = 0; col < term->cols; col++) {
+    margin_left =
+      (term->width - term->cols * CELL_WIDTH) / 2 + col * CELL_WIDTH;
 
     /* target cell */
     cellp = &term->cells[line][col];
@@ -79,22 +119,62 @@ draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
                                                       : ACTIVE_CURSOR_COLOR;
     }
 
+    // lookup pixels
+    const auto bg_bright = color2brightness(color_list[color_pair.bg]);
+    const auto fg_bright = color2brightness(color_list[color_pair.fg]);
+
+    auto bg_gray = brightness2gray(bg_bright);
+    auto fg_gray = brightness2gray(fg_bright);
+
+    // Don't draw same color
+    if (fg_gray == bg_gray) {
+      if (fg_bright < bg_bright) {
+        if (fg_gray != 0) {
+          fg_gray = static_cast<GrayMode>(fg_gray - 1);
+        } else {
+          bg_gray = static_cast<GrayMode>(bg_gray + 1);
+        }
+      } else {
+        if (bg_gray != 0) {
+          bg_gray = static_cast<GrayMode>(bg_gray - 1);
+        } else {
+          fg_gray = static_cast<GrayMode>(fg_gray + 1);
+        }
+      }
+    }
+
     for (h = 0; h < CELL_HEIGHT; h++) {
       /* if UNDERLINE attribute on, swap bg/fg */
       if ((h == (CELL_HEIGHT - 1)) &&
           (cellp->attribute & attr_mask[ATTR_UNDERLINE])) {
-        std::swap(color_pair.bg, color_pair.fg);
+        std::swap(bg_gray, fg_gray);
       }
 
       for (w = 0; w < CELL_WIDTH; w++) {
-        pos = (term->width - 1 - margin_right - w) * fb.canvas.components +
+        pos = (margin_left + w) * fb.canvas.components +
               (y_start + h) * fb.canvas.lineSize();
 
-        /* set color palette */
-        if (cellp->glyphp->bitmap[h] & (0x01 << (bdf_padding + w)))
-          pixel = color_list[color_pair.fg];
-        else
-          pixel = color_list[color_pair.bg];
+        /* set fg or bg */
+        const auto* glyph = (cellp->attribute & ATTR_BOLD) != 0
+                              ? cellp->glyph.boldp
+                              : cellp->glyph.regularp;
+
+        const auto grayMode =
+          (glyph->bitmap[h] & (0x01 << (bdf_padding + CELL_WIDTH - 1 - w)))
+            ? fg_gray
+            : bg_gray;
+
+        switch (grayMode) {
+          case White:
+            pixel = 0; // 0xFFFF;
+            break;
+          case Dither:
+            pixel = (h % 2) == (w % 2) ? 0x0 : 0xFFFF;
+            break;
+          case Black:
+            pixel = 0xFFFF; // 0;
+            break;
+        }
 
         /* update copy buffer only */
         memcpy(fb.canvas.memory + pos, &pixel, fb.canvas.components);
@@ -118,6 +198,8 @@ draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
   term->line_dirty[line] =
     ((term->mode & MODE_CURSOR) && term->cursor.y == line) ? true : false;
 }
+
+} // namespace
 
 void
 refresh(rmlib::fb::FrameBuffer& fb, struct terminal_t* term) {

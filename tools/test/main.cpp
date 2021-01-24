@@ -1,20 +1,25 @@
-#include "swtcon.h"
+#include <Canvas.h>
+#include <iostream>
 
 int
 main() {
+  const auto print_char = [](char c) {
+    std::string s(1, c);
+    auto size = rmlib::Canvas::getTextSize(s, 32);
+    std::cout << "Size of: " << c << " " << size << std::endl;
+  };
+  const auto print_str = [](std::string_view s) {
+    auto size = rmlib::Canvas::getTextSize(s, 32);
+    std::cout << "Size of: '" << s << "' " << size << std::endl;
+  };
 
-  auto* state = swtcon_init("/dev/fb0");
-
-  swtcon_dump(state);
-  Rect rect{ 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT };
-
-  uint8_t* buffer = swtcon_getbuffer(state);
-  (void)buffer;
-
-  swtcon_update(
-    state, rect, Waveform::INIT, UpdateFlags::FullRefresh | UpdateFlags::Sync);
-
-  swtcon_destroy(state);
+  print_char('a');
+  print_char('A');
+  print_char('.');
+  print_char('!');
+  print_char('^');
+  print_str("　");
+  print_char('7');
 
   return 0;
 }

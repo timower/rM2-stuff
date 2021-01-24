@@ -2,6 +2,7 @@
 
 #include "MathUtil.h"
 
+#include <algorithm>
 #include <chrono>
 #include <optional>
 #include <unordered_map>
@@ -174,13 +175,19 @@ struct GestureController {
 
   std::vector<Gesture> handleEvents(const std::vector<Event>& events);
 
+  void sync(InputManager::InputDevice& device);
+
   void reset() {
     started = false;
     tapFingers = 0;
   }
 
+  int getCurrentFingers() {
+    return std::count_if(
+      slots.begin(), slots.end(), [](const auto& slot) { return slot.active; });
+  }
+
   // members
-  int currentFinger = 0;
   int tapFingers = 0;
 
   std::array<SlotState, max_num_slots> slots;
