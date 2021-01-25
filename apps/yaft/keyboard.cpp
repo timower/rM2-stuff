@@ -263,7 +263,7 @@ Keyboard::init(rmlib::fb::FrameBuffer& fb, terminal_t& term) {
   int y = startHeight;
   int rowNum = 0;
   for (const auto& row : layout) {
-    int x = 0;
+    int x = (fb.canvas.width - row_size * baseKeyWidth) / 2;
     for (const auto& key : row) {
       const auto keyWidth = baseKeyWidth * key.width;
 
@@ -337,10 +337,13 @@ Keyboard::drawKey(const Key& key) const {
   if (key.isDown()) {
     auto a = key.keyRect.topLeft + Point{ 2, 2 };
     auto b = key.keyRect.bottomRight - Point{ 1, 1 };
-    fb->canvas.drawLine(a, { b.x, a.y }, 0x0);
     fb->canvas.drawLine(a, { a.x, b.y }, 0x0);
     fb->canvas.drawLine(b, { b.x, a.y }, 0x0);
-    fb->canvas.drawLine(b, { a.x, b.y }, 0x0);
+
+    if (key.held) {
+      fb->canvas.drawLine(a, { b.x, a.y }, 0x0);
+      fb->canvas.drawLine(b, { a.x, b.y }, 0x0);
+    }
   }
 }
 
@@ -419,15 +422,18 @@ struct event_traits<PenEvent> {
 template<typename Event>
 void
 handleScreenEvent(Keyboard& kb, const Event& ev) {
-  if ((kb.term->mode & MODE_MOUSE) == 0) {
+  if ((kb.term->mode & ALL_MOUSE_MODES) == 0) {
     return;
   }
 
   const auto slot = event_traits<Event>::getSlot(ev);
 
-  const auto loc = ev.location - kb.screenRect.topLeft;
-  char cx = 33 + (loc.x / CELL_WIDTH);
-  char cy = 33 + (loc.y / CELL_HEIGHT);
+  auto loc = ev.location - kb.screenRect.topLeft;
+  loc.x /= CELL_WIDTH;
+  loc.y /= CELL_HEIGHT;
+
+  char cx = 33 + loc.x;
+  char cy = 33 + loc.y;
   char buf[] = { esc_char, '[', 'M', 32, cx, cy };
 
   if (ev.type == event_traits<Event>::down_type) {
@@ -451,8 +457,13 @@ handleScreenEvent(Keyboard& kb, const Event& ev) {
     // Send mouse up code
     buf[3] += 3; // mouse release
     write(kb.term->fd, buf, 6);
+  } else if (kb.mouseSlot != -1 && kb.lastMousePos != loc &&
+             (kb.term->mode & MODE_MOUSE_MOVE) != 0) {
+    buf[3] += 32; // mouse move
+    write(kb.term->fd, buf, 6);
   }
-}
+  kb.lastMousePos = loc;
+} // namespace
 
 template<typename Event>
 void
@@ -469,18 +480,14 @@ handleKeyEvent(Keyboard& kb, const Event& ev) {
     key->slot = event_traits<Event>::getSlot(ev);
     key->nextRepeat = time_source::now() + repeat_delay;
 
-    kb.drawKey(*key);
-    kb.fb->doUpdate(
-      key->keyRect, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::None);
-
     kb.sendKeyDown(*key);
 
     // Clear sticky keys.
     if (!isModifier(key->info.code)) {
       for (auto* key : { kb.shiftKey, kb.altKey, kb.ctrlKey }) {
+        key->nextRepeat = time_source::now() + repeat_delay;
         if (key->stuck) {
           key->stuck = false;
-          key->nextRepeat = time_source::now() + repeat_delay;
           kb.drawKey(*key);
           kb.fb->doUpdate(key->keyRect,
                           rmlib::fb::Waveform::DU,
@@ -488,12 +495,15 @@ handleKeyEvent(Keyboard& kb, const Event& ev) {
         }
       }
     } else {
-      if constexpr (std::is_same_v<Event, PenEvent>) {
+      if (!key->held) {
         key->stuck = !key->stuck;
-      } else {
-        key->stuck = false;
       }
+      key->held = false;
     }
+
+    kb.drawKey(*key);
+    kb.fb->doUpdate(
+      key->keyRect, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::None);
 
   } else if (ev.type == event_traits<Event>::up_type) {
     const auto slot = event_traits<Event>::getSlot(ev);
@@ -543,7 +553,11 @@ Keyboard::updateRepeat() {
     if (time > key.nextRepeat) {
       // If a modifier is long pressed, stick it.
       if (isModifier(key.info.code)) {
-        key.stuck = true;
+        key.held = true;
+
+        drawKey(key);
+        fb->doUpdate(
+          key.keyRect, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::None);
       }
 
       sendKeyDown(key);

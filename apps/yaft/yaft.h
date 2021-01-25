@@ -126,36 +126,41 @@ enum term_mode {
   MODE_VWBS = 0x08,       /* variable-width backspace */
   MODE_APP_CURSOR = 0x10, /* app cursor mode */
   MODE_MOUSE = 0x20,      /* enable xterm mouse */
+  MODE_MOUSE_MOVE = 0x40, /* enable xterm mouse */
 };
 
 #ifdef __cplusplus
-inline term_mode&
+constexpr term_mode&
 operator|=(term_mode& m, term_mode o) {
   m = (term_mode)(m | o);
   return m;
 }
 
-inline term_mode
+constexpr term_mode
 operator|(term_mode m, term_mode o) {
   return (term_mode)((int)m | (int)o);
 }
 
-inline term_mode&
+constexpr term_mode&
 operator&=(term_mode& m, term_mode o) {
   m = (term_mode)(m & o);
   return m;
 }
 
-inline term_mode
+constexpr term_mode
 operator&(term_mode m, term_mode o) {
   return (term_mode)((int)m & (int)o);
 }
 
-inline term_mode
+constexpr term_mode
 operator~(term_mode m) {
   return (term_mode)(~(int)m);
 }
 #endif
+
+enum {
+  ALL_MOUSE_MODES = MODE_MOUSE_MOVE | MODE_MOUSE,
+};
 
 enum esc_state {
   STATE_RESET = 0x00,

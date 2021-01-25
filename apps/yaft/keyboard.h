@@ -37,9 +37,11 @@ struct Keyboard {
     rmlib::Rect keyRect;
 
     int slot = -1;
-    bool stuck = false;
 
-    bool isDown() const { return slot != -1 || stuck; }
+    bool stuck = false; // Used for mod keys, get stuck after tap.
+    bool held = false;  // Used for mod keys, held down after long press.
+
+    bool isDown() const { return slot != -1 || stuck || held; }
 
     time_source::time_point nextRepeat;
   };
@@ -67,6 +69,7 @@ struct Keyboard {
   terminal_t* term;
 
   int mouseSlot = -1;
+  rmlib::Point lastMousePos;
 
   // Pointers for tracking modifier state.
   Key* shiftKey = nullptr;
