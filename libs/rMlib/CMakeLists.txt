@@ -10,6 +10,14 @@ find_path(LIBEVDEV_INCLUDE_DIR libevdev.h
   HINTS "$ENV{SDKTARGETSYSROOT}/usr/include"
   REQUIRED)
 
+set(RMLIB_INCLUDES
+  include/Canvas.h
+  include/Device.h
+  include/FrameBuffer.h
+  include/Graphics.h
+  include/Input.h
+  include/MathUtil.h)
+
 add_library(${PROJECT_NAME} STATIC
   Input.cpp
   Device.cpp
@@ -27,3 +35,6 @@ target_link_libraries(${PROJECT_NAME}
   PRIVATE ${LIBEVDEV_LIBRARY})
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
+
+install(TARGETS ${PROJECT_NAME} DESTINATION lib)
+install(FILES ${RMLIB_INCLUDES} DESTINATION include/rmlib)

@@ -15,3 +15,5 @@ target_link_libraries(${PROJECT_NAME}
   PRIVATE
     tiemu
     rMlib)
+
+install(TARGETS ${PROJECT_NAME} DESTINATION bin)
