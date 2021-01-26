@@ -20,25 +20,18 @@
 using namespace rmlib;
 using namespace rmlib::input;
 
-volatile std::atomic_bool shouldStop = false;
+namespace {
 
-int inputFd = -1;
+volatile std::atomic_bool shouldStop = false;
 
 std::optional<rmlib::ImageCanvas> skin;
 
-std::optional<rmlib::Rect> lcd_rect = std::nullopt;
+std::optional<rmlib::Rect> lcd_rect;
 
 TilemCalc* calc = nullptr;
 
-constexpr auto calc_save_name = "ti84p.sav";
-
-void
-clearScreen(rmlib::fb::FrameBuffer& fb) {
-  fb.canvas.set(0xFFFF);
-  fb.doUpdate(fb.canvas.rect(),
-              rmlib::fb::Waveform::GC16,
-              rmlib::fb::UpdateFlags::FullRefresh);
-}
+constexpr auto calc_save_extension = ".sav";
+constexpr auto calc_default_rom = "ti84p.rom";
 
 bool
 showCalculator(rmlib::fb::FrameBuffer& fb) {
@@ -102,12 +95,6 @@ loadKeymap() {
   return true;
 }
 
-constexpr int
-toScanCode(int group, int bit) {
-  auto scancode = (group << 3) | bit;
-  return scancode + 1;
-}
-
 int
 get_scancode(int x, int y) {
   if (x >= skin->canvas.width || y >= skin->canvas.height) {
@@ -152,6 +139,7 @@ printEvent(const PenEvent& ev) {
   std::cout << " at " << ev.location;
   std::cout << " dist " << ev.distance << " pres " << ev.pressure << std::endl;
 }
+
 void
 handleEvent(rmlib::fb::FrameBuffer& fb, rmlib::input::Event ev) {
   static int scanCodes[10];
@@ -221,7 +209,7 @@ getTime() {
 const auto FPS = 100;
 const auto TPS = std::chrono::milliseconds(1000) / FPS;
 
-const auto frame_time = std::chrono::milliseconds(50); // 50 ms in us, 20 fps
+const auto frame_time = std::chrono::milliseconds(50); // 50 ms ->  20 fps
 
 void
 frameCallback(TilemCalc* calc, void* data) {
@@ -257,6 +245,7 @@ void
 intHandler(int sig) {
   shouldStop = true;
 }
+} // namespace
 
 int
 main(int argc, char* argv[]) {
@@ -265,9 +254,6 @@ main(int argc, char* argv[]) {
     return -1;
   }
 
-  /// TODO: launcher should do this.
-  // auto fbBackup = MemoryCanvas(fb->canvas);
-
   rmlib::input::InputManager input;
 
   if (!input.openAll()) {
@@ -275,7 +261,6 @@ main(int argc, char* argv[]) {
     return -1;
   }
 
-  // clearScreen();
   if (!showCalculator(*fb)) {
     return -1;
   }
@@ -290,13 +275,16 @@ main(int argc, char* argv[]) {
     return -1;
   }
 
-  FILE* rom = fopen("ti84p.rom", "r");
+  const auto* calc_name = argc > 1 ? argv[1] : calc_default_rom;
+
+  FILE* rom = fopen(calc_name, "r");
   if (rom == nullptr) {
     perror("Error opening rom file");
     return -1;
   }
 
-  FILE* save = fopen(calc_save_name, "r");
+  const auto save_name = std::string(calc_name) + calc_save_extension;
+  FILE* save = fopen(save_name.c_str(), "r");
   if (save == nullptr) {
     perror("No save file");
   }
@@ -305,6 +293,7 @@ main(int argc, char* argv[]) {
     perror("Error reading rom");
     return -1;
   }
+
   fclose(rom);
   if (save != nullptr) {
     fclose(save);
@@ -348,17 +337,13 @@ main(int argc, char* argv[]) {
   }
 
   std::cout << "Saving state\n";
-  save = fopen(calc_save_name, "w");
+  save = fopen(save_name.c_str(), "w");
   if (save == nullptr) {
     perror("Error opening save file");
     return -1;
   }
 
   tilem_calc_save_state(calc, nullptr, save);
-
-  // copy(fb->canvas, { 0, 0 }, fbBackup.canvas, fbBackup.canvas.rect());
-  // fb->doUpdate(
-  //   fb->canvas.rect(), fb::Waveform::GC16Fast, fb::UpdateFlags::FullRefresh);
 
   return 0;
 }

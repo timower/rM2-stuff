@@ -18,7 +18,8 @@ An TI-84+ calculator emulator for the remarkable.
 
 <img src="doc/tilem.png" width=500/>
 
-To use simply execute `tilem` in a folder containing a `ti84p.rom` ROM file. On the reMarkable 2 the rm2-fb client shim will need to be available.
+To use simply execute `tilem` in a folder containing a `ti84p.rom` ROM file or provide the rom file as a command line argument.
+On the reMarkable 2 the rm2-fb client shim will need to be available.
 
 [Yaft](apps/yaft)
 ----
@@ -39,6 +40,6 @@ A tiny launcher written for my personal needs. Still very much WIP.
 
 Currently three gestures are defined:
  * Three finger swipe down: show launcher
- * Three finger swip left/right: switch to next/previous app.
+ * Three finger swipe left/right: switch to next/previous app.
 
 Pressing `[x]` will close an app, `>` indicates the currently running app, and `*` indicates an app paused in the background.
