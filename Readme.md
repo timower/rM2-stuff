@@ -16,7 +16,7 @@ Tilem
 
 An TI-84+ calculator emulator for the remarkable.
 
-![Screenshot tilem](doc/tilem.png)
+<img src="doc/tilem.png" width=500/>
 
 To use simply execute `tilem` in a folder containing a `ti84p.rom` ROM file. On the reMarkable 2 the rm2-fb client shim will need to be available.
 
@@ -25,7 +25,7 @@ To use simply execute `tilem` in a folder containing a `ti84p.rom` ROM file. On 
 
 A fast framebuffer terminal emulator.
 
-![Screenshot yaft](doc/yaft.png)
+<img src="doc/yaft.png" width=500/>
 
 To use simply execute `yaft` or `yaft <command..>`. Again on the reMarkable 2 the rm2-fb needs to be loaded.
 
@@ -35,8 +35,7 @@ Launcher
 
 A tiny launcher written for my personal needs. Still very much WIP.
 
-
-![Screenshot launcher](doc/launcher.png)
+<img src="doc/launcher.png" width=500/>
 
 Currently three gestures are defined:
  * Three finger swipe down: show launcher
