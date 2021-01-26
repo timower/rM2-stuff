@@ -3,6 +3,8 @@
 #include "../conf.h"
 #include "../util.h"
 
+#include <iostream>
+
 namespace {
 inline uint16_t
 color2pixel(uint32_t color) {
@@ -75,6 +77,8 @@ draw_sixel(rmlib::fb::FrameBuffer& fb, int y_start, int col, uint8_t* pixmap) {
     }
   }
 }
+
+static int update_count = 0;
 
 inline void
 draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
@@ -186,6 +190,7 @@ draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
   fb.doUpdate({ { 0, y_start }, { fb.canvas.width, y_start + CELL_HEIGHT } },
               rmlib::fb::Waveform::DU,
               rmlib::fb::UpdateFlags::None);
+  update_count++;
 
   /* TODO: page flip
           if fb_fix_screeninfo.ypanstep > 0, we can use hardware panning.
@@ -216,5 +221,15 @@ refresh(rmlib::fb::FrameBuffer& fb, struct terminal_t* term) {
     if (term->line_dirty[line]) {
       draw_line(fb, term, line);
     }
+  }
+
+  if (term->shouldClear || update_count > 1024) {
+    std::cout << "FULL UPDATE: " << update_count << std::endl;
+    fb.doUpdate(fb.canvas.rect(),
+                rmlib::fb::Waveform::GC16,
+                rmlib::fb::UpdateFlags::FullRefresh);
+
+    term->shouldClear = false;
+    update_count = 0;
   }
 }

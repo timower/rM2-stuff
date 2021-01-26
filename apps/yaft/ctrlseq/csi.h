@@ -138,6 +138,8 @@ erase_display(struct terminal_t* term, struct parm_t* parm) {
       for (j = 0; j < term->cols; j++)
         erase_cell(term, i, j);
   }
+
+  term->shouldClear = true;
 }
 
 void

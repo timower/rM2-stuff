@@ -255,6 +255,7 @@ struct terminal_t {
   struct sixel_canvas_t sixel;
 
   int marginTop;
+  bool shouldClear;
 };
 
 struct parm_t { /* for parse_arg() */
