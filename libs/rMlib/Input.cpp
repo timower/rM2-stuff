@@ -378,11 +378,12 @@ GestureController::getGesture(Point currentDelta) {
 
 void
 GestureController::handleTouchDown(const TouchEvent& event) {
+  auto& slot = slots.at(event.slot);
+  slot.active = true;
+
   std::cerr << "Touch down, current fingers: " << getCurrentFingers()
             << std::endl;
 
-  auto& slot = slots.at(event.slot);
-  slot.active = true;
   slot.currentPos = event.location;
   slot.startPos = event.location;
   slot.time = std::chrono::steady_clock::now();
@@ -394,11 +395,11 @@ std::optional<Gesture>
 GestureController::handleTouchUp(const TouchEvent& event) {
   std::optional<Gesture> result;
 
-  std::cerr << "Touch up, current fingers: " << getCurrentFingers()
-            << std::endl;
-
   auto& slot = slots.at(event.slot);
   slot.active = false;
+
+  std::cerr << "Touch up, current fingers: " << getCurrentFingers()
+            << std::endl;
 
   if (getCurrentFingers() == 0) {
     if (!started) {
@@ -408,6 +409,9 @@ GestureController::handleTouchUp(const TouchEvent& event) {
       result = TapGesture{ tapFingers, slot.startPos };
       //}
     } else {
+      if (std::holds_alternative<SwipeGesture>(gesture)) {
+        std::get<SwipeGesture>(gesture).endPosition = event.location;
+      }
       result = gesture;
     }
 

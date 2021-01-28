@@ -65,6 +65,7 @@ struct Keyboard {
   rmlib::Rect screenRect;
 
   rmlib::input::InputManager input;
+  rmlib::input::GestureController gestureCtrlr;
   rmlib::fb::FrameBuffer* fb;
   terminal_t* term;
 

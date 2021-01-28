@@ -419,6 +419,44 @@ struct event_traits<PenEvent> {
   constexpr static auto getSlot(const PenEvent& ev) { return pen_slot; }
 };
 
+void
+initMouseBuf(std::array<char, 6>& buf, Point loc) {
+  loc.x /= CELL_WIDTH;
+  loc.y /= CELL_HEIGHT;
+
+  char cx = 33 + loc.x;
+  char cy = 33 + loc.y;
+  buf = { esc_char, '[', 'M', 32, cx, cy };
+}
+
+// TODO: gesture progress updates, don't do multiple scrolls
+void
+handleGesture(Keyboard& kb, const SwipeGesture& gesture) {
+  if (gesture.fingers != 2) {
+    return;
+  }
+
+  std::array<char, 6> buf;
+  const auto loc = gesture.startPosition - kb.screenRect.topLeft;
+  initMouseBuf(buf, loc);
+
+  constexpr auto scroll_size = 4 * CELL_HEIGHT;
+  const auto distance = std::max(
+    1, abs(gesture.endPosition.y - gesture.startPosition.y) / scroll_size);
+
+  if (gesture.direction == rmlib::input::SwipeGesture::Up) {
+    buf[3] += 64 + 1;
+    for (int i = 0; i < distance; i++) {
+      write(kb.term->fd, buf.data(), buf.size());
+    }
+  } else if (gesture.direction == rmlib::input::SwipeGesture::Down) {
+    buf[3] += 64 + 0;
+    for (int i = 0; i < distance; i++) {
+      write(kb.term->fd, buf.data(), buf.size());
+    }
+  }
+}
+
 template<typename Event>
 void
 handleScreenEvent(Keyboard& kb, const Event& ev) {
@@ -426,44 +464,48 @@ handleScreenEvent(Keyboard& kb, const Event& ev) {
     return;
   }
 
-  const auto slot = event_traits<Event>::getSlot(ev);
+  const auto lastFingers = kb.gestureCtrlr.getCurrentFingers();
 
-  auto loc = ev.location - kb.screenRect.topLeft;
-  loc.x /= CELL_WIDTH;
-  loc.y /= CELL_HEIGHT;
-
-  char cx = 33 + loc.x;
-  char cy = 33 + loc.y;
-  char buf[] = { esc_char, '[', 'M', 32, cx, cy };
-
-  if (ev.type == event_traits<Event>::down_type) {
-    if (kb.mouseSlot != -1) {
-      return;
+  if constexpr (std::is_same_v<Event, TouchEvent>) {
+    const auto gestures = kb.gestureCtrlr.handleEvents({ ev });
+    for (const auto& gesture : gestures) {
+      if (std::holds_alternative<SwipeGesture>(gesture)) {
+        handleGesture(kb, std::get<SwipeGesture>(gesture));
+      }
     }
+  }
 
+  const auto slot = event_traits<Event>::getSlot(ev);
+  const auto loc = ev.location - kb.screenRect.topLeft;
+  std::array<char, 6> buf;
+  initMouseBuf(buf, loc);
+
+  // Mouse down on first finger if mouse is not down.
+  if (ev.type == event_traits<Event>::down_type && kb.mouseSlot == -1 &&
+      lastFingers == 0) {
     kb.mouseSlot = slot;
 
     // Send mouse down code
     buf[3] += 0; // mouse button 1
-    write(kb.term->fd, buf, 6);
+    write(kb.term->fd, buf.data(), buf.size());
 
-  } else if (ev.type == event_traits<Event>::up_type) {
-    if (kb.mouseSlot != slot) {
-      return;
-    }
+  } else if ((ev.type == event_traits<Event>::up_type &&
+              slot == kb.mouseSlot) ||
+             (kb.mouseSlot != -1 && kb.gestureCtrlr.getCurrentFingers() > 1)) {
+    // Mouse up after finger lift or second finger down (for scrolling).
 
     kb.mouseSlot = -1;
 
     // Send mouse up code
     buf[3] += 3; // mouse release
-    write(kb.term->fd, buf, 6);
-  } else if (kb.mouseSlot != -1 && kb.lastMousePos != loc &&
+    write(kb.term->fd, buf.data(), buf.size());
+  } else if (kb.mouseSlot == slot && kb.lastMousePos != loc &&
              (kb.term->mode & MODE_MOUSE_MOVE) != 0) {
     buf[3] += 32; // mouse move
-    write(kb.term->fd, buf, 6);
+    write(kb.term->fd, buf.data(), buf.size());
   }
   kb.lastMousePos = loc;
-} // namespace
+}
 
 template<typename Event>
 void
