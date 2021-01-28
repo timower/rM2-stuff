@@ -65,7 +65,7 @@ getGlyph(uint32_t code, uint8_t* bytemap, int height, int* width) {
   int w = x1 - x0;
   int h = y1 - y0;
   int size = w * h;
-  if (size > tmpBuf.size()) {
+  if (size_t(size) > tmpBuf.size()) {
     tmpBuf.resize(size);
   }
 

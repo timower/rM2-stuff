@@ -2,6 +2,8 @@
 #include "Device.h"
 
 #include <sys/ioctl.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
 
 #include "mxcfb.h"
 
@@ -16,7 +18,20 @@
 namespace rmlib::fb {
 namespace {
 constexpr auto shm_path = "/dev/shm/swtfb.01";
-}
+constexpr auto fb_path = "/dev/fb0";
+
+constexpr int msg_q_id = 0x2257c;
+
+struct msgq_msg {
+  long type = 2;
+
+  mxcfb_update_data update;
+};
+
+// Global msgq:
+int msqid = -1;
+
+} // namespace
 
 std::optional<FrameBuffer>
 FrameBuffer::open() {
@@ -28,7 +43,8 @@ FrameBuffer::open() {
   const auto fbType = [devType] {
     switch (*devType) {
       case device::DeviceType::reMarkable1:
-        std::cerr << "rM1 currently unsupported, please open a github issue\n";
+        std::cerr << "rM1 currently untested, please open a github issue if "
+                     "you encounter any issues\n";
         return rM1;
       case device::DeviceType::reMarkable2:
         if (getenv("RM2FB_SHIM") != nullptr) {
@@ -58,7 +74,7 @@ FrameBuffer::open() {
     switch (fbType) {
       case rM1:
       case Shim:
-        return "/dev/fb0";
+        return fb_path;
 
       case rM2fb:
         return shm_path;
@@ -86,7 +102,17 @@ FrameBuffer::open() {
 
   if (canvas.memory == nullptr) {
     std::cerr << "Error mapping fb\n";
+    ::close(fd);
     return std::nullopt;
+  }
+
+  if (fbType == rM2fb) {
+    msqid = msgget(msg_q_id, IPC_CREAT | 0600);
+    if (msqid < 0) {
+      perror("Error opening msgq");
+      ::close(fd);
+      return std::nullopt;
+    }
   }
 
   return FrameBuffer(fbType, fd, canvas);
@@ -111,24 +137,29 @@ FrameBuffer::~FrameBuffer() {
 
 void
 FrameBuffer::doUpdate(Rect region, Waveform waveform, UpdateFlags flags) const {
+  if (type != Swtcon) {
+    auto update = mxcfb_update_data{};
 
-  switch (type) {
-    case rM1:
-    case Shim: {
-      auto update = mxcfb_update_data{};
-      update.waveform_mode = static_cast<int>(waveform);
-      update.update_mode = (flags & UpdateFlags::FullRefresh) != 0 ? 1 : 0;
-      update.update_region.top = region.topLeft.y;
-      update.update_region.left = region.topLeft.x;
-      update.update_region.width = region.width();
-      update.update_region.height = region.height();
+    update.waveform_mode = static_cast<int>(waveform);
+    update.update_mode = (flags & UpdateFlags::FullRefresh) != 0 ? 1 : 0;
+    update.update_region.top = region.topLeft.y;
+    update.update_region.left = region.topLeft.x;
+    update.update_region.width = region.width();
+    update.update_region.height = region.height();
 
+    if (type == rM2fb) {
+      auto msg = msgq_msg{};
+      msg.update = update;
+
+      if (msgsnd(msqid, reinterpret_cast<void*>(&msg), sizeof(msgq_msg), 0) !=
+          0) {
+        perror("Error sending update msg");
+      }
+    } else {
       ioctl(fd, MXCFB_SEND_UPDATE, &update);
-    } break;
-    case rM2fb:
-    case Swtcon:
-      // TODO: implement this
-      break;
+    }
+  } else {
+    assert(false && "Unimplemented");
   }
 }
 
