@@ -1,4 +1,5 @@
 #include "App.h"
+#include "GestureConfig.h"
 
 #include <Device.h>
 #include <FrameBuffer.h>
@@ -20,38 +21,6 @@ using namespace rmlib;
 using namespace rmlib::input;
 
 namespace {
-
-struct GestureConfig {
-  enum Type { Swipe, Pinch, Tap };
-  enum Action { ShowApps, Launch, NextRunning, PrevRunning };
-
-  Type type;
-  std::variant<PinchGesture::Direction, SwipeGesture::Direction> direction;
-  int fingers;
-
-  Action action;
-  std::string command;
-
-  bool matches(const SwipeGesture& g) const {
-    return type == GestureConfig::Swipe &&
-           std::get<SwipeGesture::Direction>(direction) == g.direction &&
-           fingers == g.fingers;
-  }
-
-  bool matches(const PinchGesture& g) const {
-    return type == GestureConfig::Pinch &&
-           std::get<PinchGesture::Direction>(direction) == g.direction &&
-           fingers == g.fingers;
-  }
-
-  bool matches(const TapGesture& g) const {
-    return type == GestureConfig::Tap && g.fingers == fingers;
-  }
-};
-
-struct Config {
-  std::vector<GestureConfig> gestures;
-};
 
 enum class State { Default, ShowingLauncher };
 
@@ -90,33 +59,42 @@ struct Launcher {
   void handleGesture(const Config& config, const Gesture& g);
 };
 
-bool
-endsWith(std::string_view a, std::string_view end) {
-  if (a.size() < end.size()) {
-    return false;
-  }
-
-  return a.substr(a.size() - end.size()) == end;
-}
-
 /// Reads apps from draft files in `/etc/draft`
 void
 Launcher::readApps() {
-  constexpr auto path = "/etc/draft";
-  const auto paths = device::listDirectory(path);
+  constexpr auto apps_path = "/etc/draft";
 
-  for (const auto& path : paths) {
-    if (!endsWith(path, ".draft")) {
-      std::cerr << "skipping non draft file: " << path << std::endl;
+  auto appDescriptions = readAppFiles(apps_path);
+
+  // Update known apps.
+  for (auto appIt = apps.begin(); appIt != apps.end();) {
+
+    auto descIt = std::find_if(appDescriptions.begin(),
+                               appDescriptions.end(),
+                               [&app = *appIt](const auto& desc) {
+                                 return desc.path == app.description.path;
+                               });
+
+    // Remove old apps.
+    if (descIt == appDescriptions.end()) {
+      if (!appIt->isRunning()) {
+        appIt = apps.erase(appIt);
+      } else {
+        // Defer removing until exit.
+        appIt->runInfo->shouldRemove = true;
+      }
+
       continue;
     }
 
-    auto appDesc = AppDescription::read(path);
-    if (!appDesc.has_value()) {
-      std::cerr << "error parsing file: " << path << std::endl;
-    }
+    // Update existing apps.
+    appIt->description = *descIt;
+    appDescriptions.erase(descIt);
+  }
 
-    apps.emplace_back(std::move(*appDesc));
+  // Any left over descriptions are new.
+  for (auto& desc : appDescriptions) {
+    apps.emplace_back(std::move(desc));
   }
 }
 
@@ -141,26 +119,6 @@ readConfg() {
   return default_config;
 }
 
-pid_t
-runCommand(std::string_view cmd) {
-  pid_t pid = fork();
-  if (pid == -1) {
-    perror("Error launching");
-    return -1;
-  }
-
-  if (pid > 0) {
-    // Parent process, pid is the child pid
-    return pid;
-  }
-
-  std::cout << "Running: " << cmd << std::endl;
-  setpgid(0, 0);
-  execlp("/bin/sh", "/bin/sh", "-c", cmd.data(), nullptr);
-  perror("Error running process");
-  return -1;
-}
-
 App*
 Launcher::getCurrentApp() {
   auto app = std::find_if(apps.begin(), apps.end(), [this](auto& app) {
@@ -183,11 +141,11 @@ Launcher::closeDialogs() {
          backupBuffer->second.canvas,
          backupBuffer->second.canvas.rect());
 
-    auto rect = backupBuffer->first + backupBuffer->second.canvas.rect();
+    const auto rect = backupBuffer->first + backupBuffer->second.canvas.rect();
     frameBuffer->doUpdate(rect, fb::Waveform::GC16Fast, fb::UpdateFlags::None);
+    backupBuffer = std::nullopt;
   }
 
-  backupBuffer = std::nullopt;
   state = State::Default;
   inputMgr.ungrab();
 }
@@ -204,42 +162,21 @@ Launcher::switchApp(App& app) {
   // Don't redraw as launching an app will redraw anyway.
   closeDialogs();
 
-  // pause the current app.
+  // Pause the current app.
   if (auto* currentApp = getCurrentApp();
-      currentApp != nullptr && currentApp->runInfo.has_value()) {
-    kill(-currentApp->runInfo->pid, SIGSTOP);
-    currentApp->runInfo->paused = true;
-    currentApp->savedFb = MemoryCanvas(frameBuffer->canvas);
+      currentApp != nullptr && currentApp->isRunning()) {
+    currentApp->pause(MemoryCanvas(frameBuffer->canvas));
   }
 
   // resume or launch app
-  if (app.runInfo.has_value()) {
-    if (app.runInfo->paused) {
-      if (app.savedFb.has_value()) {
-        copy(frameBuffer->canvas,
-             { 0, 0 },
-             app.savedFb->canvas,
-             frameBuffer->canvas.rect());
-        frameBuffer->doUpdate(frameBuffer->canvas.rect(),
-                              fb::Waveform::GC16Fast,
-                              fb::UpdateFlags::FullRefresh);
-        app.savedFb.reset();
-      }
-
-      inputMgr.flood();
-      kill(-app.runInfo->pid, SIGCONT);
-      app.runInfo->paused = false;
-    } else {
-      std::cerr << "App already running" << std::endl;
-    }
-  } else {
-    auto pid = runCommand(app.description.command);
-    if (pid == -1) {
-      std::cerr << "Error running " << app.description.command << std::endl;
+  if (app.isPaused()) {
+    inputMgr.flood();
+    app.resume(*frameBuffer);
+  } else if (!app.isRunning()) {
+    if (!app.launch()) {
+      std::cerr << "Error launching " << app.description.command << std::endl;
       return;
     }
-
-    app.runInfo = AppRunInfo{ pid, /* paused */ false };
   }
 
   currentAppPath = app.description.path;
@@ -247,13 +184,13 @@ Launcher::switchApp(App& app) {
 
 void
 Launcher::drawAppsLauncher() {
-  constexpr auto name_size = 64;
+  constexpr auto name_text_size = 64;
   constexpr auto margin = 10;
   constexpr auto text_margin = 10;
 
   static constexpr auto kill_text = "[x]";
-  static const auto kill_size = Canvas::getTextSize(kill_text, name_size);
-  static const auto ind_size = Canvas::getTextSize(">", name_size);
+  static const auto kill_size = Canvas::getTextSize(kill_text, name_text_size);
+  static const auto ind_size = Canvas::getTextSize(">", name_text_size);
 
   if (state == State::ShowingLauncher) {
     return;
@@ -275,11 +212,12 @@ Launcher::drawAppsLauncher() {
       });
     assert(longestApp != apps.end());
 
-    auto size = Canvas::getTextSize(longestApp->description.name, name_size);
+    auto size =
+      Canvas::getTextSize(longestApp->description.name, name_text_size);
     size.x += kill_size.x + ind_size.x;
 
     int width = size.x + 2 * margin;
-    int height = (name_size + text_margin) * int(apps.size());
+    int height = (name_text_size + text_margin) * int(apps.size());
     // size.y * apps.size() + text_margin * apps.size(); // - 1) + 3 * margin;
 
     auto topLeft = Point{ (frameBuffer->canvas.width / 2) - (width / 2), 0 };
@@ -299,10 +237,10 @@ Launcher::drawAppsLauncher() {
   int yoffset = 0; // 2 * margin;
   for (auto& app : apps) {
     auto displayName = app.getDisplayName();
-    auto textSize = Canvas::getTextSize(displayName, name_size);
+    auto textSize = Canvas::getTextSize(displayName, name_text_size);
 
     int xoffset = (frameBuffer->canvas.width / 2) - (textSize.x / 2);
-    if (app.runInfo.has_value()) {
+    if (app.isRunning()) {
       xoffset -= (kill_size.x / 2) + margin / 2;
     }
 
@@ -310,17 +248,17 @@ Launcher::drawAppsLauncher() {
 
     auto position = Point{ xoffset, yoffset };
 
-    frameBuffer->canvas.drawText(displayName, position, name_size);
+    frameBuffer->canvas.drawText(displayName, position, name_text_size);
     app.launchRect = { position, position + textSize };
 
-    if (app.runInfo.has_value()) {
+    if (app.isRunning()) {
       auto killPosition = Point{ xoffset + textSize.x + margin / 2, yoffset };
-      frameBuffer->canvas.drawText(kill_text, killPosition, name_size);
+      frameBuffer->canvas.drawText(kill_text, killPosition, name_text_size);
 
       app.killRect = { killPosition, killPosition + kill_size };
     }
 
-    yoffset += name_size;
+    yoffset += name_text_size;
     yoffset += text_margin / 2;
     frameBuffer->canvas.drawLine({ overlayRect.topLeft.x, yoffset },
                                  { overlayRect.bottomRight.x, yoffset },
@@ -361,14 +299,10 @@ Launcher::handleLauncherTap(TapGesture tap) {
       break;
     }
 
-    if (app.runInfo.has_value() && app.killRect.contains(tap.position)) {
+    if (app.isRunning() && app.killRect.contains(tap.position)) {
       std::cout << "Killing " << app.description.name << std::endl;
-      if (app.runInfo->paused) {
-        kill(-app.runInfo->pid, SIGCONT);
-      }
-      kill(app.runInfo->pid, SIGINT);
+      app.stop();
       closeDialogs();
-      break;
     }
   }
 }
@@ -410,7 +344,7 @@ Launcher::doAction(const GestureConfig& config) {
           it = apps.begin();
         }
 
-        if (it->runInfo.has_value()) {
+        if (it->isRunning()) {
           break;
         }
 
@@ -435,7 +369,7 @@ Launcher::doAction(const GestureConfig& config) {
         if (it == apps.rend()) {
           it = apps.rbegin();
         }
-        if (it->runInfo.has_value()) {
+        if (it->isRunning()) {
           break;
         }
         it++;
@@ -503,20 +437,14 @@ Launcher::handleGesture(const Config& config, const Gesture& g) {
 
 Launcher launcher;
 
+std::vector<pid_t> stoppedApps;
+
 void
 cleanup(int signal) {
   pid_t childPid = 0;
   while ((childPid = waitpid(static_cast<pid_t>(-1), nullptr, WNOHANG)) > 0) {
     std::cout << "Exited: " << childPid << std::endl;
-
-    auto app = std::find_if(
-      launcher.apps.begin(), launcher.apps.end(), [childPid](auto& app) {
-        return app.runInfo.has_value() && app.runInfo->pid == childPid;
-      });
-
-    if (app != launcher.apps.end()) {
-      app->runInfo = std::nullopt;
-    }
+    stoppedApps.push_back(childPid);
   }
 }
 
@@ -562,6 +490,12 @@ Launcher::init() {
     return -1;
   }
 
+  frameBuffer->clear(); // Fill white.
+  drawAppsLauncher();
+
+  frameBuffer->doUpdate(
+    frameBuffer->canvas.rect(), fb::Waveform::GC16Fast, fb::UpdateFlags::None);
+
   return 0;
 }
 
@@ -571,23 +505,43 @@ Launcher::run() {
   while (!shouldStop) {
     auto events = inputMgr.waitForInput();
 
-    // Switch if current app closed.
-    if (auto* currentApp = getCurrentApp();
-        currentApp != nullptr && !currentApp->runInfo.has_value()) {
-      App* lastApp = nullptr;
-      for (auto& app : apps) {
-        if (app.runInfo.has_value() &&
-            (lastApp == nullptr ||
-             app.lastActivated > lastApp->lastActivated)) {
-          lastApp = &app;
-        }
+    // Close stopped apps.
+    std::vector<pid_t> curStoppedApps;
+    std::swap(curStoppedApps, stoppedApps);
+    for (const auto pid : curStoppedApps) {
+      auto app = std::find_if(apps.begin(), apps.end(), [pid](auto& app) {
+        return app.isRunning() && app.runInfo->pid == pid;
+      });
+
+      if (app == apps.end()) {
+        continue;
       }
 
-      if (lastApp != nullptr) {
-        switchApp(*lastApp);
+      const auto isCurrent = app->description.path == currentAppPath;
+
+      if (app->runInfo->shouldRemove) {
+        apps.erase(app);
       } else {
-        currentAppPath = "";
-        drawAppsLauncher();
+        app->runInfo = std::nullopt;
+      }
+
+      if (isCurrent) {
+        App* lastApp = nullptr;
+        for (auto& app : apps) {
+          if (app.runInfo.has_value() &&
+              (lastApp == nullptr ||
+               app.lastActivated > lastApp->lastActivated)) {
+            lastApp = &app;
+          }
+        }
+
+        if (lastApp != nullptr) {
+          switchApp(*lastApp);
+        } else {
+          currentAppPath = "";
+          frameBuffer->clear();
+          drawAppsLauncher();
+        }
       }
     }
 
@@ -600,7 +554,7 @@ Launcher::run() {
       }
     }
 
-    // Sync
+    // Sync gesture controller, TODO: is this still needed.
     auto now = std::chrono::steady_clock::now();
     if (now - lastSync > std::chrono::seconds(10)) {
       std::cerr << "Syncing" << std::endl;

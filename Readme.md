@@ -30,13 +30,12 @@ A fast framebuffer terminal emulator.
 
 To use simply execute `yaft` or `yaft <command..>`. Again on the reMarkable 2 the rm2-fb needs to be loaded.
 
-Launcher
+Rocket
 ----
-(TODO: pick a name)
 
 A tiny launcher written for my personal needs. Still very much WIP.
 
-<img src="doc/launcher.png" width=500/>
+<img src="doc/rocket.png" width=500/>
 
 Currently three gestures are defined:
  * Three finger swipe down: show launcher

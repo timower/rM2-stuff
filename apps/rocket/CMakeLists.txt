@@ -1,4 +1,4 @@
-project(launcher)
+project(rocket)
 
 add_executable(${PROJECT_NAME}
   main.cpp

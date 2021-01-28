@@ -1,3 +1,3 @@
 add_subdirectory(tilem)
-add_subdirectory(launcher)
+add_subdirectory(rocket)
 add_subdirectory(yaft)

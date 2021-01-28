@@ -45,6 +45,11 @@ struct FrameBuffer {
     doUpdate({ location, location + textSize }, waveform, flags);
   }
 
+  void clear() {
+    canvas.set(0xFFFF);
+    doUpdate(canvas.rect(), Waveform::GC16Fast, UpdateFlags::None);
+  }
+
   // members
   Type type;
   int fd = -1;

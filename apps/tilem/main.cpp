@@ -54,7 +54,7 @@ showCalculator(rmlib::fb::FrameBuffer& fb) {
     [](int x, int y, int val) { return ((val & 0xff) / 16) << 1; });
 
   fb.doUpdate(skin->canvas.rect(),
-              rmlib::fb::Waveform::GC16Fast,
+              rmlib::fb::Waveform::GC16,
               rmlib::fb::UpdateFlags::FullRefresh);
   return true;
 }

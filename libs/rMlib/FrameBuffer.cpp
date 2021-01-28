@@ -42,6 +42,7 @@ FrameBuffer::open() {
 
   const auto fbType = [devType] {
     switch (*devType) {
+      default:
       case device::DeviceType::reMarkable1:
         std::cerr << "rM1 currently untested, please open a github issue if "
                      "you encounter any issues\n";
@@ -60,8 +61,6 @@ FrameBuffer::open() {
 
         // start swtcon
         return Swtcon;
-      default:
-        assert(false);
     }
   }();
 
