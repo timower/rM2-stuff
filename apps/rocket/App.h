@@ -70,5 +70,5 @@ struct App {
   void stop();
 
   void pause(std::optional<rmlib::MemoryCanvas> screen = std::nullopt);
-  void resume(rmlib::fb::FrameBuffer& fb);
+  void resume(rmlib::fb::FrameBuffer* fb = nullptr);
 };

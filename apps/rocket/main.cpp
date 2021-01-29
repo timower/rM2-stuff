@@ -79,23 +79,29 @@ Launcher::readApps() {
     if (descIt == appDescriptions.end()) {
       if (!appIt->isRunning()) {
         appIt = apps.erase(appIt);
+        continue;
       } else {
         // Defer removing until exit.
         appIt->runInfo->shouldRemove = true;
       }
+    } else {
 
-      continue;
+      // Update existing apps.
+      appIt->description = *descIt;
+      appDescriptions.erase(descIt);
     }
 
-    // Update existing apps.
-    appIt->description = *descIt;
-    appDescriptions.erase(descIt);
+    ++appIt;
   }
 
   // Any left over descriptions are new.
   for (auto& desc : appDescriptions) {
     apps.emplace_back(std::move(desc));
   }
+
+  std::sort(apps.begin(), apps.end(), [](const auto& app1, const auto& app2) {
+    return app1.description.path < app2.description.path;
+  });
 }
 
 const Config default_config = { {
@@ -148,6 +154,11 @@ Launcher::closeDialogs() {
 
   state = State::Default;
   inputMgr.ungrab();
+
+  if (auto* currentApp = getCurrentApp();
+      currentApp != nullptr && currentApp->isPaused()) {
+    currentApp->resume();
+  }
 }
 
 void
@@ -171,7 +182,7 @@ Launcher::switchApp(App& app) {
   // resume or launch app
   if (app.isPaused()) {
     inputMgr.flood();
-    app.resume(*frameBuffer);
+    app.resume(&*frameBuffer);
   } else if (!app.isRunning()) {
     if (!app.launch()) {
       std::cerr << "Error launching " << app.description.command << std::endl;
@@ -196,12 +207,16 @@ Launcher::drawAppsLauncher() {
     return;
   }
 
-  closeDialogs();
+  readApps();
 
   if (apps.empty()) {
+    std::cout << "No apps found\n";
     return;
   }
 
+  if (auto* currentApp = getCurrentApp(); currentApp != nullptr) {
+    currentApp->pause();
+  }
   inputMgr.grab();
 
   // Find the width and height.
@@ -237,6 +252,10 @@ Launcher::drawAppsLauncher() {
   int yoffset = 0; // 2 * margin;
   for (auto& app : apps) {
     auto displayName = app.getDisplayName();
+    if (app.description.path == currentAppPath) {
+      displayName = '>' + displayName;
+    }
+
     auto textSize = Canvas::getTextSize(displayName, name_text_size);
 
     int xoffset = (frameBuffer->canvas.width / 2) - (textSize.x / 2);
@@ -492,9 +511,6 @@ Launcher::init() {
 
   frameBuffer->clear(); // Fill white.
   drawAppsLauncher();
-
-  frameBuffer->doUpdate(
-    frameBuffer->canvas.rect(), fb::Waveform::GC16Fast, fb::UpdateFlags::None);
 
   return 0;
 }

@@ -187,6 +187,7 @@ draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
   }
 
   /* actual display update (bit blit) */
+  // TODO: group updates.
   fb.doUpdate({ { 0, y_start }, { fb.canvas.width, y_start + CELL_HEIGHT } },
               rmlib::fb::Waveform::DU,
               rmlib::fb::UpdateFlags::None);
