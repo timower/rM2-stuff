@@ -46,20 +46,6 @@ struct App {
 
   App(AppDescription desc) : description(std::move(desc)) {}
 
-  std::string getDisplayName() const {
-    auto result = description.name;
-
-    if (runInfo.has_value()) {
-      if (runInfo->paused) {
-        result = '*' + result;
-      } else {
-        result = '>' + result;
-      }
-    }
-
-    return result;
-  }
-
   bool isRunning() const { return runInfo.has_value(); }
   bool isPaused() const { return isRunning() && runInfo->paused; }
 

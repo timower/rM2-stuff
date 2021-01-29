@@ -251,9 +251,13 @@ Launcher::drawAppsLauncher() {
   // Draw text
   int yoffset = 0; // 2 * margin;
   for (auto& app : apps) {
-    auto displayName = app.getDisplayName();
+    auto displayName = app.description.name;
     if (app.description.path == currentAppPath) {
       displayName = '>' + displayName;
+    } else if (app.isPaused()) {
+      displayName = '*' + displayName;
+    } else if (app.isRunning()) {
+      displayName = '+' + displayName;
     }
 
     auto textSize = Canvas::getTextSize(displayName, name_text_size);
