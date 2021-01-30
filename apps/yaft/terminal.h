@@ -46,6 +46,9 @@ term_die(struct terminal_t* term);
 bool
 term_init(struct terminal_t* term, int width, int height);
 
+void
+term_resize(struct terminal_t* term, int width, int height);
+
 #ifdef __cplusplus
 }
 #endif

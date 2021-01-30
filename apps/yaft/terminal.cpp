@@ -446,4 +446,27 @@ term_init(struct terminal_t* term, int width, int height) {
 
   return true;
 }
+
+void
+term_resize(struct terminal_t* term, int width, int height) {
+  if (width == term->width && height == term->height)
+    return;
+
+  term->width = width;
+  term->height = height;
+
+  term->cols = term->width / CELL_WIDTH;
+  term->lines = term->height / CELL_HEIGHT;
+  term->marginTop = (term->height - term->lines * CELL_HEIGHT);
+
+  term->scroll.top = 0;
+  term->scroll.bottom = term->lines - 1;
+
+  struct winsize ws;
+  ws.ws_col = term->cols;
+  ws.ws_row = term->lines;
+  ws.ws_xpixel = CELL_WIDTH * term->cols;
+  ws.ws_ypixel = CELL_HEIGHT * term->lines;
+  ioctl(term->fd, TIOCSWINSZ, &ws);
+}
 }

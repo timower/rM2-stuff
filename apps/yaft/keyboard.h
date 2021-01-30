@@ -13,6 +13,7 @@ constexpr int num_rows = 6;
 // key height = ??
 constexpr int key_height = 64;
 constexpr int keyboard_height = key_height * num_rows;
+constexpr int hidden_keyboard_height = key_height;
 
 struct KeyInfo {
   std::string_view name;
@@ -47,6 +48,7 @@ struct Keyboard {
   };
 
   bool init(rmlib::fb::FrameBuffer& fb, terminal_t& term);
+  void initKeyMap();
 
   void draw() const;
 
@@ -58,6 +60,9 @@ struct Keyboard {
   Key* getKey(rmlib::Point location);
 
   void sendKeyDown(const Key& key) const;
+
+  void hide();
+  void show();
 
   // members
   int baseKeyWidth;
@@ -78,4 +83,6 @@ struct Keyboard {
   Key* ctrlKey = nullptr;
 
   std::vector<Key> keys;
+
+  bool hidden = false;
 };

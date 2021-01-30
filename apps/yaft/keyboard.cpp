@@ -1,5 +1,7 @@
 #include "keyboard.h"
 
+#include "terminal.h"
+
 #include <Device.h>
 
 #include <unistd.h>
@@ -122,8 +124,20 @@ constexpr std::initializer_list<std::initializer_list<KeyInfo>> layout = {
     { ":down", Down },
     { ":right", Right } },
 };
-
 static_assert(layout.size() == num_rows);
+
+constexpr std::initializer_list<std::initializer_list<KeyInfo>>
+  hidden_layout = { { { "esc", Escape },
+                      { "pgup", PageUp },
+                      { "pgdn", PageDown },
+                      { "home", Home },
+                      { "end", End },
+                      { "<", Left },
+                      { "v", Down },
+                      { "^", Up },
+                      { ">", Right },
+                      { "ctrl-c", 0x3 },
+                      { "\\n", Enter } } };
 #if 0
 static_assert(
   std::max_element(layout.begin(), layout.end(), [](auto& a, auto& b) {
@@ -225,6 +239,10 @@ getKeyCodeStr(int scancode, bool shift, bool alt, bool ctrl, bool appCursor) {
       buf[1] = 0;
     }
     return buf.data();
+  } else if (scancode == 0x3) {
+    buf[0] = char(scancode);
+    buf[1] = 0;
+    return buf.data();
   }
 
   return nullptr;
@@ -239,8 +257,6 @@ bool
 Keyboard::init(rmlib::fb::FrameBuffer& fb, terminal_t& term) {
   this->term = &term;
   this->fb = &fb;
-  baseKeyWidth = fb.canvas.width / row_size;
-  startHeight = fb.canvas.height - keyboard_height;
 
   auto dev = device::getDeviceType();
   if (!dev.has_value()) {
@@ -259,11 +275,33 @@ Keyboard::init(rmlib::fb::FrameBuffer& fb, terminal_t& term) {
     return false;
   }
 
+  initKeyMap();
+  return true;
+}
+
+void
+Keyboard::initKeyMap() {
+  baseKeyWidth = fb->canvas.width / row_size;
+  startHeight =
+    fb->canvas.height - (hidden ? hidden_keyboard_height : keyboard_height);
+
+  // Resize the terminal to make place for the keyboard.
+  term_resize(term, fb->canvas.width, startHeight);
+
   // Setup the keymap.
+  keys.clear();
+
+  shiftKey = nullptr;
+  altKey = nullptr;
+  ctrlKey = nullptr;
+
   int y = startHeight;
   int rowNum = 0;
-  for (const auto& row : layout) {
-    int x = (fb.canvas.width - row_size * baseKeyWidth) / 2;
+
+  const auto& currentLayout = hidden ? hidden_layout : layout;
+
+  for (const auto& row : currentLayout) {
+    int x = (fb->canvas.width - row_size * baseKeyWidth) / 2;
     for (const auto& key : row) {
       const auto keyWidth = baseKeyWidth * key.width;
 
@@ -286,11 +324,9 @@ Keyboard::init(rmlib::fb::FrameBuffer& fb, terminal_t& term) {
     rowNum++;
   }
 
-  int marginLeft = term.width - term.cols * CELL_WIDTH;
-  this->screenRect =
-    Rect{ { marginLeft, term.marginTop }, { term.width - 1, term.height - 1 } };
-
-  return true;
+  int marginLeft = term->width - term->cols * CELL_WIDTH;
+  this->screenRect = Rect{ { marginLeft, term->marginTop },
+                           { term->width - 1, term->height - 1 } };
 }
 
 void
@@ -380,9 +416,9 @@ Keyboard::sendKeyDown(const Key& key) const {
   }
 
   // Lookup modifier state.
-  bool shift = shiftKey->isDown();
-  bool alt = altKey->isDown();
-  bool ctrl = ctrlKey->isDown();
+  bool shift = shiftKey == nullptr ? false : shiftKey->isDown();
+  bool alt = altKey == nullptr ? false : altKey->isDown();
+  bool ctrl = ctrlKey == nullptr ? false : ctrlKey->isDown();
 
   bool appCursor = (term->mode & MODE_APP_CURSOR) != 0;
 
@@ -527,6 +563,10 @@ handleKeyEvent(Keyboard& kb, const Event& ev) {
     // Clear sticky keys.
     if (!isModifier(key->info.code)) {
       for (auto* key : { kb.shiftKey, kb.altKey, kb.ctrlKey }) {
+        if (key == nullptr) {
+          continue;
+        }
+
         key->nextRepeat = time_source::now() + repeat_delay;
         if (key->stuck) {
           key->stuck = false;
@@ -600,10 +640,45 @@ Keyboard::updateRepeat() {
         drawKey(key);
         fb->doUpdate(
           key.keyRect, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::None);
+
+      } else if (key.info.code == Escape) {
+
+        if (hidden) {
+          show();
+        } else {
+          hide();
+        }
+        break;
+
+      } else {
+        sendKeyDown(key);
       }
 
-      sendKeyDown(key);
       key.nextRepeat += repeat_time;
     }
   }
+}
+
+void
+Keyboard::hide() {
+  if (hidden) {
+    return;
+  }
+
+  initKeyMap();
+  draw();
+
+  hidden = true;
+}
+
+void
+Keyboard::show() {
+  if (!hidden) {
+    return;
+  }
+
+  initKeyMap();
+  draw();
+
+  hidden = false;
 }
