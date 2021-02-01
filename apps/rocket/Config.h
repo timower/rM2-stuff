@@ -2,13 +2,11 @@
 
 #include <Input.h>
 
+#include <functional>
 #include <variant>
 
-// DEPRECATED: will be replace by commands
-
-struct GestureConfig {
+struct ActionConfig {
   enum Type { Swipe, Pinch, Tap };
-  enum Action { ShowApps, Launch, NextRunning, PrevRunning };
 
   Type type;
   std::variant<rmlib::input::PinchGesture::Direction,
@@ -16,28 +14,30 @@ struct GestureConfig {
     direction;
   int fingers;
 
-  Action action;
-  std::string command;
-
   bool matches(const rmlib::input::SwipeGesture& g) const {
-    return type == GestureConfig::Swipe &&
+    return type == ActionConfig::Swipe &&
            std::get<rmlib::input::SwipeGesture::Direction>(direction) ==
              g.direction &&
            fingers == g.fingers;
   }
 
   bool matches(const rmlib::input::PinchGesture& g) const {
-    return type == GestureConfig::Pinch &&
+    return type == ActionConfig::Pinch &&
            std::get<rmlib::input::PinchGesture::Direction>(direction) ==
              g.direction &&
            fingers == g.fingers;
   }
 
   bool matches(const rmlib::input::TapGesture& g) const {
-    return type == GestureConfig::Tap && g.fingers == fingers;
+    return type == ActionConfig::Tap && g.fingers == fingers;
   }
 };
 
+struct Action {
+  ActionConfig config;
+  std::function<void()> command;
+};
+
 struct Config {
-  std::vector<GestureConfig> gestures;
+  std::vector<Action> actions;
 };

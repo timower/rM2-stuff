@@ -31,7 +31,6 @@ InputManager::open(const char* input, Transform inputTransform) {
   }
 
   devices.emplace(fd, InputDevice{ fd, dev, inputTransform });
-  maxFd = std::max(maxFd, fd + 1);
   return fd;
 }
 
@@ -70,14 +69,6 @@ InputManager::close(int fd) {
   ::close(fd);
 
   devices.erase(it);
-  maxFd = devices.empty() ? 0
-                          : std::max_element(
-                              devices.begin(),
-                              devices.end(),
-                              [](const auto& deva, const auto& devb) {
-                                return deva.first < devb.first;
-                              })->first +
-                              1;
 }
 
 void
@@ -87,15 +78,16 @@ InputManager::closeAll() {
     ::close(fd);
   }
   devices.clear();
-  maxFd = 0;
 }
 
 std::optional<std::vector<Event>>
 InputManager::waitForInput(fd_set& fdSet,
+                           int maxFd,
                            std::optional<std::chrono::microseconds> timeout) {
   for (auto& [fd, _] : devices) {
     (void)_;
     FD_SET(fd, &fdSet); // NOLINT
+    maxFd = std::max(fd, maxFd);
   }
 
   auto tv = timeval{ 0, 0 };
@@ -107,8 +99,9 @@ InputManager::waitForInput(fd_set& fdSet,
     tv.tv_usec = timeout->count() - (tv.tv_sec * second_in_usec);
   }
 
+  std::cout << "Max FD: " << maxFd << std::endl;
   auto ret = select(
-    maxFd, &fdSet, nullptr, nullptr, !timeout.has_value() ? nullptr : &tv);
+    maxFd + 1, &fdSet, nullptr, nullptr, !timeout.has_value() ? nullptr : &tv);
   if (ret < 0) {
     perror("Select on input failed");
     return std::nullopt;

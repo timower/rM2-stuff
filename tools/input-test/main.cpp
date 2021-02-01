@@ -93,7 +93,7 @@ main() {
   }
 
   while (true) {
-    auto events = input.waitForInput();
+    auto events = input.waitForInput(std::nullopt);
     if (!events.has_value()) {
       std::cerr << "timout or error\n";
     }

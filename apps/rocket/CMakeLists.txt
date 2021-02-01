@@ -2,7 +2,10 @@ project(rocket)
 
 add_executable(${PROJECT_NAME}
   main.cpp
-  App.cpp)
+  App.cpp
+  Launcher.cpp
+  Commands.cpp
+  CommandSocket.cpp)
 
 target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_17)
 

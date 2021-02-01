@@ -74,7 +74,6 @@ struct InputManager {
 
   InputManager(InputManager&& other) : devices(std::move(other.devices)) {
     other.devices.clear();
-    other.maxFd = 0;
   }
 
   InputManager& operator=(InputManager&& other) {
@@ -88,12 +87,12 @@ struct InputManager {
 
   std::optional<std::vector<Event>> waitForInput(
     fd_set& fdSet,
+    int maxFd,
     std::optional<std::chrono::microseconds> timeout = std::nullopt);
 
   template<typename... ExtraFds>
-  auto waitForInput(
-    std::optional<std::chrono::microseconds> timeout = std::nullopt,
-    ExtraFds... extraFds)
+  auto waitForInput(std::optional<std::chrono::microseconds> timeout,
+                    ExtraFds... extraFds)
     -> std::optional<std::conditional_t<
       sizeof...(ExtraFds) == 0,
       std::vector<Event>,
@@ -104,7 +103,9 @@ struct InputManager {
     FD_ZERO(&fds);
     (FD_SET(extraFds, &fds), ...);
 
-    auto res = waitForInput(fds, timeout);
+    auto maxFd = std::max({ 0, extraFds... });
+
+    auto res = waitForInput(fds, maxFd, timeout);
     if constexpr (sizeof...(ExtraFds) == 0) {
       return res;
     } else {
@@ -129,7 +130,6 @@ struct InputManager {
   void flood();
 
   /// members
-  int maxFd = 0;
   std::unordered_map<int, InputDevice> devices;
 };
 
