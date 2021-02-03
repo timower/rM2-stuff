@@ -250,14 +250,15 @@ intHandler(int sig) {
 int
 main(int argc, char* argv[]) {
   auto fb = rmlib::fb::FrameBuffer::open();
-  if (!fb.has_value()) {
+  if (fb.isError()) {
+    std::cerr << fb.getError().msg << std::endl;
     return -1;
   }
 
   rmlib::input::InputManager input;
 
-  if (!input.openAll()) {
-    std::cerr << "Error opening input\n";
+  if (auto err = input.openAll(); err.isError()) {
+    std::cerr << "Error opening input: " + err.getError().msg + "\n";
     return -1;
   }
 
@@ -304,7 +305,7 @@ main(int argc, char* argv[]) {
                       std::chrono::microseconds(frame_time).count(),
                       /* real time */ 1,
                       frameCallback,
-                      &fb.value());
+                      &*fb);
 
   std::cout << "loaded rom, entering mainloop\n";
 

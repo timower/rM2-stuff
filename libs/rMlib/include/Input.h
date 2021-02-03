@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Error.h"
 #include "MathUtil.h"
 
 #include <algorithm>
@@ -39,8 +40,17 @@ struct KeyEvent {
 
 using Event = std::variant<TouchEvent, PenEvent, KeyEvent>;
 
+struct FileDescriptors {
+  int pen;
+  int touch;
+  int key;
+};
+
 struct InputManager {
   struct InputDevice {
+    InputDevice(int fd, libevdev* dev, Transform transform)
+      : fd(fd), dev(dev), transform(transform) {}
+
     int fd;
     libevdev* dev;
     Transform transform;
@@ -60,11 +70,11 @@ struct InputManager {
     }
   };
 
-  std::optional<int> open(const char* input,
-                          Transform inputTransform = Transform::identity());
+  ErrorOr<int> open(std::string_view input,
+                    Transform inputTransform = Transform::identity());
 
   /// Opens all devices for the current device type.
-  bool openAll();
+  ErrorOr<FileDescriptors> openAll();
 
   void close(int fd);
   void closeAll();
@@ -125,9 +135,9 @@ struct InputManager {
   std::vector<Event> readEvents(int);
   static std::vector<Event> readEvents(InputDevice& device);
 
-  void grab();
-  void ungrab();
-  void flood();
+  void grab(int device);
+  void ungrab(int device);
+  void flood(int device);
 
   /// members
   std::unordered_map<int, InputDevice> devices;

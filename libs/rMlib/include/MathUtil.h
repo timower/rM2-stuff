@@ -169,7 +169,7 @@ static_assert((Transform::scale(4, 2) * Transform::translate({ -1, 2 })) *
                 Point{ 4, 10 } ==
               Point{ 12, 24 });
 
-static_assert(Transform{ { { 0, 1 }, { 1, 0 } } } * Point{ 4, 10 } ==
+static_assert(Transform{ { { 0, 1 }, { 1, 0 } }, { 0, 0 } } * Point{ 4, 10 } ==
               Point{ 10, 4 });
 } // namespace static_tests
 

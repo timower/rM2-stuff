@@ -18,44 +18,34 @@
 
 namespace rmlib::input {
 
-std::optional<int>
-InputManager::open(const char* input, Transform inputTransform) {
-  int fd = ::open(input, O_RDWR | O_NONBLOCK);
+ErrorOr<int>
+InputManager::open(std::string_view input, Transform inputTransform) {
+  int fd = ::open(input.data(), O_RDWR | O_NONBLOCK);
   if (fd < 0) {
-    return std::nullopt;
+    return Error{ "Couldn't open '" + std::string(input) + "'" };
   }
 
   libevdev* dev = nullptr;
   if (libevdev_new_from_fd(fd, &dev) < 0) {
-    return std::nullopt;
+    close(fd);
+    return Error{ "Error initializing evdev for '" + std::string(input) + "'" };
   }
 
-  devices.emplace(fd, InputDevice{ fd, dev, inputTransform });
+  devices.emplace(fd, InputDevice(fd, dev, inputTransform));
   return fd;
 }
 
-bool
+ErrorOr<FileDescriptors>
 InputManager::openAll() {
-  auto type = device::getDeviceType();
-  if (!type.has_value()) {
-    return false;
-  }
+  auto type = TRY(device::getDeviceType());
 
-  auto paths = device::getInputPaths(*type);
+  auto paths = device::getInputPaths(type);
 
-  if (!open(paths.touchPath.data(), paths.touchTransform)) {
-    return false;
-  }
-
-  if (!open(paths.penPath.data(), paths.penTransform)) {
-    return false;
-  }
-
-  if (!open(paths.buttonPath.data())) {
-    return false;
-  }
-
-  return true;
+  FileDescriptors result;
+  result.touch = TRY(open(paths.touchPath, paths.touchTransform));
+  result.pen = TRY(open(paths.penPath, paths.penTransform));
+  result.key = TRY(open(paths.buttonPath));
+  return result;
 }
 
 void
@@ -249,23 +239,19 @@ InputManager::readEvents(InputDevice& device) {
 }
 
 void
-InputManager::grab() {
-  for (const auto& [_, device] : devices) {
-    (void)_;
-    libevdev_grab(device.dev, libevdev_grab_mode::LIBEVDEV_GRAB);
-  }
+InputManager::grab(int fd) {
+  auto device = devices.at(fd);
+  libevdev_grab(device.dev, libevdev_grab_mode::LIBEVDEV_GRAB);
 }
 
 void
-InputManager::ungrab() {
-  for (const auto& [_, device] : devices) {
-    (void)_;
-    libevdev_grab(device.dev, libevdev_grab_mode::LIBEVDEV_UNGRAB);
-  }
+InputManager::ungrab(int fd) {
+  auto device = devices.at(fd);
+  libevdev_grab(device.dev, libevdev_grab_mode::LIBEVDEV_UNGRAB);
 }
 
 void
-InputManager::flood() {
+InputManager::flood(int fd) {
   constexpr auto size = 8 * 512 * 4;
   static const auto* floodBuffer = [] {
     // NOLINTNEXTLINE
@@ -291,11 +277,9 @@ InputManager::flood() {
   }();
 
   std::cout << "FLOODING" << std::endl;
-  for (const auto& [_, device] : devices) {
-    (void)_;
-    if (write(device.fd, floodBuffer, size * sizeof(input_event)) == -1) {
-      perror("Error writing");
-    }
+  auto device = devices.at(fd);
+  if (write(device.fd, floodBuffer, size * sizeof(input_event)) == -1) {
+    perror("Error writing");
   }
 }
 
@@ -397,8 +381,8 @@ GestureController::handleTouchUp(const TouchEvent& event) {
   if (getCurrentFingers() == 0) {
     if (!started) {
       // TODO: do we need a time limit?
-      // auto delta = std::chrono::steady_clock::now() - slots[event.slot].time;
-      // if (delta < tap_time) {
+      // auto delta = std::chrono::steady_clock::now() -
+      // slots[event.slot].time; if (delta < tap_time) {
       result = TapGesture{ tapFingers, slot.startPos };
       //}
     } else {

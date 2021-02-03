@@ -47,8 +47,8 @@ parseConfig() {
 
   for (std::string line; std::getline(ifs, line);) {
     auto result = doCommand(launcher, line);
-    if (isError(result)) {
-      std::cerr << getError(result).msg << std::endl;
+    if (result.isError()) {
+      std::cerr << result.getError().msg << std::endl;
     } else {
       std::cout << *result << std::endl;
     }
@@ -87,11 +87,17 @@ main(int argc, char* argv[]) {
     return runCommand(argc, argv);
   }
 
+  if (argc != 1) {
+    std::cerr << "Rocket socket not running\n";
+    return EXIT_FAILURE;
+  }
+
   std::signal(SIGCHLD, cleanup);
   std::signal(SIGINT, stop);
   std::signal(SIGTERM, stop);
 
-  if (launcher.init() != 0) {
+  if (auto err = launcher.init(); err.isError()) {
+    std::cerr << "Error init: " << err.getError().msg << std::endl;
     return EXIT_FAILURE;
   }
 

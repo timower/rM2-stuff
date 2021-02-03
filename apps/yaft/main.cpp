@@ -201,7 +201,7 @@ main(int argc, const char* argv[]) {
     logging(WARN, "setlocale falied\n");
 
   auto fb = rmlib::fb::FrameBuffer::open();
-  if (!fb.has_value()) {
+  if (fb.isError()) {
     logging(FATAL, "framebuffer initialize failed\n");
     goto fb_init_failed;
   }
@@ -231,7 +231,7 @@ main(int argc, const char* argv[]) {
   }
   child_alive = true;
 
-  if (!keyboard.init(*fb, term)) {
+  if (keyboard.init(*fb, term).isError()) {
     logging(FATAL, "Keyboard failed\n");
     goto tty_init_failed;
   }

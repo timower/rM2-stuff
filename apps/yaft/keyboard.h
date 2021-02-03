@@ -47,7 +47,7 @@ struct Keyboard {
     time_source::time_point nextRepeat;
   };
 
-  bool init(rmlib::fb::FrameBuffer& fb, terminal_t& term);
+  OptError<> init(rmlib::fb::FrameBuffer& fb, terminal_t& term);
   void initKeyMap();
 
   void draw() const;

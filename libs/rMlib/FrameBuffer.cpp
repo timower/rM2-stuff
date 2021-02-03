@@ -33,15 +33,12 @@ int msqid = -1;
 
 } // namespace
 
-std::optional<FrameBuffer>
+ErrorOr<FrameBuffer>
 FrameBuffer::open() {
-  auto devType = device::getDeviceType();
-  if (!devType.has_value()) {
-    return std::nullopt;
-  }
+  auto devType = TRY(device::getDeviceType());
 
   const auto fbType = [devType] {
-    switch (*devType) {
+    switch (devType) {
       default:
       case device::DeviceType::reMarkable1:
         std::cerr << "rM1 currently untested, please open a github issue if "
@@ -65,8 +62,7 @@ FrameBuffer::open() {
   }();
 
   if (fbType == Swtcon) {
-    std::cerr << "No rm2fb found, swtcon not implemented yet\n";
-    return std::nullopt;
+    return Error{ "No rm2fb found, swtcon not implemented yet\n" };
   }
 
   const auto* path = [fbType] {
@@ -87,9 +83,8 @@ FrameBuffer::open() {
 
   auto fd = ::open(path, O_RDWR);
   if (fd < 0) {
-    std::cerr << "Error opening " << path << std::endl;
     perror("error");
-    return std::nullopt;
+    return Error{ "Error opening " + std::string(path) };
   }
 
   Canvas canvas;
@@ -100,9 +95,8 @@ FrameBuffer::open() {
     nullptr, canvas.totalSize(), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
 
   if (canvas.memory == nullptr) {
-    std::cerr << "Error mapping fb\n";
     ::close(fd);
-    return std::nullopt;
+    return Error{ "Error mapping fb" };
   }
 
   if (fbType == rM2fb) {
@@ -110,7 +104,7 @@ FrameBuffer::open() {
     if (msqid < 0) {
       perror("Error opening msgq");
       ::close(fd);
-      return std::nullopt;
+      return Error{ "Error open message queue" };
     }
   }
 

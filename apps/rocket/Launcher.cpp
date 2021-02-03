@@ -11,8 +11,8 @@ using namespace rmlib::input;
 Launcher::Launcher()
   : cmdSocket([this](std::string_view cmd) -> std::string {
     auto result = doCommand(*this, cmd);
-    if (isError(result)) {
-      return "ERROR: " + getError(result).msg;
+    if (result.isError()) {
+      return "ERROR: " + result.getError().msg;
     }
 
     return *result;
@@ -91,7 +91,7 @@ Launcher::closeLauncher() {
   }
 
   state = State::Default;
-  inputMgr.ungrab();
+  inputMgr.ungrab(inputFds.touch);
 
   if (auto* currentApp = getCurrentApp();
       currentApp != nullptr && currentApp->isPaused()) {
@@ -119,7 +119,7 @@ Launcher::switchApp(App& app) {
 
   // resume or launch app
   if (app.isPaused()) {
-    inputMgr.flood();
+    inputMgr.flood(inputFds.touch);
     app.resume(&*frameBuffer);
   } else if (!app.isRunning()) {
     if (!app.launch()) {
@@ -155,7 +155,7 @@ Launcher::drawAppsLauncher() {
   if (auto* currentApp = getCurrentApp(); currentApp != nullptr) {
     currentApp->pause();
   }
-  inputMgr.grab();
+  inputMgr.grab(inputFds.touch);
 
   // Find the width and height.
   const auto overlayRect = [this] {
@@ -268,80 +268,6 @@ Launcher::handleLauncherTap(TapGesture tap) {
   }
 }
 
-// TODO: make these commands
-// void
-// Launcher::doAction(const ActionConfig& config) {
-//   switch (config.action) {
-//     case ActionConfig::Launch: {
-//       auto app =
-//         std::find_if(apps.begin(), apps.end(), [&config](const auto& app) {
-//           return app.description.name == config.command;
-//         });
-//       if (app == apps.end()) {
-//         std::cerr << "App not found: " << config.command << std::endl;
-//         break;
-//       }
-//
-//       switchApp(*app);
-//
-//     } break;
-//     case ActionConfig::ShowApps: {
-//       drawAppsLauncher();
-//     } break;
-//
-//     case ActionConfig::NextRunning: {
-//       auto it = std::find_if(apps.begin(), apps.end(), [this](auto& app) {
-//         return app.description.path == currentAppPath;
-//       });
-//
-//       if (currentAppPath.empty() || it == apps.end()) {
-//         std::cerr << "No running app\n";
-//         break;
-//       }
-//
-//       const auto start = it;
-//       it++;
-//       while (it != start) {
-//         if (it == apps.end()) {
-//           it = apps.begin();
-//         }
-//
-//         if (it->isRunning()) {
-//           break;
-//         }
-//
-//         it++;
-//       }
-//
-//       switchApp(*it);
-//     } break;
-//     case ActionConfig::PrevRunning: {
-//       auto it = std::find_if(apps.rbegin(), apps.rend(), [this](auto& app) {
-//         return app.description.path == currentAppPath;
-//       });
-//
-//       if (currentAppPath.empty() || it == apps.rend()) {
-//         std::cerr << "No running app\n";
-//         break;
-//       }
-//
-//       const auto start = it;
-//       it++;
-//       while (it != start) {
-//         if (it == apps.rend()) {
-//           it = apps.rbegin();
-//         }
-//         if (it->isRunning()) {
-//           break;
-//         }
-//         it++;
-//       }
-//
-//       switchApp(*it);
-//     } break;
-//   }
-// }
-
 void
 printGesture(const TapGesture& g) {
   std::cout << "Gesture Tap (" << g.fingers << "): " << g.position << std::endl;
@@ -398,20 +324,9 @@ Launcher::handleGesture(const Gesture& g) {
   }
 }
 
-int
+OptError<>
 Launcher::init() {
-  auto deviceType = device::getDeviceType();
-  if (!deviceType.has_value()) {
-    std::cerr << "Error finding device type\n";
-    return -1;
-  }
-
-  auto paths = device::getInputPaths(*deviceType);
-  if (!inputMgr.open(paths.touchPath.data(), paths.touchTransform)
-         .has_value()) {
-    std::cerr << "Error opening inputMgr\n";
-    return -1;
-  }
+  inputFds = TRY(inputMgr.openAll());
 
   readApps();
 
@@ -420,19 +335,15 @@ Launcher::init() {
     std::cout << " - " << app.description.name << std::endl;
   }
 
-  frameBuffer = fb::FrameBuffer::open();
-  if (!frameBuffer.has_value()) {
-    std::cerr << "Error opening framebuffer\n";
-    return -1;
-  }
+  frameBuffer = TRY(fb::FrameBuffer::open());
 
   frameBuffer->clear(); // Fill white.
 
   if (!cmdSocket.init()) {
-    return -1;
+    return Error{ "Couldn't open command socket" };
   }
 
-  return 0;
+  return NoError{};
 }
 
 void

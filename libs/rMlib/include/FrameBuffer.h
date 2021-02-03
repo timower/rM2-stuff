@@ -1,8 +1,7 @@
 #pragma once
 
-#include <optional>
-
 #include "Canvas.h"
+#include "Error.h"
 
 namespace rmlib::fb {
 
@@ -14,7 +13,7 @@ struct FrameBuffer {
   enum Type { rM1, Shim, rM2fb, Swtcon };
 
   /// Opens the framebuffer.
-  static std::optional<FrameBuffer> open();
+  static ErrorOr<FrameBuffer> open();
 
   FrameBuffer(FrameBuffer&& other)
     : type(other.type), fd(other.fd), canvas(other.canvas) {

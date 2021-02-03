@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Error.h"
 #include "MathUtil.h"
 
 #include <optional>
@@ -13,7 +14,7 @@ enum class DeviceType { reMarkable1, reMarkable2 };
 
 /// \returns The device type on which we're currently running or nullopt if
 /// detection fails.
-std::optional<DeviceType>
+ErrorOr<DeviceType>
 getDeviceType();
 
 struct InputPaths {

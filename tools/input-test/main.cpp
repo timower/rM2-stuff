@@ -72,24 +72,15 @@ printEvent(const KeyEvent& ev) {
 int
 main() {
   auto deviceType = device::getDeviceType();
-  if (!deviceType.has_value()) {
+  if (deviceType.isError()) {
     std::cerr << "Unknown device\n";
     return -1;
   }
 
-  auto inputs = device::getInputPaths(*deviceType);
   InputManager input;
-  if (!input.open(inputs.touchPath.data(), inputs.touchTransform)) {
-    std::cerr << "Error opening touch\n";
-    return -1;
-  }
-  if (!input.open(inputs.penPath.data(), inputs.penTransform)) {
-    std::cerr << "Error opening pen\n";
-    return -1;
-  }
-  if (!input.open(inputs.buttonPath.data())) {
-    std::cerr << "Error opening buttons\n";
-    return -1;
+  auto err = input.openAll();
+  if (err.isError()) {
+    std::cerr << err.getError().msg << std::endl;
   }
 
   while (true) {

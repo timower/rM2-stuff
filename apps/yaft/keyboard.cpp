@@ -253,30 +253,20 @@ getKeyCodeStr(int scancode, bool shift, bool alt, bool ctrl, bool appCursor) {
 Keyboard::Key::Key(const KeyInfo& info, rmlib::Rect rect)
   : info(info), keyRect(rect) {}
 
-bool
+OptError<>
 Keyboard::init(rmlib::fb::FrameBuffer& fb, terminal_t& term) {
   this->term = &term;
   this->fb = &fb;
 
-  auto dev = device::getDeviceType();
-  if (!dev.has_value()) {
-    return false;
-  }
+  auto dev = TRY(device::getDeviceType());
 
-  auto inputs = device::getInputPaths(*dev);
-  const auto touchFd =
-    input.open(inputs.touchPath.data(), inputs.touchTransform);
-  if (!touchFd.has_value()) {
-    return false;
-  }
+  auto inputs = device::getInputPaths(dev);
+  TRY(input.open(inputs.touchPath.data(), inputs.touchTransform));
 
-  const auto penFd = input.open(inputs.penPath.data(), inputs.penTransform);
-  if (!penFd.has_value()) {
-    return false;
-  }
+  TRY(input.open(inputs.penPath.data(), inputs.penTransform));
 
   initKeyMap();
-  return true;
+  return NoError{};
 }
 
 void

@@ -49,11 +49,15 @@ const InputPaths rm2_paths = {
 };
 } // namespace
 
-std::optional<DeviceType>
+ErrorOr<DeviceType>
 getDeviceType() {
-  static std::optional<DeviceType> result = [] {
+  static const auto result = []() -> ErrorOr<DeviceType> {
     constexpr auto path = "/sys/devices/soc0/machine";
     std::ifstream ifs(path);
+    if (!ifs.is_open()) {
+      return Error{ "Couldn't open device path" };
+    }
+
     std::string name;
     name.reserve(16);
     name.assign(std::istreambuf_iterator<char>(ifs),

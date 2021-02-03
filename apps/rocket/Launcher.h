@@ -18,7 +18,7 @@ enum class State { Default, ShowingLauncher };
 struct Launcher {
   Launcher();
 
-  int init();
+  OptError<> init();
   void run();
 
   void readApps();
@@ -61,6 +61,7 @@ struct Launcher {
 
   std::optional<std::pair<rmlib::Point, rmlib::MemoryCanvas>> backupBuffer;
 
+  rmlib::input::FileDescriptors inputFds;
   rmlib::input::GestureController gestureController;
 
   Config config;

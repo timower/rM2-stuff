@@ -152,12 +152,13 @@ parseArg<ActionConfig>(std::string_view arg) {
 template<typename... Args>
 ErrorOr<std::tuple<Args...>>
 anyError(ErrorOr<Args>... args) {
-  bool hasError = (isError(args) || ... || false);
+  bool hasError = (args.isError() || ... || false);
   if (!hasError) {
     return std::tuple{ *args... };
   }
 
-  return Error{ ((isError(args) ? getError(args).msg + ", " : "") + ... + "") };
+  return Error{ ((args.isError() ? args.getError().msg + ", " : "") + ... +
+                 "") };
 }
 
 template<typename T>
@@ -206,13 +207,10 @@ struct Command {
     cmdFn = [](auto* fn,
                Launcher& launcher,
                const std::vector<std::string_view>& args) -> CommandResult {
-      auto argsOrErrors = parseArgs<Args...>(args);
-      if (isError(argsOrErrors)) {
-        return getError(argsOrErrors);
-      }
+      auto parsedArgs = TRY(parseArgs<Args...>(args));
 
       auto argTuple = std::tuple_cat(std::tuple<Launcher&>{ launcher },
-                                     std::move(*argsOrErrors));
+                                     std::move(parsedArgs));
       auto* fnPtr = reinterpret_cast<CommandResult (*)(Launcher&, Args...)>(fn);
       return std::apply(fnPtr, argTuple);
     };
@@ -221,13 +219,10 @@ struct Command {
                  Launcher& launcher,
                  const std::vector<std::string_view>& args)
       -> ErrorOr<std::function<CommandResult()>> {
-      auto argsOrErrors = parseArgs<ToOwning<Args>...>(args);
-      if (isError(argsOrErrors)) {
-        return getError(argsOrErrors);
-      }
+      auto parsedArgs = TRY(parseArgs<ToOwning<Args>...>(args));
 
       auto argTuple = std::tuple_cat(std::tuple<Launcher&>{ launcher },
-                                     std::move(*argsOrErrors));
+                                     std::move(parsedArgs));
       return [fn, args = std::move(argTuple)]() {
         auto* fnPtr =
           reinterpret_cast<CommandResult (*)(Launcher&, Args...)>(fn);
@@ -305,48 +300,69 @@ getNext(It start, It begin, It end) {
   return it;
 }
 
+enum class SwitchTarget { Next, Prev, Last };
+
+template<>
+ErrorOr<SwitchTarget>
+parseArg<SwitchTarget>(std::string_view arg) {
+  if (arg == "next" || arg == "Next") {
+    return SwitchTarget::Next;
+  }
+  if (arg == "prev" || arg == "Prev") {
+    return SwitchTarget::Prev;
+  }
+  if (arg == "last" || arg == "Last") {
+    return SwitchTarget::Last;
+  }
+  return Error{ "Expected on of <next|prev|last>" };
+}
+
 CommandResult
-switchTo(Launcher& launcher, std::string_view arg) {
+switchTo(Launcher& launcher, SwitchTarget target) {
 
-  if (arg == "next") {
-    auto start = std::find_if(
-      launcher.apps.begin(), launcher.apps.end(), [&launcher](auto& app) {
-        return app.description.path == launcher.currentAppPath;
-      });
-    if (launcher.currentAppPath.empty() || start == launcher.apps.end()) {
-      return "No apps running";
-    }
-
-    auto it = getNext(start, launcher.apps.begin(), launcher.apps.end());
-    launcher.switchApp(*it);
-  } else if (arg == "prev") {
-    auto start = std::find_if(
-      launcher.apps.rbegin(), launcher.apps.rend(), [&launcher](auto& app) {
-        return app.description.path == launcher.currentAppPath;
-      });
-    if (launcher.currentAppPath.empty() || start == launcher.apps.rend()) {
-      return "No apps running";
-    }
-
-    auto it = getNext(start, launcher.apps.rbegin(), launcher.apps.rend());
-    launcher.switchApp(*it);
-  } else if (arg == "last") {
-    auto* currentApp = launcher.getCurrentApp();
-    App* lastApp = nullptr;
-    for (auto& app : launcher.apps) {
-      if (app.runInfo.has_value() && &app != currentApp &&
-          (lastApp == nullptr || app.lastActivated > lastApp->lastActivated)) {
-        lastApp = &app;
+  switch (target) {
+    case SwitchTarget::Next: {
+      auto start = std::find_if(
+        launcher.apps.begin(), launcher.apps.end(), [&launcher](auto& app) {
+          return app.description.path == launcher.currentAppPath;
+        });
+      if (launcher.currentAppPath.empty() || start == launcher.apps.end()) {
+        return "No apps running";
       }
-    }
 
-    if (lastApp == nullptr) {
-      return "No other apps";
-    }
-    launcher.switchApp(*lastApp);
-  } else {
-    return Error{ "Unknown switch target, expected <next|prev|last>, got: " +
-                  std::string(arg) };
+      auto it = getNext(start, launcher.apps.begin(), launcher.apps.end());
+      launcher.switchApp(*it);
+    } break;
+
+    case SwitchTarget::Prev: {
+      auto start = std::find_if(
+        launcher.apps.rbegin(), launcher.apps.rend(), [&launcher](auto& app) {
+          return app.description.path == launcher.currentAppPath;
+        });
+      if (launcher.currentAppPath.empty() || start == launcher.apps.rend()) {
+        return "No apps running";
+      }
+
+      auto it = getNext(start, launcher.apps.rbegin(), launcher.apps.rend());
+      launcher.switchApp(*it);
+    } break;
+
+    case SwitchTarget::Last: {
+      auto* currentApp = launcher.getCurrentApp();
+      App* lastApp = nullptr;
+      for (auto& app : launcher.apps) {
+        if (app.runInfo.has_value() && &app != currentApp &&
+            (lastApp == nullptr ||
+             app.lastActivated > lastApp->lastActivated)) {
+          lastApp = &app;
+        }
+      }
+
+      if (lastApp == nullptr) {
+        return "No other apps";
+      }
+      launcher.switchApp(*lastApp);
+    } break;
   }
 
   return "OK";
@@ -355,8 +371,8 @@ switchTo(Launcher& launcher, std::string_view arg) {
 CommandResult
 onAction(Launcher& launcher, ActionConfig action, std::string_view command) {
   auto fnOrError = getCommandFn(launcher, command);
-  if (isError(fnOrError)) {
-    return Error{ "Can't add action: " + getError(fnOrError).msg +
+  if (fnOrError.isError()) {
+    return Error{ "Can't add action: " + fnOrError.getError().msg +
                   " for command: \"" + std::string(command) + "\"" };
   }
 
@@ -364,17 +380,28 @@ onAction(Launcher& launcher, ActionConfig action, std::string_view command) {
   return "OK";
 }
 
+CommandResult
+kill(Launcher& launcher, std::string_view name) {
+  auto* app = launcher.getApp(name);
+  if (app == nullptr) {
+    return Error{ "Unknown app: " + std::string(name) };
+  }
+  app->stop();
+  return "OK";
+}
+
 // clang-format off
 const std::unordered_map<std::string_view, Command> commands = {
   { "help",   { help,   "- Show help" } },
   { "launch", { launch, "- launch <app name> - Start or switch to app" } },
+  { "kill",   { kill,   "- kill <app name> - Stop an app"}},
   { "show",   { show,   "- Show the launcher" } },
   { "hide",   { hide,   "- Hide the launcher" } },
   { "switch", { switchTo,
   "- switch <next|prev|last> - Switch to the next, previous or last running app"
   } },
   { "on",     { onAction,
-  "- on <gesture> <command> - execute command when the given action occurs"
+  "- on <gesture> <command> - Execute command when the given action occurs"
   } },
 };
 // clang-format on
@@ -394,12 +421,8 @@ help(Launcher&) {
 
 ErrorOr<std::function<void()>>
 getCommandFn(Launcher& launcher, std::string_view command) {
-  auto tokensOrErr = tokenize(command);
-  if (isError(tokensOrErr)) {
-    return getError(tokensOrErr);
-  }
+  auto tokens = TRY(tokenize(command));
 
-  const auto tokens = *tokensOrErr;
   if (tokens.empty()) {
     // Nothing to execute, doesn't fail.
     return Error{ "Empty command" };
@@ -412,14 +435,14 @@ getCommandFn(Launcher& launcher, std::string_view command) {
   }
 
   auto parsedFn = cmdIt->second.parse(launcher, tokens);
-  if (isError(parsedFn)) {
-    return getError(parsedFn);
+  if (parsedFn.isError()) {
+    return parsedFn.getError();
   }
 
   return [fn = std::move(*parsedFn)]() {
     auto res = fn();
-    if (isError(res)) {
-      std::cerr << getError(res).msg << std::endl;
+    if (res.isError()) {
+      std::cerr << res.getError().msg << std::endl;
     }
   };
 }
@@ -428,12 +451,7 @@ getCommandFn(Launcher& launcher, std::string_view command) {
 
 CommandResult
 doCommand(Launcher& launcher, std::string_view command) {
-  auto tokensOrErr = tokenize(command);
-  if (isError(tokensOrErr)) {
-    return getError(tokensOrErr);
-  }
-
-  const auto tokens = *tokensOrErr;
+  auto tokens = TRY(tokenize(command));
   if (tokens.empty()) {
     // Nothing to execute, doesn't fail.
     return "";
