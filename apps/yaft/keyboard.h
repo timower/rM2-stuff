@@ -78,9 +78,9 @@ struct Keyboard {
   rmlib::Point lastMousePos;
 
   // Pointers for tracking modifier state.
-  Key* shiftKey = nullptr;
-  Key* altKey = nullptr;
-  Key* ctrlKey = nullptr;
+  int shiftKey = -1;
+  int altKey = -1;
+  int ctrlKey = -1;
 
   std::vector<Key> keys;
 

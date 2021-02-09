@@ -281,9 +281,9 @@ Keyboard::initKeyMap() {
   // Setup the keymap.
   keys.clear();
 
-  shiftKey = nullptr;
-  altKey = nullptr;
-  ctrlKey = nullptr;
+  shiftKey = -1;
+  altKey = -1;
+  ctrlKey = -1;
 
   int y = startHeight;
   int rowNum = 0;
@@ -295,17 +295,17 @@ Keyboard::initKeyMap() {
     for (const auto& key : row) {
       const auto keyWidth = baseKeyWidth * key.width;
 
-      keys.emplace_back(
-        key, Rect{ { x, y }, { x + keyWidth - 1, y + key_height - 1 } });
-
       // Store the modifier keys for later.
       if (key.code == Shift) {
-        shiftKey = &keys.back();
+        shiftKey = keys.size();
       } else if (key.code == Alt) {
-        altKey = &keys.back();
+        altKey = keys.size();
       } else if (key.code == Ctrl) {
-        ctrlKey = &keys.back();
+        ctrlKey = keys.size();
       }
+
+      keys.emplace_back(
+        key, Rect{ { x, y }, { x + keyWidth - 1, y + key_height - 1 } });
 
       x += keyWidth;
     }
@@ -406,9 +406,9 @@ Keyboard::sendKeyDown(const Key& key) const {
   }
 
   // Lookup modifier state.
-  bool shift = shiftKey == nullptr ? false : shiftKey->isDown();
-  bool alt = altKey == nullptr ? false : altKey->isDown();
-  bool ctrl = ctrlKey == nullptr ? false : ctrlKey->isDown();
+  bool shift = shiftKey == -1 ? false : keys.at(shiftKey).isDown();
+  bool alt = altKey == -1 ? false : keys.at(altKey).isDown();
+  bool ctrl = ctrlKey == -1 ? false : keys.at(ctrlKey).isDown();
 
   bool appCursor = (term->mode & MODE_APP_CURSOR) != 0;
 
@@ -552,18 +552,19 @@ handleKeyEvent(Keyboard& kb, const Event& ev) {
 
     // Clear sticky keys.
     if (!isModifier(key->info.code)) {
-      for (auto* key : { kb.shiftKey, kb.altKey, kb.ctrlKey }) {
-        if (key == nullptr) {
+      for (auto keyIdx : { kb.shiftKey, kb.altKey, kb.ctrlKey }) {
+        if (keyIdx == -1) {
           continue;
         }
 
-        key->nextRepeat = time_source::now() + repeat_delay;
-        if (key->stuck) {
-          key->stuck = false;
-          kb.drawKey(*key);
-          kb.fb->doUpdate(key->keyRect,
-                          rmlib::fb::Waveform::DU,
-                          rmlib::fb::UpdateFlags::None);
+        auto& key = kb.keys[keyIdx];
+
+        key.nextRepeat = time_source::now() + repeat_delay;
+        if (key.stuck) {
+          key.stuck = false;
+          kb.drawKey(key);
+          kb.fb->doUpdate(
+            key.keyRect, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::None);
         }
       }
     } else {
