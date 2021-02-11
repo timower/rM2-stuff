@@ -37,14 +37,25 @@ ErrorOr<FrameBuffer>
 FrameBuffer::open() {
   auto devType = TRY(device::getDeviceType());
 
-  const auto fbType = [devType] {
+  Canvas canvas;
+
+  const auto fbType = [&canvas, devType] {
     switch (devType) {
       default:
       case device::DeviceType::reMarkable1:
         std::cerr << "rM1 currently untested, please open a github issue if "
                      "you encounter any issues\n";
+
+        canvas.width = 1408; // TODO: use ioctl
+        canvas.height = 1872;
+
         return rM1;
       case device::DeviceType::reMarkable2:
+        // Not all of the rm2 fb modes support retrieving the size, so hard code
+        // it here.
+        canvas.width = 1404;
+        canvas.height = 1872;
+
         if (getenv("RM2FB_SHIM") != nullptr) {
           std::cerr << "Using rm2fb shim\n";
           return Shim;
@@ -87,9 +98,6 @@ FrameBuffer::open() {
     return Error{ "Error opening " + std::string(path) };
   }
 
-  Canvas canvas;
-  canvas.width = 1404; // TODO: use ioctl?
-  canvas.height = 1872;
   canvas.components = sizeof(uint16_t);
   canvas.memory = static_cast<uint8_t*>(mmap(
     nullptr, canvas.totalSize(), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));

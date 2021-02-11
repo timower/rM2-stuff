@@ -595,6 +595,20 @@ handleKeyEvent(Keyboard& kb, const Event& ev) {
       keyIt->keyRect, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::None);
   }
 }
+
+template<typename Ev>
+bool
+isKeyRelease(const Keyboard& kb, const Ev& ev) {
+  if (event_traits<Ev>::up_type != ev.type) {
+    return false;
+  }
+
+  auto slot = event_traits<Ev>::getSlot(ev);
+  return std::any_of(kb.keys.begin(), kb.keys.end(), [slot](const auto& key) {
+    return key.slot == slot;
+  });
+}
+
 } // namespace
 
 void
@@ -603,10 +617,14 @@ Keyboard::handleEvents(const std::vector<rmlib::input::Event>& events) {
     std::visit(
       [this](const auto& ev) {
         if constexpr (!std::is_same_v<std::decay_t<decltype(ev)>, KeyEvent>) {
-          if (screenRect.contains(ev.location)) {
-            handleScreenEvent(*this, ev);
-          } else {
+
+          // If the event is not on the screen or it's a release event of a
+          // previously pressed key, handle it as a keyboard event. Otherwise
+          // handle it as a screen (mouse) event.
+          if (!screenRect.contains(ev.location) || isKeyRelease(*this, ev)) {
             handleKeyEvent(*this, ev);
+          } else {
+            handleScreenEvent(*this, ev);
           }
         }
       },
