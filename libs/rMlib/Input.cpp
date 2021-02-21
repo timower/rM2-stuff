@@ -89,7 +89,6 @@ InputManager::waitForInput(fd_set& fdSet,
     tv.tv_usec = timeout->count() - (tv.tv_sec * second_in_usec);
   }
 
-  std::cout << "Max FD: " << maxFd << std::endl;
   auto ret = select(
     maxFd + 1, &fdSet, nullptr, nullptr, !timeout.has_value() ? nullptr : &tv);
   if (ret < 0) {

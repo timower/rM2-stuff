@@ -326,9 +326,9 @@ Keyboard::drawKey(const Key& key) const {
   fb->canvas.set(key.keyRect, 0xFF);
 
   fb->canvas.drawLine(
-    key.keyRect.topLeft, key.keyRect.topLeft + Point{ keyWidth, 0 }, 0x0);
+    key.keyRect.topLeft, key.keyRect.topLeft + Point{ keyWidth - 1, 0 }, 0x0);
   fb->canvas.drawLine(
-    key.keyRect.topLeft, key.keyRect.topLeft + Point{ 0, key_height }, 0x0);
+    key.keyRect.topLeft, key.keyRect.topLeft + Point{ 0, key_height - 1 }, 0x0);
 
   const auto printName = [&key = key.info] {
     if (key.name[0] != ':' || key.name.size() == 1) {

@@ -25,6 +25,7 @@ struct Canvas {
   Rect rect() const { return { { 0, 0 }, { width - 1, height - 1 } }; }
 
   int getPixel(int x, int y) {
+    assert(rect().contains(Point{ x, y }));
     int result = 0;
     auto* pixel = &memory[y * lineSize() + x * components];
     memcpy(&result, pixel, components);
@@ -32,12 +33,14 @@ struct Canvas {
   }
 
   void setPixel(Point p, int val) {
+    assert(rect().contains(p));
     auto* pixel = &memory[p.y * lineSize() + p.x * components];
     memcpy(pixel, &val, components);
   }
 
   template<typename Func>
   void transform(Func&& f, Rect r) {
+    assert(rect().contains(r.bottomRight) && rect().contains(r.topLeft));
     for (int y = r.topLeft.y; y <= r.bottomRight.y; y++) {
       for (int x = r.topLeft.x; x <= r.bottomRight.x; x++) {
         auto* pixel = &memory[y * lineSize() + x * components];
@@ -57,6 +60,7 @@ struct Canvas {
 
   template<typename Func>
   void forEach(Func&& func, Rect r) const {
+    assert(rect().contains(r.bottomRight) && rect().contains(r.topLeft));
     for (int y = r.topLeft.y; y <= r.bottomRight.y; y++) {
       for (int x = r.topLeft.x; x <= r.bottomRight.x; x++) {
         auto* pixel = &memory[y * lineSize() + x * components];
@@ -73,8 +77,9 @@ struct Canvas {
     forEach(std::forward<Func>(func), rect());
   }
 
-  void set(Rect rect, int value) {
-    transform([value](int x, int y, int val) { return value; }, rect);
+  void set(Rect r, int value) {
+    assert(rect().contains(r.bottomRight) && rect().contains(r.topLeft));
+    transform([value](int x, int y, int val) { return value; }, r);
   }
 
   void set(int value) { set(rect(), value); }
