@@ -131,7 +131,7 @@ struct InputManager {
       constexpr auto fd_isset = [](auto fd, auto& fds) {
         return FD_ISSET(fd, &fds);
       };
-      ((extraResult[i++] = fd_isset(extraFds, &fds)), ...);
+      ((extraResult[i++] = fd_isset(extraFds, fds)), ...);
 
       return std::pair{ *res, extraResult };
     }
