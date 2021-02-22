@@ -111,8 +111,10 @@ struct InputManager {
 
     fd_set fds;
     FD_ZERO(&fds);
-    constexpr auto fd_set = [](auto fd, auto& fds) { FD_SET(fd, &fds); };
-    (fd_set(extraFds, fds), ...);
+    if constexpr (sizeof...(ExtraFds) > 0) {
+      constexpr auto fd_set = [](auto fd, auto& fds) { FD_SET(fd, &fds); };
+      (fd_set(extraFds, fds), ...);
+    }
 
     auto maxFd = std::max({ 0, extraFds... });
 

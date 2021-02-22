@@ -16,12 +16,11 @@ namespace {
 constexpr auto pen_slot = 0x1000;
 constexpr char esc_char = '\x1b';
 
-constexpr std::initializer_list<std::pair<std::string_view, std::string_view>>
-  print_names = {
-    { ":backspace", "<==" }, { ":tab", "<=>" }, { ":enter", "\\n" },
-    { ":shift", "shift" },   { ":up", "^" },    { ":down", "v" },
-    { ":left", "<" },        { ":right", ">" },
-  };
+const std::vector<std::pair<std::string_view, std::string_view>> print_names = {
+  { ":backspace", "<==" }, { ":tab", "<=>" }, { ":enter", "\\n" },
+  { ":shift", "shift" },   { ":up", "^" },    { ":down", "v" },
+  { ":left", "<" },        { ":right", ">" },
+};
 
 enum SpecialKeys {
   Escape = 0x1000000,
@@ -53,7 +52,7 @@ isModifier(int scancode) {
   return scancode == Shift || scancode == Ctrl || scancode == Alt;
 }
 
-constexpr std::initializer_list<std::initializer_list<KeyInfo>> layout = {
+const std::vector<std::vector<KeyInfo>> layout = {
   { { "esc", Escape },
     { ">", 0x3e, "<", 0x3c },
     { "|", 0x7c, "&", 0x26 },
@@ -124,21 +123,23 @@ constexpr std::initializer_list<std::initializer_list<KeyInfo>> layout = {
     { ":down", Down },
     { ":right", Right } },
 };
-static_assert(layout.size() == num_rows);
 
-constexpr std::initializer_list<std::initializer_list<KeyInfo>>
-  hidden_layout = { { { "esc", Escape },
-                      { "pgup", PageUp },
-                      { "pgdn", PageDown },
-                      { "home", Home },
-                      { "end", End },
-                      { "<", Left },
-                      { "v", Down },
-                      { "^", Up },
-                      { ">", Right },
-                      { "ctrl-c", 0x3 },
-                      { "\\n", Enter } } };
-#if 0
+const std::vector<std::vector<KeyInfo>> hidden_layout = {
+  { { "esc", Escape },
+    { "pgup", PageUp },
+    { "pgdn", PageDown },
+    { "home", Home },
+    { "end", End },
+    { "<", Left },
+    { "v", Down },
+    { "^", Up },
+    { ">", Right },
+    { "ctrl-c", 0x3 },
+    { "\\n", Enter } }
+};
+
+#if 0 // C++ 20
+static_assert(layout.size() == num_rows);
 static_assert(
   std::max_element(layout.begin(), layout.end(), [](auto& a, auto& b) {
     return a.size() < b.size();
@@ -334,7 +335,7 @@ Keyboard::drawKey(const Key& key) const {
     if (key.name[0] != ':' || key.name.size() == 1) {
       return key.name;
     }
-    const auto* it =
+    const auto it =
       std::find_if(print_names.begin(),
                    print_names.end(),
                    [&key](const auto& pair) { return pair.first == key.name; });

@@ -33,7 +33,7 @@ CommandSocket::send(std::string_view cmd) {
     return false;
   }
 
-  int written = write(sock, cmd.data(), cmd.size());
+  size_t written = write(sock, cmd.data(), cmd.size());
   if (written != cmd.size()) {
     perror("Error writing");
     return false;
@@ -115,7 +115,7 @@ CommandSocket::process() {
     }
 
     auto response = callback(std::string_view(buf.data(), size));
-    auto written = write(client, response.data(), response.size());
+    size_t written = write(client, response.data(), response.size());
     if (written != response.size()) {
       perror("Error writing to client");
     }
