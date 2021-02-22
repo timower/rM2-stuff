@@ -111,7 +111,8 @@ struct InputManager {
 
     fd_set fds;
     FD_ZERO(&fds);
-    (FD_SET(extraFds, &fds), ...);
+    constexpr auto fd_set = [](auto fd, auto& fds) { FD_SET(fd, &fds); };
+    (fd_set(extraFds, fds), ...);
 
     auto maxFd = std::max({ 0, extraFds... });
 
@@ -126,7 +127,11 @@ struct InputManager {
 
       std::array<bool, sizeof...(extraFds)> extraResult;
       int i = 0;
-      ((extraResult[i++] = FD_ISSET(extraFds, &fds)), ...);
+
+      constexpr auto fd_isset = [](auto fd, auto& fds) {
+        return FD_ISSET(fd, &fds);
+      };
+      ((extraResult[i++] = fd_isset(extraFds, &fds)), ...);
 
       return std::pair{ *res, extraResult };
     }
