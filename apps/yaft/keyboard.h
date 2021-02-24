@@ -25,6 +25,12 @@ struct KeyInfo {
   int width = 1;
 };
 
+struct EvKeyInfo {
+  int code;
+  int scancode;
+  int altscancode = 0; // Code when pressed with shift.
+};
+
 using time_source = std::chrono::steady_clock;
 
 constexpr auto repeat_delay = std::chrono::seconds(1);
@@ -47,6 +53,13 @@ struct Keyboard {
     time_source::time_point nextRepeat;
   };
 
+  struct PhysicalKey {
+    const EvKeyInfo& info;
+    bool down = false;
+
+    time_source::time_point nextRepeat = {};
+  };
+
   OptError<> init(rmlib::fb::FrameBuffer& fb, terminal_t& term);
   void initKeyMap();
 
@@ -60,6 +73,7 @@ struct Keyboard {
   Key* getKey(rmlib::Point location);
 
   void sendKeyDown(const Key& key) const;
+  void sendKeyDown(const PhysicalKey& key) const;
 
   void hide();
   void show();
@@ -83,6 +97,9 @@ struct Keyboard {
   int ctrlKey = -1;
 
   std::vector<Key> keys;
+
+  // Map from evdev key code to PhysicalKey.
+  std::unordered_map<int, PhysicalKey> physicalKeys;
 
   bool hidden = false;
 };

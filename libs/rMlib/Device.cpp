@@ -83,6 +83,24 @@ getInputPaths(DeviceType type) {
   }
 }
 
+std::optional<Transform>
+getInputTransform(std::string_view path) {
+  auto devType = getDeviceType();
+  if (devType.isError()) {
+    return std::nullopt;
+  }
+
+  auto paths = getInputPaths(*devType);
+  if (path == paths.touchPath) {
+    return paths.touchTransform;
+  }
+  if (path == paths.penPath) {
+    return paths.penTransform;
+  }
+
+  return std::nullopt;
+}
+
 std::vector<std::string>
 listDirectory(std::string_view path, bool onlyFiles) {
   auto* dir = opendir(path.data());

@@ -28,26 +28,38 @@ split(std::string_view str, std::string_view delims = " ") {
   return output;
 }
 
-ErrorOr<std::vector<std::string_view>>
+using Tokens = std::vector<std::string_view>;
+
+ErrorOr<std::vector<Tokens>>
 tokenize(std::string_view str) {
-  std::vector<std::string_view> output;
+  std::vector<Tokens> output;
+  output.reserve(1);
+
+  std::vector<std::string_view> tokens;
 
   bool inQuotes = false;
   for (auto first = str.data(), second = str.data(), last = first + str.size();
        first < last;
        ++second) {
     if (second == last && first != second) {
-      output.emplace_back(first, second - first);
+      tokens.emplace_back(first, second - first);
       break;
     }
 
     if (*second == ' ' && !inQuotes && first != second) {
-      output.emplace_back(first, second - first);
+      tokens.emplace_back(first, second - first);
+      first = second + 1;
+    } else if (*second == ';' && !inQuotes) {
+      if (first != second) {
+        tokens.emplace_back(first, second - first);
+      }
+      output.emplace_back(std::move(tokens));
+      tokens.clear();
       first = second + 1;
     } else if (*second == '"') {
       if (inQuotes) {
         inQuotes = false;
-        output.emplace_back(first, second - first);
+        tokens.emplace_back(first, second - first);
       } else {
         inQuotes = true;
       }
@@ -55,13 +67,20 @@ tokenize(std::string_view str) {
     }
   }
 
+  if (!tokens.empty()) {
+    output.emplace_back(std::move(tokens));
+  }
+
   if (inQuotes) {
     return Error{ "Unclosed quotes" };
   }
 
   std::cout << "parsed: ";
-  for (const auto& token : output) {
-    std::cout << '"' << token << "\" ";
+  for (const auto& tokens : output) {
+    for (const auto& token : tokens) {
+      std::cout << '"' << token << "\" ";
+    }
+    std::cout << "; ";
   }
   std::cout << std::endl;
 
@@ -390,6 +409,55 @@ kill(Launcher& launcher, std::string_view name) {
   return "OK";
 }
 
+enum class InputType { Touch, Pen, Keys };
+
+template<>
+ErrorOr<InputType>
+parseArg<InputType>(std::string_view arg) {
+  if (arg == "touch") {
+    return InputType::Touch;
+  }
+  if (arg == "pen") {
+    return InputType::Pen;
+  }
+  if (arg == "keys") {
+    return InputType::Keys;
+  }
+  return Error{ "Expected <touch|pen|keys>" };
+}
+
+CommandResult
+grab(Launcher& launcher, InputType input) {
+  switch (input) {
+    case InputType::Touch:
+      launcher.inputFds->touch.grab();
+      break;
+    case InputType::Pen:
+      launcher.inputFds->pen.grab();
+      break;
+    case InputType::Keys:
+      launcher.inputFds->key.grab();
+      break;
+  }
+  return "OK";
+}
+
+CommandResult
+ungrab(Launcher& launcher, InputType input) {
+  switch (input) {
+    case InputType::Touch:
+      launcher.inputFds->touch.ungrab();
+      break;
+    case InputType::Pen:
+      launcher.inputFds->pen.ungrab();
+      break;
+    case InputType::Keys:
+      launcher.inputFds->key.ungrab();
+      break;
+  }
+  return "OK";
+}
+
 // clang-format off
 const std::unordered_map<std::string_view, Command> commands = {
   { "help",   { help,   "- Show help" } },
@@ -397,6 +465,8 @@ const std::unordered_map<std::string_view, Command> commands = {
   { "kill",   { kill,   "- kill <app name> - Stop an app"}},
   { "show",   { show,   "- Show the launcher" } },
   { "hide",   { hide,   "- Hide the launcher" } },
+  { "grab",   { grab,   "- grab <input> - Grabs the given input" } },
+  { "ungrab", { ungrab, "- ungrab <input> - Releases the given input" } },
   { "switch", { switchTo,
   "- switch <next|prev|last> - Switch to the next, previous or last running app"
   } },
@@ -421,28 +491,31 @@ help(Launcher&) {
 
 ErrorOr<std::function<void()>>
 getCommandFn(Launcher& launcher, std::string_view command) {
-  auto tokens = TRY(tokenize(command));
+  auto cmds = TRY(tokenize(command));
 
-  if (tokens.empty()) {
-    // Nothing to execute, doesn't fail.
-    return Error{ "Empty command" };
+  std::vector<std::function<CommandResult()>> results;
+  for (const auto& tokens : cmds) {
+    if (tokens.empty()) {
+      continue;
+    }
+
+    auto cmdIt = commands.find(tokens.front());
+    if (cmdIt == commands.end()) {
+      return Error{ std::string("Command ") + std::string(tokens.front()) +
+                    " not found" };
+    }
+
+    auto parsedFn = TRY(cmdIt->second.parse(launcher, tokens));
+    results.emplace_back(std::move(parsedFn));
   }
 
-  auto cmdIt = commands.find(tokens.front());
-  if (cmdIt == commands.end()) {
-    return Error{ std::string("Command ") + std::string(tokens.front()) +
-                  " not found" };
-  }
-
-  auto parsedFn = cmdIt->second.parse(launcher, tokens);
-  if (parsedFn.isError()) {
-    return parsedFn.getError();
-  }
-
-  return [fn = std::move(*parsedFn)]() {
-    auto res = fn();
-    if (res.isError()) {
-      std::cerr << res.getError().msg << std::endl;
+  return [fns = std::move(results)]() {
+    for (const auto& fn : fns) {
+      auto res = fn();
+      if (res.isError()) {
+        std::cerr << res.getError().msg << std::endl;
+        break;
+      }
     }
   };
 }
@@ -451,17 +524,22 @@ getCommandFn(Launcher& launcher, std::string_view command) {
 
 CommandResult
 doCommand(Launcher& launcher, std::string_view command) {
-  auto tokens = TRY(tokenize(command));
-  if (tokens.empty()) {
-    // Nothing to execute, doesn't fail.
-    return "";
+  auto cmds = TRY(tokenize(command));
+
+  std::string result;
+  for (const auto& tokens : cmds) {
+    if (tokens.empty()) {
+      continue;
+    }
+
+    auto cmdIt = commands.find(tokens.front());
+    if (cmdIt == commands.end()) {
+      return Error{ std::string("Command ") + std::string(tokens.front()) +
+                    " not found" };
+    }
+
+    result += TRY(cmdIt->second(launcher, tokens));
   }
 
-  auto cmdIt = commands.find(tokens.front());
-  if (cmdIt == commands.end()) {
-    return Error{ std::string("Command ") + std::string(tokens.front()) +
-                  " not found" };
-  }
-
-  return cmdIt->second(launcher, tokens);
+  return result;
 }

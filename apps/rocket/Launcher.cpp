@@ -91,7 +91,7 @@ Launcher::closeLauncher() {
   }
 
   state = State::Default;
-  inputMgr.ungrab(inputFds.touch);
+  inputFds->touch.ungrab();
 
   if (auto* currentApp = getCurrentApp();
       currentApp != nullptr && currentApp->isPaused()) {
@@ -119,7 +119,7 @@ Launcher::switchApp(App& app) {
 
   // resume or launch app
   if (app.isPaused()) {
-    inputMgr.flood(inputFds.touch);
+    inputFds->touch.flood();
     app.resume(&*frameBuffer);
   } else if (!app.isRunning()) {
     if (!app.launch()) {
@@ -155,7 +155,7 @@ Launcher::drawAppsLauncher() {
   if (auto* currentApp = getCurrentApp(); currentApp != nullptr) {
     currentApp->pause();
   }
-  inputMgr.grab(inputFds.touch);
+  inputFds->touch.grab();
 
   // Find the width and height.
   const auto overlayRect = [this] {
@@ -326,7 +326,7 @@ Launcher::handleGesture(const Gesture& g) {
 
 OptError<>
 Launcher::init() {
-  inputFds = TRY(inputMgr.openAll());
+  inputFds.emplace(TRY(inputMgr.openAll()));
 
   readApps();
 
@@ -335,7 +335,8 @@ Launcher::init() {
     std::cout << " - " << app.description.name << std::endl;
   }
 
-  frameBuffer = TRY(fb::FrameBuffer::open());
+  auto fb = TRY(fb::FrameBuffer::open());
+  frameBuffer.emplace(std::move(fb));
 
   frameBuffer->clear(); // Fill white.
 
@@ -392,8 +393,12 @@ Launcher::run() {
       }
     }
 
-    if (eventsAndFd.has_value()) {
-      auto gestures = gestureController.handleEvents(eventsAndFd->first);
+    if (eventsAndFd.isError()) {
+      std::cerr << "Error reading input: " << eventsAndFd.getError().msg
+                << "\n";
+    } else {
+      auto [gestures, unhandledEvs] =
+        gestureController.handleEvents(eventsAndFd->first);
 
       for (const auto& gesture : gestures) {
         std::visit([this](const auto& g) { handleGesture(g); }, gesture);
@@ -408,7 +413,7 @@ Launcher::run() {
     auto now = std::chrono::steady_clock::now();
     if (now - lastSync > std::chrono::seconds(10)) {
       std::cerr << "Syncing" << std::endl;
-      gestureController.sync(inputMgr.devices.begin()->second);
+      gestureController.sync(inputFds->touch);
       lastSync = now;
     }
   }

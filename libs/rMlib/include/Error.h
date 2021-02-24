@@ -16,6 +16,8 @@ class ErrorOr;
 template<typename Err = Error>
 using OptError = ErrorOr<NoError, Err>;
 
+// TODO: allow references in ErrorOr -> if T is reference, store reference
+// wrapper.
 template<typename T, typename Err>
 class ErrorOr {
   constexpr static bool isOptError = std::is_same_v<T, NoError>;
@@ -60,14 +62,14 @@ public:
 
   template<typename U = T,
            typename = std::enable_if_t<!std::is_same_v<U, NoError>>>
-  T* operator->() {
+  auto* operator->() {
     assert(!isError());
     return &std::get<T>(value);
   }
 
   template<typename U = T,
            typename = std::enable_if_t<!std::is_same_v<U, NoError>>>
-  const T* operator->() const {
+  const auto* operator->() const {
     assert(!isError());
     return &std::get<T>(value);
   }

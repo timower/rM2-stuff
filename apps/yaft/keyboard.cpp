@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <iostream>
 
+#include <linux/input-event-codes.h>
+
 using namespace rmlib;
 using namespace rmlib::input;
 
@@ -146,6 +148,130 @@ static_assert(
   })->size() == row_size);
 #endif
 
+const std::vector<EvKeyInfo> keymap = {
+  { KEY_ESC, Escape },
+  { KEY_1, '1', '!' },
+  { KEY_2, '2', '@' },
+  { KEY_3, '3', '#' },
+  { KEY_4, '4', '$' },
+  { KEY_5, '5', '%' },
+  { KEY_6, '6', '^' },
+  { KEY_7, '7', '&' },
+  { KEY_8, '8', '*' },
+  { KEY_9, '9', '(' },
+  { KEY_0, '0', ')' },
+  { KEY_MINUS, '-', '_' },
+  { KEY_EQUAL, '=', '+' },
+  { KEY_BACKSPACE, Backspace },
+  { KEY_TAB, Tab },
+  { KEY_Q, 'Q' },
+  { KEY_W, 'W' },
+  { KEY_E, 'E' },
+  { KEY_R, 'R' },
+  { KEY_T, 'T' },
+  { KEY_Y, 'Y' },
+  { KEY_U, 'U' },
+  { KEY_I, 'I' },
+  { KEY_O, 'O' },
+  { KEY_P, 'P' },
+  { KEY_LEFTBRACE, '[', '{' },
+  { KEY_RIGHTBRACE, ']', '}' },
+  { KEY_ENTER, Enter },
+  { KEY_LEFTCTRL, Ctrl },
+  { KEY_A, 'A' },
+  { KEY_S, 'S' },
+  { KEY_D, 'D' },
+  { KEY_F, 'F' },
+  { KEY_G, 'G' },
+  { KEY_H, 'H' },
+  { KEY_J, 'J' },
+  { KEY_K, 'K' },
+  { KEY_L, 'L' },
+  { KEY_SEMICOLON, ';', ':' },
+  { KEY_APOSTROPHE, '\'', '"' },
+  { KEY_GRAVE, '`', '~' },
+  { KEY_LEFTSHIFT, Shift },
+  { KEY_BACKSLASH, '\\', '|' },
+  { KEY_Z, 'Z' },
+  { KEY_X, 'X' },
+  { KEY_C, 'C' },
+  { KEY_V, 'V' },
+  { KEY_B, 'B' },
+  { KEY_N, 'N' },
+  { KEY_M, 'M' },
+  { KEY_COMMA, ',', '<' },
+  { KEY_DOT, '.', '>' },
+  { KEY_SLASH, '/', '?' },
+  { KEY_RIGHTSHIFT, Shift },
+  { KEY_KPASTERISK, '*' },
+  { KEY_LEFTALT, Alt },
+  { KEY_SPACE, ' ' },
+  // { KEY_CAPSLOCK
+  // { KEY_F1 59
+  // { KEY_F2 60
+  // { KEY_F3 61
+  // { KEY_F4 62
+  // { KEY_F5 63
+  // { KEY_F6 64
+  // { KEY_F7 65
+  // { KEY_F8 66
+  // { KEY_F9 67
+  // { KEY_F10 68
+  // { KEY_NUMLOCK 69
+  // { KEY_SCROLLLOCK 70
+  { KEY_KP7, '7' },
+  { KEY_KP8, '8' },
+  { KEY_KP9, '9' },
+  { KEY_KPMINUS, '-' },
+  { KEY_KP4, '4' },
+  { KEY_KP5, '5' },
+  { KEY_KP6, '6' },
+  { KEY_KPPLUS, '+' },
+  { KEY_KP1, '1' },
+  { KEY_KP2, '2' },
+  { KEY_KP3, '3' },
+  { KEY_KP0, '0' },
+  { KEY_KPDOT, '.' },
+
+  // { KEY_ZENKAKUHANKAKU 85
+  // { KEY_102ND 86
+  // { KEY_F11 87
+  // { KEY_F12 88
+  // { KEY_RO 89
+  // { KEY_KATAKANA 90
+  // { KEY_HIRAGANA 91
+  // { KEY_HENKAN 92
+  // { KEY_KATAKANAHIRAGANA 93
+  // { KEY_MUHENKAN 94
+  // { KEY_KPJPCOMMA 95
+  { KEY_KPENTER, Enter },
+  { KEY_RIGHTCTRL, Ctrl },
+  { KEY_KPSLASH, '/' },
+  // { KEY_SYSRQ 99
+  { KEY_RIGHTALT, Alt },
+  { KEY_LINEFEED, Enter },
+  { KEY_HOME, Home },
+  { KEY_UP, Up },
+  { KEY_PAGEUP, PageUp },
+  { KEY_LEFT, Left },
+  { KEY_RIGHT, Right },
+  { KEY_END, End },
+  { KEY_DOWN, Down },
+  { KEY_PAGEDOWN, PageDown },
+  // { KEY_INSERT 110
+  { KEY_DELETE, Del },
+  // { KEY_MACRO 112
+  // { KEY_MUTE 113
+  // { KEY_VOLUMEDOWN 114
+  // { KEY_VOLUMEUP 115
+  // { KEY_POWER 116 /* SC System Power Down */
+  { KEY_KPEQUAL, '=' },
+  { KEY_KPPLUSMINUS, '+', '-' },
+  // { KEY_PAUSE 119
+  // { KEY_SCALE 120 /* AL Compiz Scale (Expose) */
+
+};
+
 const char*
 getKeyCodeStr(int scancode, bool shift, bool alt, bool ctrl, bool appCursor) {
   static std::array<char, 512> buf;
@@ -259,12 +385,7 @@ Keyboard::init(rmlib::fb::FrameBuffer& fb, terminal_t& term) {
   this->term = &term;
   this->fb = &fb;
 
-  auto dev = TRY(device::getDeviceType());
-
-  auto inputs = device::getInputPaths(dev);
-  TRY(input.open(inputs.touchPath.data(), inputs.touchTransform));
-
-  TRY(input.open(inputs.penPath.data(), inputs.penTransform));
+  TRY(input.openAll());
 
   initKeyMap();
   return NoError{};
@@ -318,6 +439,11 @@ Keyboard::initKeyMap() {
   int marginLeft = term->width - term->cols * CELL_WIDTH;
   this->screenRect = Rect{ { marginLeft, term->marginTop },
                            { term->width - 1, term->height - 1 } };
+
+  // do physical keys:
+  for (const auto& keyInfo : keymap) {
+    physicalKeys.emplace(keyInfo.code, PhysicalKey{ keyInfo });
+  }
 }
 
 void
@@ -426,6 +552,39 @@ Keyboard::sendKeyDown(const Key& key) const {
   }
 }
 
+void
+Keyboard::sendKeyDown(const PhysicalKey& key) const {
+  if (isModifier(key.info.scancode)) {
+    return;
+  }
+
+  const auto anyKeyDown = [this](int scancode) {
+    return std::any_of(physicalKeys.begin(),
+                       physicalKeys.end(),
+                       [scancode](const auto& codeAndKey) {
+                         return codeAndKey.second.info.scancode == scancode &&
+                                codeAndKey.second.down;
+                       });
+  };
+
+  bool shift = anyKeyDown(Shift);
+  bool alt = anyKeyDown(Alt);
+  bool ctrl = anyKeyDown(Ctrl);
+
+  bool appCursor = (term->mode & MODE_APP_CURSOR) != 0;
+
+  auto scancode = (key.info.altscancode != 0 && shift) ? key.info.altscancode
+                                                       : key.info.scancode;
+
+  const auto* code = getKeyCodeStr(scancode, shift, alt, ctrl, appCursor);
+  if (code != nullptr) {
+    write(term->fd, code, strlen(code));
+  } else {
+    std::cerr << "unknown key combo: " << scancode << " shift " << shift
+              << " ctrl " << ctrl << " alt " << alt << std::endl;
+  }
+}
+
 namespace {
 template<typename Event>
 struct event_traits;
@@ -494,7 +653,7 @@ handleScreenEvent(Keyboard& kb, const Event& ev) {
   const auto lastFingers = kb.gestureCtrlr.getCurrentFingers();
 
   if constexpr (std::is_same_v<Event, TouchEvent>) {
-    const auto gestures = kb.gestureCtrlr.handleEvents({ ev });
+    const auto [gestures, _] = kb.gestureCtrlr.handleEvents({ ev });
     for (const auto& gesture : gestures) {
       if (std::holds_alternative<SwipeGesture>(gesture)) {
         handleGesture(kb, std::get<SwipeGesture>(gesture));
@@ -610,6 +769,24 @@ isKeyRelease(const Keyboard& kb, const Ev& ev) {
   });
 }
 
+void
+handlePhysicalKeyEvent(Keyboard& kb, const KeyEvent& ev) {
+  auto it = kb.physicalKeys.find(ev.keyCode);
+  if (it == kb.physicalKeys.end()) {
+    std::cout << "Unknown physical key: " << ev.keyCode << "\n";
+    return;
+  }
+  auto& key = it->second;
+
+  if (ev.type == KeyEvent::Press) {
+    key.down = true;
+    key.nextRepeat = time_source::now() + repeat_delay;
+    kb.sendKeyDown(key);
+  } else if (ev.type == KeyEvent::Release) {
+    key.down = false;
+  }
+}
+
 } // namespace
 
 void
@@ -627,6 +804,8 @@ Keyboard::handleEvents(const std::vector<rmlib::input::Event>& events) {
           } else {
             handleScreenEvent(*this, ev);
           }
+        } else {
+          handlePhysicalKeyEvent(*this, ev);
         }
       },
       event);
@@ -661,6 +840,22 @@ Keyboard::updateRepeat() {
         break;
 
       } else {
+        sendKeyDown(key);
+      }
+
+      key.nextRepeat += repeat_time;
+    }
+  }
+
+  for (auto& [_, key] : physicalKeys) {
+    (void)_;
+
+    if (!key.down) {
+      continue;
+    }
+
+    if (time > key.nextRepeat) {
+      if (!isModifier(key.info.scancode)) {
         sendKeyDown(key);
       }
 

@@ -61,7 +61,7 @@ struct Launcher {
 
   std::optional<std::pair<rmlib::Point, rmlib::MemoryCanvas>> backupBuffer;
 
-  rmlib::input::FileDescriptors inputFds;
+  std::optional<rmlib::input::FileDescriptors> inputFds;
   rmlib::input::GestureController gestureController;
 
   Config config;

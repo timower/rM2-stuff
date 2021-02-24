@@ -30,6 +30,9 @@ struct InputPaths {
 const InputPaths&
 getInputPaths(DeviceType type);
 
+std::optional<Transform>
+getInputTransform(std::string_view path);
+
 // TODO: battery paths
 
 std::vector<std::string>

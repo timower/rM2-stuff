@@ -258,7 +258,9 @@ main(int argc, const char* argv[]) {
     // Update repeat in any case (timeout, error or events).
     keyboard.updateRepeat();
 
-    if (!eventAndFds.has_value()) {
+    if (eventAndFds.isError()) {
+      std::cerr << "Error reading input: " << eventAndFds.getError().msg
+                << "\n";
       continue;
     }
 

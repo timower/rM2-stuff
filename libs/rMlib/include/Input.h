@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <memory>
 #include <optional>
 #include <unordered_map>
 #include <unordered_set>
@@ -12,6 +13,8 @@
 #include <vector>
 
 struct libevdev;
+struct udev;
+struct udev_monitor;
 
 namespace rmlib::input {
 constexpr static auto max_num_slots = 32;
@@ -25,7 +28,6 @@ struct TouchEvent {
   int pressure;
 };
 
-// TODO
 struct PenEvent {
   enum { TouchDown, TouchUp, ToolClose, ToolLeave, Move } type;
   Point location;
@@ -36,118 +38,6 @@ struct PenEvent {
 struct KeyEvent {
   enum { Release = 0, Press = 1, Repeat = 2 } type;
   int keyCode;
-};
-
-using Event = std::variant<TouchEvent, PenEvent, KeyEvent>;
-
-struct FileDescriptors {
-  int pen;
-  int touch;
-  int key;
-};
-
-struct InputManager {
-  struct InputDevice {
-    InputDevice(int fd, libevdev* dev, Transform transform)
-      : fd(fd), dev(dev), transform(transform) {}
-
-    int fd;
-    libevdev* dev;
-    Transform transform;
-
-    int slot = 0;
-    std::array<Event, max_num_slots> slots;
-
-    std::unordered_set<int> changedSlots;
-    std::vector<Event> events;
-
-    template<typename T>
-    T& getSlot() {
-      if (!std::holds_alternative<T>(slots[slot])) {
-        slots[slot] = T{};
-      }
-      return std::get<T>(slots[slot]);
-    }
-  };
-
-  ErrorOr<int> open(std::string_view input,
-                    Transform inputTransform = Transform::identity());
-
-  /// Opens all devices for the current device type.
-  ErrorOr<FileDescriptors> openAll();
-
-  void close(int fd);
-  void closeAll();
-
-  InputManager() = default;
-  ~InputManager() { closeAll(); }
-
-  InputManager(InputManager&& other) : devices(std::move(other.devices)) {
-    other.devices.clear();
-  }
-
-  InputManager& operator=(InputManager&& other) {
-    closeAll();
-    std::swap(other, *this);
-    return *this;
-  }
-
-  InputManager(const InputManager&) = delete;
-  InputManager& operator=(const InputManager&) = delete;
-
-  std::optional<std::vector<Event>> waitForInput(
-    fd_set& fdSet,
-    int maxFd,
-    std::optional<std::chrono::microseconds> timeout = std::nullopt);
-
-  template<typename... ExtraFds>
-  auto waitForInput(std::optional<std::chrono::microseconds> timeout,
-                    ExtraFds... extraFds)
-    -> std::optional<std::conditional_t<
-      sizeof...(ExtraFds) == 0,
-      std::vector<Event>,
-      std::pair<std::vector<Event>, std::array<bool, sizeof...(ExtraFds)>>>> {
-    static_assert((std::is_same_v<ExtraFds, int> && ...));
-
-    fd_set fds;
-    FD_ZERO(&fds);
-    if constexpr (sizeof...(ExtraFds) > 0) {
-      constexpr auto fd_set = [](auto fd, auto& fds) { FD_SET(fd, &fds); };
-      (fd_set(extraFds, fds), ...);
-    }
-
-    auto maxFd = std::max({ 0, extraFds... });
-
-    auto res = waitForInput(fds, maxFd, timeout);
-    if constexpr (sizeof...(ExtraFds) == 0) {
-      return res;
-    } else {
-
-      if (!res.has_value()) {
-        return std::nullopt;
-      }
-
-      std::array<bool, sizeof...(extraFds)> extraResult;
-      int i = 0;
-
-      constexpr auto fd_isset = [](auto fd, auto& fds) {
-        return FD_ISSET(fd, &fds);
-      };
-      ((extraResult[i++] = fd_isset(extraFds, fds)), ...);
-
-      return std::pair{ *res, extraResult };
-    }
-  }
-
-  std::vector<Event> readEvents(int);
-  static std::vector<Event> readEvents(InputDevice& device);
-
-  void grab(int device);
-  void ungrab(int device);
-  void flood(int device);
-
-  /// members
-  std::unordered_map<int, InputDevice> devices;
 };
 
 struct SwipeGesture {
@@ -173,6 +63,106 @@ struct TapGesture {
 
 using Gesture = std::variant<SwipeGesture, PinchGesture, TapGesture>;
 
+using Event = std::variant<TouchEvent, PenEvent, KeyEvent>;
+
+struct InputDeviceBase {
+  int fd;
+  libevdev* evdev;
+  std::string path;
+
+  void grab();
+  void ungrab();
+  virtual void flood() = 0;
+
+  virtual ~InputDeviceBase();
+
+  virtual OptError<> readEvents(std::vector<Event>& out) = 0;
+
+protected:
+  InputDeviceBase(int fd, libevdev* evdev, std::string path)
+    : fd(fd), evdev(evdev), path(std::move(path)) {}
+};
+
+struct FileDescriptors {
+  InputDeviceBase& pen;
+  InputDeviceBase& touch;
+  InputDeviceBase& key;
+};
+
+struct InputManager {
+  ErrorOr<InputDeviceBase*> open(std::string_view input,
+                                 Transform inputTransform);
+
+  ErrorOr<InputDeviceBase*> open(std::string_view input);
+
+  /// Opens all devices for the current device type.
+  /// \param monitor If true monitor for new devices and automatically add them.
+  ///                Will also remove devices when unplugged.
+  ErrorOr<FileDescriptors> openAll(bool monitor = true);
+
+  InputManager() = default;
+  ~InputManager();
+
+  InputManager(InputManager&& other) : devices(std::move(other.devices)) {
+    other.devices.clear();
+  }
+
+  InputManager& operator=(InputManager&& other) {
+    devices.clear();
+    std::swap(other, *this);
+    return *this;
+  }
+
+  InputManager(const InputManager&) = delete;
+  InputManager& operator=(const InputManager&) = delete;
+
+  ErrorOr<std::vector<Event>> waitForInput(
+    fd_set& fdSet,
+    int maxFd,
+    std::optional<std::chrono::microseconds> timeout = std::nullopt);
+
+  template<typename... ExtraFds>
+  auto waitForInput(std::optional<std::chrono::microseconds> timeout,
+                    ExtraFds... extraFds)
+    -> ErrorOr<std::conditional_t<
+      sizeof...(ExtraFds) == 0,
+      std::vector<Event>,
+      std::pair<std::vector<Event>, std::array<bool, sizeof...(ExtraFds)>>>> {
+    static_assert((std::is_same_v<ExtraFds, int> && ...));
+
+    fd_set fds;
+    FD_ZERO(&fds);
+    if constexpr (sizeof...(ExtraFds) > 0) {
+      constexpr auto fd_set = [](auto fd, auto& fds) { FD_SET(fd, &fds); };
+      (fd_set(extraFds, fds), ...);
+    }
+
+    auto maxFd = std::max({ 0, extraFds... });
+
+    auto res = TRY(waitForInput(fds, maxFd, timeout));
+    if constexpr (sizeof...(ExtraFds) == 0) {
+      return res;
+    } else {
+      std::array<bool, sizeof...(extraFds)> extraResult;
+      int i = 0;
+
+      constexpr auto fd_isset = [](auto fd, auto& fds) {
+        return FD_ISSET(fd, &fds);
+      };
+      ((extraResult[i++] = fd_isset(extraFds, fds)), ...);
+
+      return std::pair{ res, extraResult };
+    }
+  }
+
+  /// members
+  std::unordered_map<std::string_view, std::unique_ptr<InputDeviceBase>>
+    devices;
+  udev* udevHandle = nullptr;
+  udev_monitor* udevMonitor = nullptr;
+  int udevMonitorFd = -1;
+};
+
 struct GestureController {
   // pixels to move before detecting swipe or pinch
   constexpr static int start_threshold = 50;
@@ -190,9 +180,10 @@ struct GestureController {
   void handleTouchMove(const TouchEvent& event);
   std::optional<Gesture> handleTouchUp(const TouchEvent& event);
 
-  std::vector<Gesture> handleEvents(const std::vector<Event>& events);
+  std::pair<std::vector<Gesture>, std::vector<Event>> handleEvents(
+    const std::vector<Event>& events);
 
-  void sync(InputManager::InputDevice& device);
+  void sync(InputDeviceBase& device);
 
   void reset() {
     started = false;

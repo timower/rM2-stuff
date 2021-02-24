@@ -32,7 +32,9 @@ target_include_directories(${PROJECT_NAME}
     ${LIBEVDEV_INCLUDE_DIR})
 
 target_link_libraries(${PROJECT_NAME}
-  PRIVATE ${LIBEVDEV_LIBRARY})
+  PRIVATE
+    ${LIBEVDEV_LIBRARY}
+    udev)
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
 

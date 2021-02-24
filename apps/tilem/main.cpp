@@ -314,9 +314,11 @@ main(int argc, char* argv[]) {
   auto lastUpdateT = getTime();
   while (!shouldStop) {
     constexpr auto wait_time = std::chrono::milliseconds(10);
-    auto events = input.waitForInput(wait_time);
-    if (events.has_value()) {
-      for (const auto& event : *events) {
+    auto eventsOrErr = input.waitForInput(wait_time);
+    if (eventsOrErr.isError()) {
+      std::cerr << eventsOrErr.getError().msg << std::endl;
+    } else {
+      for (const auto& event : *eventsOrErr) {
         handleEvent(*fb, event);
       }
     }
