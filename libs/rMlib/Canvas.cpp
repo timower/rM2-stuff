@@ -14,7 +14,11 @@
 namespace rmlib {
 
 namespace {
+#ifdef EMULATE
+constexpr auto font_path = "/usr/share/fonts/TTF/DejaVuSansMono.ttf";
+#else
 constexpr auto font_path = "/usr/share/fonts/ttf/noto/NotoMono-Regular.ttf";
+#endif
 
 stbtt_fontinfo*
 getFont() {

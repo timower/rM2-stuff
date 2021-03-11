@@ -51,6 +51,9 @@ const InputPaths rm2_paths = {
 
 ErrorOr<DeviceType>
 getDeviceType() {
+#ifdef EMULATE
+  return DeviceType::reMarkable2;
+#else
   static const auto result = []() -> ErrorOr<DeviceType> {
     constexpr auto path = "/sys/devices/soc0/machine";
     std::ifstream ifs(path);
@@ -70,6 +73,7 @@ getDeviceType() {
   }();
 
   return result;
+#endif
 }
 
 const InputPaths&

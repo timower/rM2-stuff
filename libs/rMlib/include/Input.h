@@ -100,7 +100,7 @@ struct InputManager {
   ///                Will also remove devices when unplugged.
   ErrorOr<FileDescriptors> openAll(bool monitor = true);
 
-  InputManager() = default;
+  InputManager();
   ~InputManager();
 
   InputManager(InputManager&& other) : devices(std::move(other.devices)) {

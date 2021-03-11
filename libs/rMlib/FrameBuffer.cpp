@@ -15,6 +15,10 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#ifdef EMULATE
+#include <SDL2/SDL.h>
+#endif
+
 namespace rmlib::fb {
 namespace {
 constexpr auto shm_path = "/dev/shm/swtfb.01";
@@ -31,14 +35,119 @@ struct msgq_msg {
 // Global msgq:
 int msqid = -1;
 
+#ifdef EMULATE
+constexpr auto canvas_width = 1404;
+constexpr auto canvas_height = 1872;
+constexpr auto canvas_components = 2;
+constexpr auto window_width = canvas_width / EMULATE_SCALE;
+constexpr auto window_height = canvas_height / EMULATE_SCALE;
+
+// Global window for emulation.
+SDL_Window* window = nullptr;
+std::unique_ptr<uint8_t[]> emuMem;
+
+void
+putpixel(SDL_Surface* surface, int x, int y, Uint32 pixel) {
+  if (x < 0 || x >= window_width || y < 0 || y >= window_height) {
+    return;
+  }
+
+  int bpp = surface->format->BytesPerPixel;
+  /* Here p is the address to the pixel we want to set */
+  Uint8* p = (Uint8*)surface->pixels + y * surface->pitch + x * bpp;
+
+  switch (bpp) {
+    case 1:
+      *p = pixel;
+      break;
+
+    case 2:
+      *(Uint16*)p = pixel;
+      break;
+
+    case 3:
+      if (SDL_BYTEORDER == SDL_BIG_ENDIAN) {
+        p[0] = (pixel >> 16) & 0xff;
+        p[1] = (pixel >> 8) & 0xff;
+        p[2] = pixel & 0xff;
+      } else {
+        p[0] = pixel & 0xff;
+        p[1] = (pixel >> 8) & 0xff;
+        p[2] = (pixel >> 16) & 0xff;
+      }
+      break;
+
+    case 4:
+      *(Uint32*)p = pixel;
+      break;
+  }
+}
+
+ErrorOr<Canvas>
+makeEmulatedCanvas() {
+  if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+    return Error{ std::string("could not initialize sdl2:") + SDL_GetError() };
+  }
+  window = SDL_CreateWindow("rM emulator",
+                            SDL_WINDOWPOS_UNDEFINED,
+                            SDL_WINDOWPOS_UNDEFINED,
+                            window_width,
+                            window_height,
+                            SDL_WINDOW_SHOWN);
+  if (window == NULL) {
+    return Error{ std::string("could not create window:") + SDL_GetError() };
+  }
+  auto* screenSurface = SDL_GetWindowSurface(window);
+  SDL_FillRect(
+    screenSurface, NULL, SDL_MapRGB(screenSurface->format, 0xFF, 0xFF, 0xFF));
+  SDL_UpdateWindowSurface(window);
+
+  Canvas canvas;
+  emuMem = std::make_unique<uint8_t[]>(canvas_width * canvas_height *
+                                       canvas_components);
+  canvas.memory = emuMem.get();
+  canvas.width = canvas_width;
+  canvas.height = canvas_height;
+  canvas.components = canvas_components;
+  return canvas;
+}
+
+void
+updateEmulatedCanvas(const Canvas& canvas, Rect region) {
+  auto* surface = SDL_GetWindowSurface(window);
+
+  for (int y = region.topLeft.y; y < region.bottomRight.y; y++) {
+    for (int x = region.topLeft.x; x < region.bottomRight.x; x++) {
+      auto* pixelPtr =
+        &canvas.memory[y * canvas.lineSize() + x * canvas.components];
+      int32_t pixel = 0;
+      memcpy(&pixel, pixelPtr, canvas.components);
+
+      // assume rgb565
+      auto b = (pixel & 0x1f) << 3;
+      auto g = ((pixel >> 5) & 0x3f) << 2;
+      auto r = ((pixel >> 11) & 0x1f) << 3;
+
+      putpixel(surface,
+               x / EMULATE_SCALE,
+               y / EMULATE_SCALE,
+               SDL_MapRGB(surface->format, r, g, b));
+    }
+  }
+  SDL_UpdateWindowSurface(window);
+}
+#endif // EMULATE
 } // namespace
 
 ErrorOr<FrameBuffer>
 FrameBuffer::open() {
-  auto devType = TRY(device::getDeviceType());
-
+#ifdef EMULATE
+  auto canvas = TRY(makeEmulatedCanvas());
+  return FrameBuffer(FrameBuffer::Swtcon, 1337, canvas);
+#else
   Canvas canvas;
 
+  auto devType = TRY(device::getDeviceType());
   const auto fbType = [&canvas, devType] {
     switch (devType) {
       default:
@@ -117,10 +226,19 @@ FrameBuffer::open() {
   }
 
   return FrameBuffer(fbType, fd, canvas);
+#endif
 }
 
 void
 FrameBuffer::close() {
+#ifdef EMULATE
+  if (fd == 1337) {
+    SDL_DestroyWindow(window);
+    window = nullptr;
+    fd = -1;
+  }
+#else
+
   if (canvas.memory != nullptr) {
     munmap(canvas.memory, canvas.totalSize());
   }
@@ -130,6 +248,8 @@ FrameBuffer::close() {
     ::close(fd);
   }
   fd = -1;
+
+#endif
 }
 
 FrameBuffer::~FrameBuffer() {
@@ -138,6 +258,9 @@ FrameBuffer::~FrameBuffer() {
 
 void
 FrameBuffer::doUpdate(Rect region, Waveform waveform, UpdateFlags flags) const {
+#ifdef EMULATE
+  updateEmulatedCanvas(canvas, region);
+#else
   if (type != Swtcon) {
     auto update = mxcfb_update_data{};
 
@@ -162,6 +285,7 @@ FrameBuffer::doUpdate(Rect region, Waveform waveform, UpdateFlags flags) const {
   } else {
     assert(false && "Unimplemented");
   }
+#endif
 }
 
 } // namespace rmlib::fb

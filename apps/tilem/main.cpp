@@ -184,7 +184,7 @@ handleEvent(rmlib::fb::FrameBuffer& fb, rmlib::input::Event ev) {
   auto touchEv = std::get<rmlib::input::TouchEvent>(ev);
   if (touchEv.type == rmlib::input::TouchEvent::Down) {
     auto scancode = get_scancode(touchEv.location.x, touchEv.location.y);
-    std::cout << "touch down " << scancode << std::endl;
+    std::cout << "touch down " << touchEv.location << scancode << std::endl;
     scanCodes[touchEv.slot] = scancode;
     if (scancode != -1) {
       tilem_keypad_press_key(calc, scancode);
@@ -194,7 +194,7 @@ handleEvent(rmlib::fb::FrameBuffer& fb, rmlib::input::Event ev) {
     }
   } else if (touchEv.type == rmlib::input::TouchEvent::Up) {
     auto scancode = scanCodes[touchEv.slot];
-    std::cout << "touch up " << scancode << std::endl;
+    std::cout << "touch up " << touchEv.location << scancode << std::endl;
     if (scancode != -1) {
       tilem_keypad_release_key(calc, scancode);
     }
