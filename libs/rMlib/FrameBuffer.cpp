@@ -5,8 +5,6 @@
 #include <sys/ipc.h>
 #include <sys/msg.h>
 
-#include "mxcfb.h"
-
 #include <cassert>
 #include <fcntl.h>
 #include <iostream>
@@ -16,16 +14,21 @@
 #include <unistd.h>
 
 #ifdef EMULATE
-#include <SDL2/SDL.h>
+#include <SDL.h>
+// #include <SDL2/SDL.h>
+#else
+#include "mxcfb.h"
 #endif
 
 namespace rmlib::fb {
 namespace {
+#ifndef EMULATE
 constexpr auto shm_path = "/dev/shm/swtfb.01";
 constexpr auto fb_path = "/dev/fb0";
 
 constexpr int msg_q_id = 0x2257c;
 
+// TODO: import this from rm2-fb
 struct msgq_msg {
   long type = 2;
 
@@ -35,7 +38,8 @@ struct msgq_msg {
 // Global msgq:
 int msqid = -1;
 
-#ifdef EMULATE
+#else
+
 constexpr auto canvas_width = 1404;
 constexpr auto canvas_height = 1872;
 constexpr auto canvas_components = 2;

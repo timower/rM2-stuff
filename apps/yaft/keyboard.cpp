@@ -450,12 +450,13 @@ void
 Keyboard::drawKey(const Key& key) const {
   const auto keyWidth = key.keyRect.width();
 
-  fb->canvas.set(key.keyRect, 0xFF);
+  fb->canvas.set(key.keyRect, white);
 
   fb->canvas.drawLine(
-    key.keyRect.topLeft, key.keyRect.topLeft + Point{ keyWidth - 1, 0 }, 0x0);
-  fb->canvas.drawLine(
-    key.keyRect.topLeft, key.keyRect.topLeft + Point{ 0, key_height - 1 }, 0x0);
+    key.keyRect.topLeft, key.keyRect.topLeft + Point{ keyWidth - 1, 0 }, black);
+  fb->canvas.drawLine(key.keyRect.topLeft,
+                      key.keyRect.topLeft + Point{ 0, key_height - 1 },
+                      black);
 
   const auto printName = [&key = key.info] {
     if (key.name[0] != ':' || key.name.size() == 1) {

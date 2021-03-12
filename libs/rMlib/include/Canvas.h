@@ -14,6 +14,9 @@ namespace rmlib {
 
 constexpr auto default_text_size = 24;
 
+constexpr auto white = 0xFFFF;
+constexpr auto black = 0x0;
+
 // Returns a glyph for the given codepoint.
 bool
 getGlyph(uint32_t code, uint8_t* bitmap, int height, int* width);

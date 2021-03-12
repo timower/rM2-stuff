@@ -6,6 +6,7 @@
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "stb_truetype.h"
 
+#include <array>
 #include <codecvt>
 #include <iostream>
 #include <locale>
@@ -188,12 +189,18 @@ Canvas::drawText(std::string_view text, Point location, int size) { // NOLINT
     for (int y = 0; y < h; y++) {
       for (int x = 0; x < w; x++) {
         auto pixel = 0xff - textBuffer[y * w + x];
+        auto pixel565 =
+          (pixel >> 3) | ((pixel >> 2) << 5) | ((pixel >> 3) << 11);
 
         auto memY = location.y + baseline + y0 + y;
         auto memX = location.x + static_cast<int>(xpos) + x0 + x;
 
+        uint16_t* targetPtr = reinterpret_cast<uint16_t*>(
+          &memory[memY * lineSize() + memX * components]);
+        *targetPtr = pixel565;
+
         // NOLINTNEXTLINE
-        memory[(memY)*lineSize() + (memX)*components] = (pixel / 16) << 1;
+        // memory[(memY)*lineSize() + (memX)*components] = (pixel / 16) << 1;
       }
     }
 

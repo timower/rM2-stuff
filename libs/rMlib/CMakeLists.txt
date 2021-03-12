@@ -1,7 +1,6 @@
 project(rMlib)
 
 option(EMULATE "Emulate a rM tablet using SDL" OFF)
-option(EMULATE_SCALE "Scale of the emulated window" 2)
 
 find_library(LIBEVDEV_LIBRARY
   NAMES libevdev.so
@@ -44,11 +43,17 @@ target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
 
 if (EMULATE)
   find_package(SDL2 REQUIRED)
+  if (TARGET SDL2::SDL2)
+    target_link_libraries(${PROJECT_NAME} PUBLIC  SDL2::SDL2)
+  else()
+    target_link_libraries(${PROJECT_NAME} PUBLIC ${SDL2_LIBRARIES})
+    target_include_directories(${PROJECT_NAME} PUBLIC ${SDL2_INCLUDE_DIRS})
+  endif()
+  target_link_libraries(${PROJECT_NAME} PUBLIC  pthread)
 
-  target_link_libraries(${PROJECT_NAME} PUBLIC SDL2::SDL2 pthread)
   target_compile_definitions(${PROJECT_NAME} PRIVATE EMULATE)
   target_compile_definitions(${PROJECT_NAME} PRIVATE
-    EMULATE_SCALE=${EMULATE_SCALE})
+    EMULATE_SCALE=2)
 endif()
 
 install(TARGETS ${PROJECT_NAME} DESTINATION lib)
