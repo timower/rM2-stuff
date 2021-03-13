@@ -5,6 +5,9 @@
 
 #include <iostream>
 
+#include <linux/input.h>
+#include <unistd.h>
+
 using namespace rmlib;
 using namespace rmlib::input;
 
@@ -402,6 +405,17 @@ Launcher::run() {
 
       for (const auto& gesture : gestures) {
         std::visit([this](const auto& g) { handleGesture(g); }, gesture);
+      }
+
+      for (const auto& ev : unhandledEvs) {
+        if (std::holds_alternative<KeyEvent>(ev)) {
+          const auto& keyEv = std::get<KeyEvent>(ev);
+          if (keyEv.keyCode == KEY_POWER && keyEv.type == KeyEvent::Release) {
+            //  system("/sbin/rmmod brcmfmac");
+            //  system("echo \"mem\" > /sys/power/state");
+            //  system("/sbin/modprobe brcmfmac");
+          }
+        }
       }
 
       if (eventsAndFd->second[0]) {
