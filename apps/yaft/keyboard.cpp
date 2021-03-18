@@ -393,12 +393,12 @@ Keyboard::init(rmlib::fb::FrameBuffer& fb, terminal_t& term) {
 
 void
 Keyboard::initKeyMap() {
-  baseKeyWidth = fb->canvas.width / row_size;
+  baseKeyWidth = fb->canvas.width() / row_size;
   startHeight =
-    fb->canvas.height - (hidden ? hidden_keyboard_height : keyboard_height);
+    fb->canvas.height() - (hidden ? hidden_keyboard_height : keyboard_height);
 
   // Resize the terminal to make place for the keyboard.
-  term_resize(term, fb->canvas.width, startHeight);
+  term_resize(term, fb->canvas.width(), startHeight);
 
   // Setup the keymap.
   keys.clear();
@@ -413,7 +413,7 @@ Keyboard::initKeyMap() {
   const auto& currentLayout = hidden ? hidden_layout : layout;
 
   for (const auto& row : currentLayout) {
-    int x = (fb->canvas.width - row_size * baseKeyWidth) / 2;
+    int x = (fb->canvas.width() - row_size * baseKeyWidth) / 2;
     for (const auto& key : row) {
       const auto keyWidth = baseKeyWidth * key.width;
 
@@ -504,7 +504,7 @@ Keyboard::drawKey(const Key& key) const {
 void
 Keyboard::draw() const {
   Rect keyboardRect = { { 0, startHeight },
-                        { fb->canvas.width - 1, fb->canvas.height - 1 } };
+                        { fb->canvas.width() - 1, fb->canvas.height() - 1 } };
 
   for (const auto& key : keys) {
     drawKey(key);

@@ -106,14 +106,9 @@ makeEmulatedCanvas() {
     screenSurface, NULL, SDL_MapRGB(screenSurface->format, 0xFF, 0xFF, 0xFF));
   SDL_UpdateWindowSurface(window);
 
-  Canvas canvas;
   emuMem = std::make_unique<uint8_t[]>(canvas_width * canvas_height *
                                        canvas_components);
-  canvas.memory = emuMem.get();
-  canvas.width = canvas_width;
-  canvas.height = canvas_height;
-  canvas.components = canvas_components;
-  return canvas;
+  return Canvas(emuMem.get(), canvas_width, canvas_height, canvas_components);
 }
 
 void
@@ -122,10 +117,9 @@ updateEmulatedCanvas(const Canvas& canvas, Rect region) {
 
   for (int y = region.topLeft.y; y < region.bottomRight.y; y++) {
     for (int x = region.topLeft.x; x < region.bottomRight.x; x++) {
-      auto* pixelPtr =
-        &canvas.memory[y * canvas.lineSize() + x * canvas.components];
+      auto* pixelPtr = canvas.getPtr<>(x, y);
       int32_t pixel = 0;
-      memcpy(&pixel, pixelPtr, canvas.components);
+      memcpy(&pixel, pixelPtr, canvas.components());
 
       // assume rgb565
       auto b = (pixel & 0x1f) << 3;
@@ -149,30 +143,37 @@ FrameBuffer::open() {
   auto canvas = TRY(makeEmulatedCanvas());
   return FrameBuffer(FrameBuffer::Swtcon, 1337, canvas);
 #else
-  Canvas canvas;
+  int components = sizeof(uint16_t);
+  int width;
+  int height;
+  int stride;
 
   auto devType = TRY(device::getDeviceType());
-  const auto fbType = [&canvas, devType] {
+  const auto fbType = [&, devType] {
     switch (devType) {
       default:
       case device::DeviceType::reMarkable1:
         std::cerr << "rM1 currently untested, please open a github issue if "
                      "you encounter any issues\n";
 
-        canvas.width = 1408; // TODO: use ioctl
-        canvas.height = 1872;
+        width = 1404; // TODO: use ioctl
+        height = 1872;
+        stride = 1408 * components;
 
         return rM1;
       case device::DeviceType::reMarkable2:
-        // Not all of the rm2 fb modes support retrieving the size, so hard code
-        // it here.
-        canvas.width = 1404;
-        canvas.height = 1872;
+
+        width = 1404;
+        height = 1872;
+        stride = width * components;
 
         if (getenv("RM2FB_SHIM") != nullptr) {
           std::cerr << "Using rm2fb shim\n";
           return Shim;
         }
+
+        // Not all of the rm2 fb modes support retrieving the size, so hard code
+        // it here.
 
         // check if shared mem exists
         if (access(shm_path, F_OK) == 0) {
@@ -211,11 +212,10 @@ FrameBuffer::open() {
     return Error{ "Error opening " + std::string(path) };
   }
 
-  canvas.components = sizeof(uint16_t);
-  canvas.memory = static_cast<uint8_t*>(mmap(
-    nullptr, canvas.totalSize(), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
+  auto* memory = static_cast<uint8_t*>(
+    mmap(nullptr, stride * height, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
 
-  if (canvas.memory == nullptr) {
+  if (memory == nullptr) {
     ::close(fd);
     return Error{ "Error mapping fb" };
   }
@@ -229,6 +229,7 @@ FrameBuffer::open() {
     }
   }
 
+  Canvas canvas(memory, width, height, stride, components);
   return FrameBuffer(fbType, fd, canvas);
 #endif
 }
@@ -243,10 +244,10 @@ FrameBuffer::close() {
   }
 #else
 
-  if (canvas.memory != nullptr) {
-    munmap(canvas.memory, canvas.totalSize());
+  if (canvas.getMemory() != nullptr) {
+    munmap(canvas.getMemory(), canvas.totalSize());
   }
-  canvas.memory = nullptr;
+  canvas = Canvas{};
 
   if (fd != -1) {
     ::close(fd);
@@ -270,10 +271,25 @@ FrameBuffer::doUpdate(Rect region, Waveform waveform, UpdateFlags flags) const {
 
     update.waveform_mode = static_cast<int>(waveform);
     update.update_mode = (flags & UpdateFlags::FullRefresh) != 0 ? 1 : 0;
-    update.update_region.top = region.topLeft.y;
+
+#define TEMP_USE_REMARKABLE_DRAW 0x0018
+#define EPDC_FLAG_EXP1 0x270ce20
+    update.update_marker = 0;
+    update.dither_mode = EPDC_FLAG_EXP1;
+    update.temp = TEMP_USE_REMARKABLE_DRAW;
+    update.flags = 0;
+
     update.update_region.left = region.topLeft.x;
+    update.update_region.top = region.topLeft.y;
     update.update_region.width = region.width();
     update.update_region.height = region.height();
+
+#ifndef NDEBUG
+    std::cerr << "UPDATE region: {" << update.update_region.left << " "
+              << " " << update.update_region.top << " "
+              << update.update_region.width << " "
+              << update.update_region.height << "}\n";
+#endif
 
     if (type == rM2fb) {
       auto msg = msgq_msg{};

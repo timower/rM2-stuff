@@ -43,8 +43,8 @@ showCalculator(rmlib::fb::FrameBuffer& fb) {
     }
   }
 
-  std::cout << "calc skin size: " << skin->canvas.width << "x"
-            << skin->canvas.height << std::endl;
+  std::cout << "calc skin size: " << skin->canvas.width() << "x"
+            << skin->canvas.height() << std::endl;
 
   rmlib::transform(
     fb.canvas,
@@ -97,7 +97,7 @@ loadKeymap() {
 
 int
 get_scancode(int x, int y) {
-  if (x >= skin->canvas.width || y >= skin->canvas.height) {
+  if (x >= skin->canvas.width() || y >= skin->canvas.height()) {
     return -1;
   }
 

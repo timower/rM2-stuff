@@ -206,7 +206,7 @@ main(int argc, const char* argv[]) {
     goto fb_init_failed;
   }
 
-  if (!term_init(&term, fb->canvas.width, fb->canvas.height)) {
+  if (!term_init(&term, fb->canvas.width(), fb->canvas.height())) {
     logging(FATAL, "terminal initialize failed\n");
     goto term_init_failed;
   }

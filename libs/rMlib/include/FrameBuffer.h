@@ -18,7 +18,7 @@ struct FrameBuffer {
   FrameBuffer(FrameBuffer&& other)
     : type(other.type), fd(other.fd), canvas(other.canvas) {
     other.fd = -1;
-    other.canvas.memory = nullptr;
+    other.canvas = Canvas{};
   }
 
   FrameBuffer(const FrameBuffer&) = delete;

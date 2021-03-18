@@ -176,9 +176,9 @@ Launcher::drawAppsLauncher() {
     int height = (name_text_size + text_margin) * int(apps.size());
     // size.y * apps.size() + text_margin * apps.size(); // - 1) + 3 * margin;
 
-    auto topLeft = Point{ (frameBuffer->canvas.width / 2) - (width / 2), 0 };
+    auto topLeft = Point{ (frameBuffer->canvas.width() / 2) - (width / 2), 0 };
     auto bottomRight =
-      Point{ (frameBuffer->canvas.width / 2) + (width / 2), height };
+      Point{ (frameBuffer->canvas.width() / 2) + (width / 2), height };
     return Rect{ topLeft, bottomRight };
   }();
 
@@ -203,7 +203,7 @@ Launcher::drawAppsLauncher() {
 
     auto textSize = Canvas::getTextSize(displayName, name_text_size);
 
-    int xoffset = (frameBuffer->canvas.width / 2) - (textSize.x / 2);
+    int xoffset = (frameBuffer->canvas.width() / 2) - (textSize.x / 2);
     if (app.isRunning()) {
       xoffset -= (kill_size.x / 2) + margin / 2;
     }

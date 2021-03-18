@@ -189,18 +189,14 @@ Canvas::drawText(std::string_view text, Point location, int size) { // NOLINT
     for (int y = 0; y < h; y++) {
       for (int x = 0; x < w; x++) {
         auto pixel = 0xff - textBuffer[y * w + x];
-        auto pixel565 =
+        uint16_t pixel565 =
           (pixel >> 3) | ((pixel >> 2) << 5) | ((pixel >> 3) << 11);
 
         auto memY = location.y + baseline + y0 + y;
         auto memX = location.x + static_cast<int>(xpos) + x0 + x;
 
-        uint16_t* targetPtr = reinterpret_cast<uint16_t*>(
-          &memory[memY * lineSize() + memX * components]);
+        auto* targetPtr = getPtr<uint16_t>(memX, memY);
         *targetPtr = pixel565;
-
-        // NOLINTNEXTLINE
-        // memory[(memY)*lineSize() + (memX)*components] = (pixel / 16) << 1;
       }
     }
 
@@ -248,53 +244,55 @@ Canvas::drawLine(Point start, Point end, int val) {
 
 std::optional<ImageCanvas>
 ImageCanvas::load(const char* path, int components) {
-  Canvas result;
-  result.memory = stbi_load(
-    path, &result.width, &result.height, &result.components, components);
-  if (result.memory == nullptr) {
+  int width;
+  int height;
+  int imgComponents;
+  auto* mem = stbi_load(path, &width, &height, &imgComponents, components);
+  if (mem == nullptr) {
     return std::nullopt;
   }
 
   if (components != 0) {
-    result.components = components;
+    imgComponents = components;
   }
 
+  Canvas result(mem, width, height, imgComponents);
   return ImageCanvas{ result };
 }
 
 std::optional<ImageCanvas>
 ImageCanvas::load(uint8_t* data, int size, int components) {
-  Canvas result;
-  result.memory = stbi_load_from_memory(
-    data, size, &result.width, &result.height, &result.components, components);
-  if (result.memory == nullptr) {
+  int width;
+  int height;
+  int imgComponents;
+  auto* mem = stbi_load_from_memory(
+    data, size, &width, &height, &imgComponents, components);
+  if (mem == nullptr) {
     return std::nullopt;
   }
 
   if (components != 0) {
-    result.components = components;
+    imgComponents = components;
   }
 
+  Canvas result(mem, width, height, imgComponents);
   return ImageCanvas{ result };
 }
 
 void
 ImageCanvas::release() {
-  if (canvas.memory != nullptr) {
-    stbi_image_free(canvas.memory);
+  if (canvas.getMemory() != nullptr) {
+    stbi_image_free(canvas.getMemory());
   }
-  canvas.memory = nullptr;
+  canvas = Canvas{};
 }
 
 MemoryCanvas::MemoryCanvas(const Canvas& other, Rect rect) {
   // NOLINTNEXTLINE
   memory = std::make_unique<uint8_t[]>(rect.width() * rect.height() *
-                                       other.components);
-  canvas = other;
-  canvas.width = rect.width();
-  canvas.height = rect.height();
-  canvas.memory = memory.get();
-
+                                       other.components());
+  canvas =
+    Canvas(memory.get(), rect.width(), rect.height(), other.components());
   copy(canvas, { 0, 0 }, other, rect);
 }
 

@@ -59,7 +59,7 @@ draw_sixel(rmlib::fb::FrameBuffer& fb, int y_start, int col, uint8_t* pixmap) {
       memcpy(&color, pixmap + src_offset, BYTES_PER_PIXEL);
 
       dst_offset = (y_start + h) * fb.canvas.lineSize() +
-                   (col * CELL_WIDTH + w) * fb.canvas.components;
+                   (col * CELL_WIDTH + w) * fb.canvas.components();
       auto grayMode = brightness2gray(color2brightness(color));
 
       switch (grayMode) {
@@ -73,7 +73,8 @@ draw_sixel(rmlib::fb::FrameBuffer& fb, int y_start, int col, uint8_t* pixmap) {
           pixel = 0;
           break;
       }
-      memcpy(fb.canvas.memory + dst_offset, &pixel, fb.canvas.components);
+      memcpy(
+        fb.canvas.getMemory() + dst_offset, &pixel, fb.canvas.components());
     }
   }
 }
@@ -155,7 +156,7 @@ draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
       }
 
       for (w = 0; w < CELL_WIDTH; w++) {
-        pos = (margin_left + w) * fb.canvas.components +
+        pos = (margin_left + w) * fb.canvas.components() +
               (y_start + h) * fb.canvas.lineSize();
 
         /* set fg or bg */
@@ -181,16 +182,17 @@ draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
         }
 
         /* update copy buffer only */
-        memcpy(fb.canvas.memory + pos, &pixel, fb.canvas.components);
+        memcpy(fb.canvas.getMemory() + pos, &pixel, fb.canvas.components());
       }
     }
   }
 
   /* actual display update (bit blit) */
   // TODO: group updates.
-  fb.doUpdate({ { 0, y_start }, { fb.canvas.width, y_start + CELL_HEIGHT } },
-              rmlib::fb::Waveform::DU,
-              rmlib::fb::UpdateFlags::None);
+  fb.doUpdate(
+    { { 0, y_start }, { fb.canvas.width() - 1, y_start + CELL_HEIGHT - 1 } },
+    rmlib::fb::Waveform::DU,
+    rmlib::fb::UpdateFlags::None);
   update_count++;
 
   /* TODO: page flip

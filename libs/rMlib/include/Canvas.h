@@ -21,24 +21,39 @@ constexpr auto black = 0x0;
 bool
 getGlyph(uint32_t code, uint8_t* bitmap, int height, int* width);
 
-struct Canvas {
-  int lineSize() const { return width * components; }
-  int totalSize() const { return lineSize() * height; }
+class Canvas {
+public:
+  Canvas() = default;
+  Canvas(uint8_t* mem, int width, int height, int components)
+    : memory(mem)
+    , mWidth(width)
+    , mHeight(height)
+    , mComponents(components)
+    , mLineSize(width * components) {}
 
-  Rect rect() const { return { { 0, 0 }, { width - 1, height - 1 } }; }
+  Canvas(uint8_t* mem, int width, int height, int stride, int components)
+    : memory(mem)
+    , mWidth(width)
+    , mHeight(height)
+    , mComponents(components)
+    , mLineSize(stride) {}
+
+  int totalSize() const { return mLineSize * mHeight; }
+
+  Rect rect() const { return { { 0, 0 }, { mWidth - 1, mHeight - 1 } }; }
 
   int getPixel(int x, int y) {
     assert(rect().contains(Point{ x, y }));
     int result = 0;
-    auto* pixel = &memory[y * lineSize() + x * components];
-    memcpy(&result, pixel, components);
+    auto* pixel = &memory[y * mLineSize + x * mComponents];
+    memcpy(&result, pixel, mComponents);
     return result;
   }
 
   void setPixel(Point p, int val) {
     assert(rect().contains(p));
-    auto* pixel = &memory[p.y * lineSize() + p.x * components];
-    memcpy(pixel, &val, components);
+    auto* pixel = &memory[p.y * mLineSize + p.x * mComponents];
+    memcpy(pixel, &val, mComponents);
   }
 
   template<typename Func>
@@ -46,12 +61,12 @@ struct Canvas {
     assert(rect().contains(r.bottomRight) && rect().contains(r.topLeft));
     for (int y = r.topLeft.y; y <= r.bottomRight.y; y++) {
       for (int x = r.topLeft.x; x <= r.bottomRight.x; x++) {
-        auto* pixel = &memory[y * lineSize() + x * components];
+        auto* pixel = &memory[y * mLineSize + x * mComponents];
         int value = 0;
 
-        memcpy(&value, pixel, components);
+        memcpy(&value, pixel, mComponents);
         value = f(x, y, value);
-        memcpy(pixel, &value, components);
+        memcpy(pixel, &value, mComponents);
       }
     }
   }
@@ -66,10 +81,10 @@ struct Canvas {
     assert(rect().contains(r.bottomRight) && rect().contains(r.topLeft));
     for (int y = r.topLeft.y; y <= r.bottomRight.y; y++) {
       for (int x = r.topLeft.x; x <= r.bottomRight.x; x++) {
-        auto* pixel = &memory[y * lineSize() + x * components];
+        auto* pixel = &memory[y * mLineSize + x * mComponents];
         int value = 0;
 
-        memcpy(&value, pixel, components);
+        memcpy(&value, pixel, mComponents);
         func(x, y, value);
       }
     }
@@ -95,12 +110,32 @@ struct Canvas {
 
   void drawLine(Point start, Point end, int val);
 
+  template<typename T = uint8_t>
+  const T* getPtr(int x, int y) const {
+    assert(sizeof(T) == 1 || sizeof(T) == mComponents);
+    return reinterpret_cast<T*>(memory + y * mLineSize + x * mComponents);
+  }
+
+  template<typename T = uint8_t>
+  T* getPtr(int x, int y) {
+    assert(sizeof(T) == 1 || sizeof(T) == mComponents);
+    return reinterpret_cast<T*>(memory + y * mLineSize + x * mComponents);
+  }
+
+  int components() const { return mComponents; }
+  int width() const { return mWidth; }
+  int height() const { return mHeight; }
+  int lineSize() const { return mLineSize; }
+  uint8_t* getMemory() const { return memory; }
+
   // members
+private:
   uint8_t* memory = nullptr;
 
-  int width;
-  int height;
-  int components;
+  int mWidth = 0;
+  int mHeight = 0;
+  int mComponents = 0;
+  int mLineSize = 0;
 };
 
 struct ImageCanvas {
@@ -110,7 +145,7 @@ struct ImageCanvas {
                                          int components = 0);
 
   ImageCanvas(ImageCanvas&& other) : canvas(other.canvas) {
-    other.canvas.memory = nullptr;
+    other.canvas = Canvas{};
   }
 
   ImageCanvas& operator=(ImageCanvas&& other) {
@@ -145,15 +180,13 @@ copy(Canvas& dest,
      const Point& destOffset,
      const Canvas& src,
      const Rect& srcRect) {
-  assert(dest.components == src.components);
+  assert(dest.components() == src.components());
 
   for (int y = srcRect.topLeft.y; y <= srcRect.bottomRight.y; y++) {
-    auto* srcPixel =
-      &src.memory[y * src.lineSize() + srcRect.topLeft.x * src.components];
+    auto* srcPixel = src.getPtr<>(srcRect.topLeft.x, y);
     auto* destPixel =
-      &dest.memory[(y - srcRect.topLeft.y + destOffset.y) * dest.lineSize() +
-                   destOffset.x * dest.components];
-    memcpy(destPixel, srcPixel, srcRect.width() * src.components);
+      dest.getPtr<>(destOffset.x, (y - srcRect.topLeft.y + destOffset.y));
+    memcpy(destPixel, srcPixel, srcRect.width() * src.components());
   }
 }
 
@@ -166,15 +199,14 @@ transform(Canvas& dest,
           Func&& f) {
   for (int y = srcRect.topLeft.y; y <= srcRect.bottomRight.y; y++) {
     for (int x = srcRect.topLeft.x; x <= srcRect.bottomRight.x; x++) {
-      auto* srcPixel = &src.memory[y * src.lineSize() + x * src.components];
+      auto* srcPixel = src.getPtr<>(x, y);
       // TODO: correct offsets
-      auto* destPixel =
-        &dest.memory[(y + destOffset.y - srcRect.topLeft.y) * dest.lineSize() +
-                     (x + destOffset.x - srcRect.topLeft.x) * dest.components];
+      auto* destPixel = dest.getPtr<>((x + destOffset.x - srcRect.topLeft.x),
+                                      (y + destOffset.y - srcRect.topLeft.y));
       int value = 0;
-      memcpy(&value, srcPixel, src.components);
+      memcpy(&value, srcPixel, src.components());
       value = f(x, y, value);
-      memcpy(destPixel, &value, dest.components);
+      memcpy(destPixel, &value, dest.components());
     }
   }
 }
