@@ -9,7 +9,11 @@
 #include <algorithm>
 #include <iostream>
 
+#ifdef __APPLE__
+#include "event-codes.h"
+#else
 #include <linux/input-event-codes.h>
+#endif
 
 using namespace rmlib;
 using namespace rmlib::input;

@@ -97,7 +97,7 @@ makeEmulatedCanvas() {
                             SDL_WINDOWPOS_UNDEFINED,
                             window_width,
                             window_height,
-                            SDL_WINDOW_SHOWN);
+                            SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI);
   if (window == NULL) {
     return Error{ std::string("could not create window:") + SDL_GetError() };
   }

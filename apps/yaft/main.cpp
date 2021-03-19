@@ -15,8 +15,10 @@
 
 #include <iostream>
 
+#ifndef __APPLE__
 #include <linux/kd.h>
 #include <linux/vt.h>
+#endif
 
 static const char* term_name = "yaft-256color";
 static const char* shell_cmd = "/bin/bash";
@@ -42,6 +44,7 @@ sig_handler(int signo) {
     wait(NULL);
   }
 
+#ifndef __APPLE__
   if constexpr (VT_CONTROL) {
     if (signo == SIGUSR1) { /* vt activate */
       vt_active = true;
@@ -60,6 +63,7 @@ sig_handler(int signo) {
       }
     }
   }
+#endif
 }
 
 void
@@ -87,6 +91,7 @@ tty_init(struct termios* termios_orig) {
 
   if (USE_STDIN) {
     if (VT_CONTROL) {
+#ifndef __APPLE__
       esigaction(SIGUSR1, &sigact, NULL);
       esigaction(SIGUSR2, &sigact, NULL);
 
@@ -108,6 +113,7 @@ tty_init(struct termios* termios_orig) {
                   "ioctl: KDSETMODE failed (maybe here is not console)\n ");
         }
       }
+#endif
     }
 
     etcgetattr(STDIN_FILENO, termios_orig);
@@ -124,7 +130,6 @@ void
 tty_die(struct termios* termios_orig) {
   /* no error handling */
   struct sigaction sigact;
-  struct vt_mode vtm;
 
   memset(&sigact, 0, sizeof(struct sigaction));
   sigact.sa_handler = SIG_DFL;
@@ -132,6 +137,8 @@ tty_die(struct termios* termios_orig) {
 
   if (USE_STDIN) {
     if (VT_CONTROL) {
+#ifndef __APPLE__
+      struct vt_mode vtm;
       sigaction(SIGUSR1, &sigact, NULL);
       sigaction(SIGUSR2, &sigact, NULL);
 
@@ -143,6 +150,7 @@ tty_die(struct termios* termios_orig) {
 
       if (FORCE_TEXT_MODE == false)
         ioctl(STDIN_FILENO, KDSETMODE, KD_TEXT);
+#endif
     }
 
     tcsetattr(STDIN_FILENO, TCSAFLUSH, termios_orig);

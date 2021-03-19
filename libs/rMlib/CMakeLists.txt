@@ -2,17 +2,6 @@ project(rMlib)
 
 option(EMULATE "Emulate a rM tablet using SDL" OFF)
 
-find_library(LIBEVDEV_LIBRARY
-  NAMES libevdev.so
-  HINTS "$ENV{SDKTARGETSYSROOT}/usr/lib"
-  REQUIRED)
-
-find_path(LIBEVDEV_INCLUDE_PAR libevdev.h
-  PATH_SUFFIXES libevdev-1.0/libevdev libevdev
-  HINTS "$ENV{SDKTARGETSYSROOT}/usr/include"
-  REQUIRED)
-get_filename_component(LIBEVDEV_INCLUDE_DIR ${LIBEVDEV_INCLUDE_PAR} DIRECTORY)
-
 set(RMLIB_INCLUDES
   include/Canvas.h
   include/Device.h
@@ -21,23 +10,46 @@ set(RMLIB_INCLUDES
   include/Input.h
   include/MathUtil.h)
 
-add_library(${PROJECT_NAME} STATIC
-  Input.cpp
+set(RMLIB_SOURCES
   Device.cpp
   FrameBuffer.cpp
-  Canvas.cpp)
+  Canvas.cpp
+  Gesture.cpp)
+
+if (APPLE)
+  set(RMLIB_SOURCES ${RMLIB_SOURCES} InputApple.cpp)
+else()
+  set(RMLIB_SOURCES ${RMLIB_SOURCES} Input.cpp)
+endif()
+add_library(${PROJECT_NAME} STATIC ${RMLIB_SOURCES})
+
 
 target_include_directories(${PROJECT_NAME}
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
   PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${LIBEVDEV_INCLUDE_DIR})
+    ${CMAKE_CURRENT_SOURCE_DIR})
 
-target_link_libraries(${PROJECT_NAME}
-  PRIVATE
-    ${LIBEVDEV_LIBRARY}
-    udev)
+if (NOT APPLE)
+  find_library(LIBEVDEV_LIBRARY
+    NAMES libevdev.so
+    HINTS "$ENV{SDKTARGETSYSROOT}/usr/lib"
+    REQUIRED)
+
+  find_path(LIBEVDEV_INCLUDE_PAR libevdev.h
+    PATH_SUFFIXES libevdev-1.0/libevdev libevdev
+    HINTS "$ENV{SDKTARGETSYSROOT}/usr/include"
+    REQUIRED)
+  get_filename_component(LIBEVDEV_INCLUDE_DIR ${LIBEVDEV_INCLUDE_PAR} DIRECTORY)
+
+  target_link_libraries(${PROJECT_NAME}
+    PRIVATE
+      ${LIBEVDEV_LIBRARY}
+      udev)
+
+    target_include_directories(${PROJECT_NAME}
+      PRIVATE ${LIBEVDEV_INCLUDE_DIR})
+endif()
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
 

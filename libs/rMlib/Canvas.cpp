@@ -16,7 +16,11 @@ namespace rmlib {
 
 namespace {
 #ifdef EMULATE
+#ifdef __APPLE__
+constexpr auto font_path = "/System/Library/Fonts/SFNSMono.ttf";
+#else
 constexpr auto font_path = "/usr/share/fonts/TTF/DejaVuSansMono.ttf";
+#endif
 #else
 constexpr auto font_path = "/usr/share/fonts/ttf/noto/NotoMono-Regular.ttf";
 #endif
