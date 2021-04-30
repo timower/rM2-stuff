@@ -12,6 +12,9 @@ namespace rmlib::device {
 
 enum class DeviceType { reMarkable1, reMarkable2 };
 
+ErrorOr<std::string>
+readFile(std::string_view path);
+
 /// \returns The device type on which we're currently running or nullopt if
 /// detection fails.
 ErrorOr<DeviceType>

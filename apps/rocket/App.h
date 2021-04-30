@@ -25,7 +25,10 @@ struct AppDescription {
   std::string command;
   std::string icon;
 
-  static std::optional<AppDescription> read(std::string_view path);
+  std::optional<rmlib::ImageCanvas> iconImage;
+
+  static std::optional<AppDescription> read(std::string_view path,
+                                            std::string_view iconDir);
 };
 
 std::vector<AppDescription>

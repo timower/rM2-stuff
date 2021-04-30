@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cassert>
+#include <cstring>
+
 #include <string>
 #include <variant>
 
@@ -8,6 +10,8 @@ struct NoError {};
 
 struct Error {
   std::string msg;
+
+  static Error errn() { return Error{ strerror(errno) }; }
 };
 
 template<typename T, typename Err = Error>

@@ -43,7 +43,7 @@ endsWith(std::string_view a, std::string_view end) {
 } // namespace
 
 std::optional<AppDescription>
-AppDescription::read(std::string_view path) {
+AppDescription::read(std::string_view path, std::string_view iconDir) {
   std::ifstream ifs(path.data());
   if (!ifs.is_open()) {
     return std::nullopt;
@@ -75,11 +75,21 @@ AppDescription::read(std::string_view path) {
     return std::nullopt;
   }
 
-  return result;
+  if (!result.icon.empty()) {
+    auto iconPath = std::string(iconDir) + '/' + result.icon + ".png";
+    std::cout << "Parsing image from: " << iconPath << std::endl;
+    result.iconImage = ImageCanvas::load(iconPath.c_str());
+    if (result.iconImage.has_value()) {
+      std::cout << result.iconImage->canvas.components() << std::endl;
+    }
+  }
+
+  return std::optional(std::move(result));
 }
 
 std::vector<AppDescription>
 readAppFiles(std::string_view directory) {
+  const auto iconPath = std::string(directory) + "/icons";
   const auto paths = device::listDirectory(directory);
 
   std::vector<AppDescription> result;
@@ -90,7 +100,7 @@ readAppFiles(std::string_view directory) {
       continue;
     }
 
-    auto appDesc = AppDescription::read(path);
+    auto appDesc = AppDescription::read(path, iconPath);
     if (!appDesc.has_value()) {
       std::cerr << "error parsing file: " << path << std::endl;
       continue;
@@ -127,7 +137,7 @@ App::stop() {
     kill(-runInfo->pid, SIGCONT);
   }
 
-  kill(runInfo->pid, SIGINT);
+  kill(-runInfo->pid, SIGTERM);
 }
 
 void

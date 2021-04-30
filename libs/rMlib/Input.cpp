@@ -159,18 +159,14 @@ PenDevice::handleEvent(input_event event) {
     if (event.code == BTN_TOOL_PEN) {
       if (event.value == KeyEvent::Press) {
         penEvent.type = PenEvent::ToolClose;
-        // setType = true;
       } else {
         penEvent.type = PenEvent::ToolLeave;
-        // setType = true;
       }
     } else if (event.code == BTN_TOUCH) {
       if (event.value == KeyEvent::Press) {
         penEvent.type = PenEvent::TouchDown;
-        // setType = true;
       } else {
         penEvent.type = PenEvent::TouchUp;
-        // setType = true;
       }
     }
   }
@@ -459,7 +455,7 @@ InputManager::open(std::string_view input) {
   return open(input, optTransform.has_value() ? *optTransform : Transform{});
 }
 
-ErrorOr<FileDescriptors>
+ErrorOr<BaseDevices>
 InputManager::openAll(bool monitor) {
   udev* udevHandle =
     this->udevHandle == nullptr ? udev_new() : this->udevHandle;
@@ -503,7 +499,8 @@ InputManager::openAll(bool monitor) {
   auto* pen = devices.at(paths.penPath).get();
   auto* key = devices.at(paths.buttonPath).get();
 
-  return FileDescriptors{ *pen, *touch, *key };
+  baseDevices.emplace(BaseDevices{ *pen, *touch, *key });
+  return *baseDevices;
 }
 
 ErrorOr<std::vector<Event>>

@@ -15,6 +15,7 @@
 
 #ifdef EMULATE
 #include <SDL.h>
+#include <chrono>
 // #include <SDL2/SDL.h>
 #else
 #include "mxcfb.h"
@@ -103,36 +104,67 @@ makeEmulatedCanvas() {
   }
   auto* screenSurface = SDL_GetWindowSurface(window);
   SDL_FillRect(
-    screenSurface, NULL, SDL_MapRGB(screenSurface->format, 0xFF, 0xFF, 0xFF));
+
+    screenSurface,
+    NULL,
+    SDL_MapRGB(screenSurface->format, 0x1F << 3, 0x1F << 3, 0x1F << 3));
   SDL_UpdateWindowSurface(window);
 
-  emuMem = std::make_unique<uint8_t[]>(canvas_width * canvas_height *
-                                       canvas_components);
+  const auto memSize = canvas_width * canvas_height * canvas_components;
+  emuMem = std::make_unique<uint8_t[]>(memSize);
+  memset(emuMem.get(), 0xaa, memSize);
   return Canvas(emuMem.get(), canvas_width, canvas_height, canvas_components);
 }
 
 void
 updateEmulatedCanvas(const Canvas& canvas, Rect region) {
+  std::cout << "Update: " << region << "\n";
   auto* surface = SDL_GetWindowSurface(window);
 
-  for (int y = region.topLeft.y; y < region.bottomRight.y; y++) {
-    for (int x = region.topLeft.x; x < region.bottomRight.x; x++) {
-      auto* pixelPtr = canvas.getPtr<>(x, y);
-      int32_t pixel = 0;
-      memcpy(&pixel, pixelPtr, canvas.components());
+  const auto getGrey = [&canvas](int x, int y) {
+    const auto rgb = *canvas.getPtr<uint16_t>(x, y);
+    const auto r = rgb & 0x1f;
+    return r << 3;
+  };
+
+  static int color = 0;
+  color = (color + 1) % 3;
+  const auto surfStart = region.topLeft / EMULATE_SCALE;
+  const auto surfEnd = region.bottomRight / EMULATE_SCALE;
+
+  for (int y = surfStart.y; y <= surfEnd.y; y++) {
+    for (int x = surfStart.x; x <= surfEnd.x; x++) {
+
+      auto pixel = getGrey(x * EMULATE_SCALE, y * EMULATE_SCALE);
+#if EMULATE_SCALE > 1
+      pixel += getGrey(x * EMULATE_SCALE + 1, y * EMULATE_SCALE);
+      pixel += getGrey(x * EMULATE_SCALE, y * EMULATE_SCALE + 1);
+      pixel += getGrey(x * EMULATE_SCALE + 1, y * EMULATE_SCALE + 1);
+      pixel /= 4;
+#endif
 
       // assume rgb565
-      auto b = (pixel & 0x1f) << 3;
-      auto g = ((pixel >> 5) & 0x3f) << 2;
-      auto r = ((pixel >> 11) & 0x1f) << 3;
+      int r = pixel;
+      int g = pixel;
+      int b = pixel;
 
-      putpixel(surface,
-               x / EMULATE_SCALE,
-               y / EMULATE_SCALE,
-               SDL_MapRGB(surface->format, r, g, b));
+      if (y == surfStart.y || y == surfEnd.y || x == surfStart.x ||
+          x == surfEnd.x) {
+        r = color == 2 ? 0xff : 0x00;
+        g = color == 1 ? 0xff : 0x00;
+        b = color == 0 ? 0xff : 0x00;
+      }
+
+      putpixel(surface, x, y, SDL_MapRGB(surface->format, r, g, b));
     }
   }
-  SDL_UpdateWindowSurface(window);
+
+  SDL_Rect rect;
+  rect.x = region.topLeft.x / EMULATE_SCALE;
+  rect.y = region.topLeft.y / EMULATE_SCALE;
+  rect.w = region.width() / EMULATE_SCALE + 1;
+  rect.h = region.height() / EMULATE_SCALE + 1;
+  SDL_UpdateWindowSurfaceRects(window, &rect, 1);
 }
 #endif // EMULATE
 } // namespace
@@ -264,6 +296,7 @@ FrameBuffer::~FrameBuffer() {
 void
 FrameBuffer::doUpdate(Rect region, Waveform waveform, UpdateFlags flags) const {
 #ifdef EMULATE
+  std::cout << (waveform == Waveform::DU ? "DU" : "Other") << " ";
   updateEmulatedCanvas(canvas, region);
 #else
   if (type != Swtcon) {
@@ -285,7 +318,20 @@ FrameBuffer::doUpdate(Rect region, Waveform waveform, UpdateFlags flags) const {
     update.update_region.height = region.height();
 
 #ifndef NDEBUG
-    std::cerr << "UPDATE region: {" << update.update_region.left << " "
+    const auto waveformStr = [waveform] {
+      switch (waveform) {
+        case Waveform::DU:
+          return "DU";
+        case Waveform::GC16:
+          return "GC16";
+        case Waveform::GC16Fast:
+          return "GC16Fast";
+        default:
+          return "???";
+      }
+    }();
+    std::cerr << "UPDATE " << waveformStr << " region: {"
+              << update.update_region.left << " "
               << " " << update.update_region.top << " "
               << update.update_region.width << " "
               << update.update_region.height << "}\n";

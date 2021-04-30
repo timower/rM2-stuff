@@ -30,13 +30,13 @@ InputManager::InputManager() {}
 
 InputManager::~InputManager() {}
 
-ErrorOr<FileDescriptors>
+ErrorOr<BaseDevices>
 InputManager::openAll(bool monitor) {
   auto fakeDev = std::make_unique<FakeInputDevice>();
   auto& fakeDevRef = *fakeDev;
   devices.emplace("Test", std::move(fakeDev));
 
-  return FileDescriptors{ fakeDevRef, fakeDevRef, fakeDevRef };
+  return BaseDevices{ fakeDevRef, fakeDevRef, fakeDevRef };
 }
 
 ErrorOr<std::vector<Event>>
@@ -46,6 +46,10 @@ InputManager::waitForInput(fd_set& fdSet,
   static bool down = false;
 
   std::thread selectThread([maxFd, &fdSet, &timeout]() {
+    if (maxFd == 0 && !FD_ISSET(0, &fdSet)) {
+      return;
+    }
+
     auto tv = timeval{ 0, 0 };
     if (timeout.has_value()) {
       constexpr auto second_in_usec =

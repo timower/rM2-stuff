@@ -49,6 +49,29 @@ const InputPaths rm2_paths = {
 };
 } // namespace
 
+ErrorOr<std::string>
+readFile(std::string_view path) {
+  assert(path[path.length()] == '\0' && "path must be null terminated");
+  FILE* f = fopen(&path[0], "rb");
+  if (f == nullptr) {
+    return Error::errn();
+  }
+
+  fseek(f, 0, SEEK_END);
+  const unsigned long size = ftell(f);
+  fseek(f, 0, SEEK_SET);
+
+  std::string result(size + 1, '\0');
+  auto read = fread(result.data(), size, 1, f);
+  if (read != size && !(read == 0 && feof(f))) {
+    fclose(f);
+    return Error{ "Only read: " + std::to_string(read) + " bytes?" };
+  }
+
+  fclose(f);
+  return result;
+}
+
 ErrorOr<DeviceType>
 getDeviceType() {
 #ifdef EMULATE
