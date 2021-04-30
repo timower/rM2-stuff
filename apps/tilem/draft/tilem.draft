@@ -1,0 +1,8 @@
+# Copyright (c) 2020 The Toltec Contributors
+# SPDX-License-Identifier: MIT
+
+name=TilEm
+desc=TI-84+ emulator
+call=/opt/bin/tilem /home/root/ti84plus.rom
+term=:
+imgFile=tilem
