@@ -26,7 +26,7 @@ using namespace rmlib::input;
 namespace {
 
 constexpr auto calc_save_extension = ".sav";
-constexpr auto calc_default_rom = "ti84p.rom";
+constexpr auto calc_default_rom = "/home/root/ti84plus.rom";
 
 const auto FPS = 100;
 const auto TPS = std::chrono::milliseconds(1000) / FPS;
@@ -370,7 +370,7 @@ protected:
         float subX = 0;
         for (int x = rect.topLeft.x; x <= rect.bottomRight.x; x++) {
           const uint8_t data = lcdRow[int(subX)];
-          const uint8_t pixel = data ? 0 : 0xff;
+          const uint16_t pixel = data ? black : white;
 
           *canvasPtr = pixel;
 
@@ -506,10 +506,10 @@ public:
   auto header(AppContext& context, int width) const {
     constexpr auto fontSize = 48;
     // TODO: expand option
-    return Cleared(Border(
-      Row(Sized(Text("Tilem", fontSize), width - fontSize - 2, std::nullopt),
+    return Border(
+      Row(Sized(Text("TilEm", fontSize), width - fontSize - 2, std::nullopt),
           closeButton(context, fontSize)),
-      Insets::all(1)));
+      Insets::all(1));
   }
 
   auto build(AppContext& context, const BuildContext& buildCtx) const {
@@ -517,10 +517,11 @@ public:
     constexpr auto scale = 6.5;
     constexpr auto width = scale * 96;
     constexpr auto height = scale * 64;
-    return Center(Border(Column(header(context, width),
-                                Sized(Screen(mCalc), width, height),
-                                Sized(Keypad(mCalc), width, std::nullopt)),
-                         Insets::all(1)));
+    return Cleared(
+      Center(Border(Column(header(context, width),
+                           Sized(Screen(mCalc), width, height),
+                           Sized(Keypad(mCalc), width, std::nullopt)),
+                    Insets::all(1))));
   }
 
   ~CalcState() {

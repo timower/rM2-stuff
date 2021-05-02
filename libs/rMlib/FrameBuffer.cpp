@@ -121,10 +121,12 @@ updateEmulatedCanvas(const Canvas& canvas, Rect region) {
   std::cout << "Update: " << region << "\n";
   auto* surface = SDL_GetWindowSurface(window);
 
-  const auto getGrey = [&canvas](int x, int y) {
+  const auto getPixel = [&canvas](int x, int y) {
     const auto rgb = *canvas.getPtr<uint16_t>(x, y);
-    const auto r = rgb & 0x1f;
-    return r << 3;
+    const auto b = (rgb & 0x1f) << 3;
+    const auto g = ((rgb >> 5) & 0x3f) << 2;
+    const auto r = ((rgb >> 11) & 0x1f) << 3;
+    return std::array{ r, g, b };
   };
 
   static int color = 0;
@@ -135,18 +137,24 @@ updateEmulatedCanvas(const Canvas& canvas, Rect region) {
   for (int y = surfStart.y; y <= surfEnd.y; y++) {
     for (int x = surfStart.x; x <= surfEnd.x; x++) {
 
-      auto pixel = getGrey(x * EMULATE_SCALE, y * EMULATE_SCALE);
+      auto pixel = getPixel(x * EMULATE_SCALE, y * EMULATE_SCALE);
 #if EMULATE_SCALE > 1
-      pixel += getGrey(x * EMULATE_SCALE + 1, y * EMULATE_SCALE);
-      pixel += getGrey(x * EMULATE_SCALE, y * EMULATE_SCALE + 1);
-      pixel += getGrey(x * EMULATE_SCALE + 1, y * EMULATE_SCALE + 1);
-      pixel /= 4;
+      const auto pixel1 = getPixel(x * EMULATE_SCALE + 1, y * EMULATE_SCALE);
+      const auto pixel2 = getPixel(x * EMULATE_SCALE, y * EMULATE_SCALE + 1);
+      const auto pixel3 =
+        getPixel(x * EMULATE_SCALE + 1, y * EMULATE_SCALE + 1);
+
+      pixel = {
+        (pixel[0] + pixel1[0] + pixel2[0] + pixel3[0]) / 4,
+        (pixel[1] + pixel1[1] + pixel2[1] + pixel3[1]) / 4,
+        (pixel[2] + pixel1[2] + pixel2[2] + pixel3[2]) / 4,
+      };
 #endif
 
       // assume rgb565
-      int r = pixel;
-      int g = pixel;
-      int b = pixel;
+      int r = pixel[0];
+      int g = pixel[1];
+      int b = pixel[2];
 
       if (y == surfStart.y || y == surfEnd.y || x == surfStart.x ||
           x == surfEnd.x) {

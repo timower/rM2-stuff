@@ -85,9 +85,10 @@ protected:
     if (!this->widget->child.has_value()) {
       if (this->widget->background != nullptr) {
         const auto offset =
-          (rect.size() - this->widget->background->rect().size()) / 2;
+          rect.align(this->widget->background->rect().size(), 0.5f, 0.5f)
+            .topLeft;
         copy(canvas,
-             offset.toPoint(),
+             offset,
              *this->widget->background,
              this->widget->background->rect());
         return UpdateRegion{ rect };
