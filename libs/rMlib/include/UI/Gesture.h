@@ -62,9 +62,6 @@ class GestureRenderObject
 public:
   using SingleChildRenderObject<
     GestureDetector<Child>>::SingleChildRenderObject;
-  // GestureRenderObject(const GestureDetector<Child>& widget)
-  //   : SingleChildRenderObject(widget.child.createRenderObject())
-  //   , widget(&widget) {}
 
   void handleInput(const rmlib::input::Event& ev) final {
     if (this->widget->gestures.onAny) {
@@ -144,11 +141,4 @@ public:
   Gestures gestures;
 };
 
-auto
-Button(std::string text, Callback onTap) {
-  return GestureDetector(
-    Container(
-      Text(std::move(text)), Insets::all(2), Insets::all(2), Insets::all(1)),
-    Gestures{}.OnTap(std::move(onTap)));
-}
 } // namespace rmlib

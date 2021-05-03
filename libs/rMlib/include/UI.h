@@ -10,7 +10,9 @@
 #include <UI/Flex.h>
 #include <UI/Wrap.h>
 
+#include <UI/Button.h>
 #include <UI/Gesture.h>
+
 #include <UI/Image.h>
 #include <UI/Layout.h>
 #include <UI/Text.h>

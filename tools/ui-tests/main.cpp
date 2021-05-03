@@ -210,7 +210,8 @@ navTest() {
 int
 main() {
   // auto optErr = runApp(Center(Row(Text("Test:"), CounterTest())));
-  auto optErr = runApp(navTest());
+  auto optErr =
+    runApp(Center(Button("TestButton", [] { std::cout << "Click\n"; })));
 
   if (optErr.isError()) {
     std::cerr << optErr.getError().msg << "\n";

@@ -12,11 +12,6 @@ class CenterRenderObject : public SingleChildRenderObject<Center<Child>> {
 public:
   using SingleChildRenderObject<Center<Child>>::SingleChildRenderObject;
 
-  // CenterRenderObject(const Center<Child>& widget)
-  //   :
-  //   SingleChildRenderObject<Center<Child>>(widget.child.createRenderObject())
-  //   , widget(&widget) {}
-
   Size doLayout(const Constraints& constraints) override {
     childSize = this->child->layout(Constraints{ { 0, 0 }, constraints.max });
 
@@ -70,9 +65,6 @@ template<typename Child>
 class PaddingRenderObject : public SingleChildRenderObject<Padding<Child>> {
 public:
   using SingleChildRenderObject<Padding<Child>>::SingleChildRenderObject;
-  // PaddingRenderObject(const Padding<Child>& widget)
-  //   : SingleChildRenderObject(widget.child.createRenderObject())
-  //   , widget(&widget) {}
 
   void update(const Padding<Child>& newWidget) {
     if (/*newWidget.insets != widget->insets*/ false) {
@@ -120,14 +112,16 @@ template<typename Child>
 class BorderRenderObject : public SingleChildRenderObject<Border<Child>> {
 public:
   using SingleChildRenderObject<Border<Child>>::SingleChildRenderObject;
-  // BorderRenderObject(const Border<Child>& widget)
-  //   : SingleChildRenderObject(widget.child.createRenderObject())
-  //   , widget(&widget) {}
 
   void update(const Border<Child>& newWidget) {
     if (this->widget->size != newWidget.size) {
       this->markNeedsLayout();
-      this->markNeedsDraw();
+    }
+
+    if (this->widget->color != newWidget.color) {
+      // Only mark ourselves, our child shouldn't be redrawn.
+      // Also use partial draw so our region isn't cleared.
+      RenderObject::markNeedsDraw(/* full */ false);
     }
 
     this->widget = &newWidget;
@@ -150,10 +144,12 @@ protected:
   UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) override {
     auto result = this->child->draw(this->widget->size.shrink(rect), canvas);
 
-    if (this->isFullDraw()) {
-      const auto drawLine = [&canvas](Point a, Point b, Point dir, int size) {
+    /// Only redraw the border if we're marked for redrawing, ignore our child.
+    if (RenderObject::getNeedsDraw()) {
+      const auto drawLine = [color = this->widget->color,
+                             &canvas](Point a, Point b, Point dir, int size) {
         for (int i = 0; i < size; i++) {
-          canvas.drawLine(a, b, black);
+          canvas.drawLine(a, b, color);
           a += dir;
           b += dir;
         }
@@ -187,7 +183,8 @@ template<typename Child>
 class Border : public Widget<BorderRenderObject<Child>> {
 private:
 public:
-  Border(Child child, Insets size) : child(std::move(child)), size(size) {}
+  Border(Child child, Insets size, int color = black)
+    : child(std::move(child)), size(size), color(color) {}
 
   std::unique_ptr<RenderObject> createRenderObject() const {
     return std::make_unique<BorderRenderObject<Child>>(*this);
@@ -195,6 +192,7 @@ public:
 
   Child child;
   Insets size;
+  int color;
 };
 
 template<class Child>
@@ -204,9 +202,6 @@ template<typename Child>
 class SizedRenderObject : public SingleChildRenderObject<Sized<Child>> {
 public:
   using SingleChildRenderObject<Sized<Child>>::SingleChildRenderObject;
-  // SizedRenderObject(const Sized<Child>& widget)
-  //   : SingleChildRenderObject(widget.child.createRenderObject())
-  //   , widget(&widget) {}
 
   void update(const Sized<Child>& newWidget) {
     if (newWidget.width != this->widget->width ||
@@ -285,9 +280,6 @@ template<typename Child>
 class ClearedRenderObject : public SingleChildRenderObject<Cleared<Child>> {
 public:
   using SingleChildRenderObject<Cleared<Child>>::SingleChildRenderObject;
-  // ClearedRenderObject(const Cleared<Child>& widget)
-  //   : SingleChildRenderObject(widget.child.createRenderObject())
-  //   , widget(&widget) {}
 
   void update(const Cleared<Child>& newWidget) {
     if (newWidget.color != this->widget->color) {
@@ -337,9 +329,6 @@ class PositionedRenderObject
   : public SingleChildRenderObject<Positioned<Child>> {
 public:
   using SingleChildRenderObject<Positioned<Child>>::SingleChildRenderObject;
-  // PositionedRenderObject(const Positioned<Child>& widget)
-  //   : SingleChildRenderObject(widget.child.createRenderObject())
-  //   , widget(&widget) {}
 
   void update(const Positioned<Child>& newWidget) {
     if (newWidget.position != this->widget->position) {
