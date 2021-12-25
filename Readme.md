@@ -18,7 +18,7 @@ An TI-84+ calculator emulator for the remarkable.
 
 <img src="doc/tilem.png" width=500/>
 
-To use simply execute `tilem` in a folder containing a `ti84p.rom` ROM file or provide the rom file as a command line argument.
+To use simply execute `tilem` in a folder containing a `ti84plus.rom` ROM file or provide the rom file as a command line argument.
 On the reMarkable 2 the rm2-fb client shim will need to be available.
 
 [Yaft](apps/yaft)
