@@ -3,7 +3,25 @@
 #include <UI/RenderObject.h>
 #include <UI/Widget.h>
 
+#include <numeric>
+
 namespace rmlib {
+
+template<typename Child>
+class Expanded {
+public:
+  Expanded(Child child, float flex = 1.0f)
+    : child(std::move(child)), flex(flex) {}
+
+  std::unique_ptr<RenderObject> createRenderObject() const {
+    return child.createRenderObject();
+  }
+
+  void update(RenderObject& ro) const { child.update(ro); }
+
+  Child child;
+  float flex;
+};
 
 template<typename... Children>
 class Flex;
@@ -52,7 +70,13 @@ protected:
         : Constraints{ { 0, constraints.min.height },
                        { Constraints::unbound, constraints.max.height } };
 
+    // First layout non flex children with unbounded contraints.
     for (auto i = 0u; i < num_children; i++) {
+      if (this->widget->flexes[i] != 0) {
+        continue;
+      }
+
+      // TODO: DRY
       const auto newSize = this->children[i]->layout(childConstraints);
       if (isVertical() ? newSize.height != childSizes[i].height
                        : newSize.width != childSizes[i].width) {
@@ -72,6 +96,45 @@ protected:
 
     assert(result.height <= constraints.max.height && "Flex too large");
     assert(result.width <= constraints.max.width && "Flex too wide");
+
+    // Divide the remaining space.
+    const auto totalFlex = std::accumulate(
+      this->widget->flexes.begin(), this->widget->flexes.end(), 0);
+    const auto remainingSpace = isVertical()
+                                  ? constraints.max.height - result.height
+                                  : constraints.max.width - result.width;
+
+    for (auto i = 0u; i < num_children; i++) {
+      if (this->widget->flexes[i] == 0) {
+        continue;
+      }
+
+      const auto sizeAllocation = int(remainingSpace / totalFlex);
+      const auto childConstraints =
+        isVertical()
+          ? Constraints{ { constraints.min.width, sizeAllocation },
+                         { constraints.max.width, sizeAllocation } }
+          : Constraints{ { sizeAllocation, constraints.min.height },
+                         { sizeAllocation, constraints.max.height } };
+
+      const auto newSize = this->children[i]->layout(childConstraints);
+
+      // TODO: DRY
+      if (isVertical() ? newSize.height != childSizes[i].height
+                       : newSize.width != childSizes[i].width) {
+        this->markNeedsDraw();
+      }
+
+      childSizes[i] = newSize;
+
+      if (isVertical()) {
+        result.height += childSizes[i].height;
+        result.width = std::max(childSizes[i].width, result.width);
+      } else {
+        result.width += childSizes[i].width;
+        result.height = std::max(childSizes[i].height, result.height);
+      }
+    }
 
     totalSize = isVertical() ? result.height : result.width;
 
@@ -132,9 +195,26 @@ private:
 template<typename... Children>
 class Flex : public Widget<FlexRenderObject<Children...>> {
 private:
+  template<typename T>
+  struct IsExpanded : std::false_type {};
+
+  template<typename T>
+  struct IsExpanded<Expanded<T>> : std::true_type {};
+
+  template<typename T>
+  static float GetFlex(const T& t) {
+    if constexpr (IsExpanded<T>::value) {
+      return t.flex;
+    } else {
+      return 0;
+    }
+  }
+
 public:
   Flex(Axis axis, Children... children)
-    : children(std::move(children)...), axis(axis) {}
+    : flexes{ GetFlex(children)... }
+    , children(std::move(children)...)
+    , axis(axis) {}
 
   std::unique_ptr<RenderObject> createRenderObject() const {
     return std::make_unique<FlexRenderObject<Children...>>(*this);
@@ -142,6 +222,8 @@ public:
 
 private:
   friend class FlexRenderObject<Children...>;
+
+  std::array<float, sizeof...(Children)> flexes;
   std::tuple<Children...> children;
   Axis axis;
 };

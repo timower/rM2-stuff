@@ -1,6 +1,9 @@
 #pragma once
 
 #ifdef __cplusplus
+
+#include <cstdint>
+
 extern "C" {
 #endif
 

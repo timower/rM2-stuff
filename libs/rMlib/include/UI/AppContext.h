@@ -65,11 +65,47 @@ public:
 
   const Canvas& getFbCanvas() const { return canvas; }
 
+  void listenFd(int fd, Callback callback) {
+    extraFds.emplace(fd, std::move(callback));
+  }
+
+  ErrorOr<std::vector<input::Event>> waitForInput(
+    std::optional<std::chrono::microseconds> durantion) {
+    if (!extraFds.empty()) {
+      int maxFd = std::max_element(extraFds.begin(),
+                                   extraFds.end(),
+                                   [](const auto& a, const auto& b) {
+                                     return a.first < b.first;
+                                   })
+                    ->first;
+
+      fd_set set;
+      FD_ZERO(&set);
+      for (const auto& [fd, _] : extraFds) {
+        FD_SET(fd, &set);
+      }
+
+      auto evs = TRY(inputManager.waitForInput(set, maxFd, durantion));
+
+      for (const auto& [fd, cb] : extraFds) {
+        if (FD_ISSET(fd, &set)) {
+          cb();
+        }
+      }
+
+      return evs;
+    } else {
+      return inputManager.waitForInput(durantion);
+    }
+  }
+
 private:
   input::InputManager inputManager;
   TimerQueue timers;
   std::vector<Callback> doLaters;
   Canvas& canvas;
+
+  std::unordered_map<int, Callback> extraFds;
 
   bool mShouldStop = false;
 };

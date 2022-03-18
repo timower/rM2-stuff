@@ -23,7 +23,7 @@ struct BuildContext {
 };
 
 class RenderObject {
-  static int roCount;
+  static inline int roCount = 0;
 
 public:
   RenderObject(typeID::type_id_t typeID) : mTypeID(typeID), mID(roCount++) {
@@ -159,8 +159,6 @@ protected:
   bool mInRebuild = false;
 #endif
 };
-
-int RenderObject::roCount = 0;
 
 template<typename Widget>
 class LeafRenderObject : public RenderObject {

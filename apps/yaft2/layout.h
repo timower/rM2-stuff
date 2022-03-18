@@ -1,0 +1,49 @@
+#pragma once
+
+#include <string_view>
+#include <vector>
+
+struct KeyInfo {
+  std::string_view name;
+  int code;
+
+  std::string_view altName = "";
+  int altCode = 0;
+
+  int width = 1;
+};
+
+struct Layout {
+  std::vector<std::vector<KeyInfo>> rows;
+
+  std::size_t numRows() const { return rows.size(); }
+  std::size_t numCols() const;
+};
+
+enum SpecialKeys {
+  Escape = 0x1000000,
+  Tab,
+  Backspace,
+  Enter,
+  Del,
+  Home,
+  End,
+
+  Left,
+  Up,
+  Right,
+  Down,
+
+  PageUp,
+  PageDown
+
+};
+
+enum ModifierKeys {
+  Shift = 0x2000000,
+  Ctrl = 0x4000000,
+  Alt = 0x8000000,
+};
+
+extern const Layout qwerty_layout;
+extern const Layout hidden_layout;

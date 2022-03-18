@@ -30,9 +30,9 @@
 namespace rmlib {
 
 namespace details {
-static AppContext* currentContext = nullptr;
+static inline AppContext* currentContext = nullptr;
 
-void
+inline void
 stop(int signal) {
   currentContext->stop();
 }
@@ -72,7 +72,7 @@ runApp(AppWidget widget) {
     }
 
     const auto duration = context.getNextDuration();
-    const auto evsOrError = context.getInputManager().waitForInput(duration);
+    const auto evsOrError = context.waitForInput(duration);
     context.checkTimers();
     context.doAllLaters();
 
