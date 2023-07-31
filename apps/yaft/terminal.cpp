@@ -378,12 +378,14 @@ term_die(struct terminal_t* term) {
 }
 
 bool
-term_init(struct terminal_t* term, int width, int height) {
+term_init(struct terminal_t* term, int width, int height, bool isLandscape) {
   extern const uint32_t color_list[COLORS]; /* global */
 
   term->width = width;
   term->height = height;
+  term->isLandscape = isLandscape;
 
+  /* 1 px margin on edges */
   term->cols = (term->width - 2) / CELL_WIDTH;
   term->lines = (term->height - 2) / CELL_HEIGHT;
 
@@ -448,12 +450,13 @@ term_init(struct terminal_t* term, int width, int height) {
 }
 
 void
-term_resize(struct terminal_t* term, int width, int height) {
-  if (width == term->width && height == term->height)
+term_resize(struct terminal_t* term, int width, int height, bool isLandscape) {
+  if (width == term->width && height == term->height && isLandscape == term->isLandscape)
     return;
 
   term->width = width;
   term->height = height;
+  term->isLandscape = isLandscape;
 
   term->cols = term->width / CELL_WIDTH;
   term->lines = term->height / CELL_HEIGHT;

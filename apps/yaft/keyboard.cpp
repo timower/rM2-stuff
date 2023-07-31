@@ -397,12 +397,21 @@ Keyboard::init(rmlib::fb::FrameBuffer& fb, terminal_t& term) {
 
 void
 Keyboard::initKeyMap() {
+  // do physical keys:
+  for (const auto& keyInfo : keymap) {
+    physicalKeys.emplace(keyInfo.code, PhysicalKey{ keyInfo });
+  }
+
+  if (term->isLandscape) {
+    return;
+  }
+
   baseKeyWidth = fb->canvas.width() / row_size;
   startHeight =
     fb->canvas.height() - (hidden ? hidden_keyboard_height : keyboard_height);
 
   // Resize the terminal to make place for the keyboard.
-  term_resize(term, fb->canvas.width(), startHeight);
+  term_resize(term, fb->canvas.width(), startHeight, /* isLandscape */ false);
 
   // Setup the keymap.
   keys.clear();
@@ -441,11 +450,6 @@ Keyboard::initKeyMap() {
   int marginLeft = term->width - term->cols * CELL_WIDTH;
   this->screenRect = Rect{ { marginLeft, term->marginTop },
                            { term->width - 1, term->height - 1 } };
-
-  // do physical keys:
-  for (const auto& keyInfo : keymap) {
-    physicalKeys.emplace(keyInfo.code, PhysicalKey{ keyInfo });
-  }
 }
 
 void
@@ -505,6 +509,10 @@ Keyboard::drawKey(const Key& key) const {
 
 void
 Keyboard::draw() const {
+  if (term->isLandscape) {
+    return;
+  }
+
   Rect keyboardRect = { { 0, startHeight },
                         { fb->canvas.width() - 1, fb->canvas.height() - 1 } };
 
@@ -802,7 +810,7 @@ Keyboard::handleEvents(const std::vector<rmlib::input::Event>& events) {
           // If the event is not on the screen or it's a release event of a
           // previously pressed key, handle it as a keyboard event. Otherwise
           // handle it as a screen (mouse) event.
-          if (!screenRect.contains(ev.location) || isKeyRelease(*this, ev)) {
+          if ((!screenRect.contains(ev.location) || isKeyRelease(*this, ev)) && !term->isLandscape) {
             handleKeyEvent(*this, ev);
           } else {
             handleScreenEvent(*this, ev);
@@ -817,6 +825,10 @@ Keyboard::handleEvents(const std::vector<rmlib::input::Event>& events) {
 
 void
 Keyboard::updateRepeat() {
+  if (term->isLandscape) {
+    return;
+  }
+
   const auto time = time_source::now();
 
   for (auto& key : keys) {

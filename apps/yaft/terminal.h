@@ -44,10 +44,10 @@ void
 term_die(struct terminal_t* term);
 
 bool
-term_init(struct terminal_t* term, int width, int height);
+term_init(struct terminal_t* term, int width, int height, bool isLandscape);
 
 void
-term_resize(struct terminal_t* term, int width, int height);
+term_resize(struct terminal_t* term, int width, int height, bool isLandscape);
 
 #ifdef __cplusplus
 }
