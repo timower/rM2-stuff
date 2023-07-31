@@ -149,22 +149,22 @@ printEvent(const KeyEvent& ev) {
 
 int
 main() {
-  // struct udev* udev = udev_new();
-  // if (!udev) {
-  //   fprintf(stderr, "udev_new() failed\n");
-  //   return 1;
-  // }
+  struct udev* udev = udev_new();
+  if (!udev) {
+    fprintf(stderr, "udev_new() failed\n");
+    return 1;
+  }
 
-  // enumerate_devices(udev);
-  // monitor_devices(udev);
+  enumerate_devices(udev);
+  monitor_devices(udev);
 
-  // udev_unref(udev);
+  udev_unref(udev);
 
-  // auto deviceType = device::getDeviceType();
-  // if (deviceType.isError()) {
-  //   std::cerr << "Unknown device\n";
-  //   return -1;
-  // }
+  auto deviceType = device::getDeviceType();
+  if (deviceType.isError()) {
+    std::cerr << "Unknown device\n";
+    return -1;
+  }
 
   InputManager input;
   auto err = input.openAll();

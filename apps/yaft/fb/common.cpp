@@ -6,21 +6,6 @@
 #include <iostream>
 
 namespace {
-inline uint16_t
-color2pixel(uint32_t color) {
-  uint32_t r, g, b;
-
-  r = 0xFF & (color >> (BITS_PER_RGB * 2));
-  g = 0xFF & (color >> BITS_PER_RGB);
-  b = 0xFF & (color >> 0);
-
-  // RGB 565
-  r = r >> (BITS_PER_RGB - 5);
-  g = g >> (BITS_PER_RGB - 6);
-  b = b >> (BITS_PER_RGB - 5);
-
-  return (r << 11) | (g << 5) | (b << 0);
-}
 
 inline uint16_t
 color2brightness(uint32_t color) {
@@ -211,12 +196,6 @@ draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
 
 void
 refresh(rmlib::fb::FrameBuffer& fb, struct terminal_t* term) {
-  // if (term->palette_modified) {
-  //   term->palette_modified = false;
-  //   for (int i = 0; i < COLORS; i++)
-  //     fb.real_palette[i] = color2pixel(&fb.info, term->virtual_palette[i]);
-  // }
-
   if (term->mode & MODE_CURSOR)
     term->line_dirty[term->cursor.y] = true;
 

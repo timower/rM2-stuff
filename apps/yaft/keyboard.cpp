@@ -412,7 +412,6 @@ Keyboard::initKeyMap() {
   ctrlKey = -1;
 
   int y = startHeight;
-  int rowNum = 0;
 
   const auto& currentLayout = hidden ? hidden_layout : layout;
 
@@ -437,7 +436,6 @@ Keyboard::initKeyMap() {
     }
 
     y += key_height;
-    rowNum++;
   }
 
   int marginLeft = term->width - term->cols * CELL_WIDTH;

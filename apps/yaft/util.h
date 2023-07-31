@@ -7,21 +7,31 @@ enum loglevel_t {
   FATAL,
 };
 
+static inline const char*
+loglevel2str(enum loglevel_t loglevel) {
+  switch (loglevel) {
+    case DEBUG:
+      return "DEBUG";
+    case WARN:
+      return "WARN";
+    case ERROR:
+      return "ERROR";
+    case FATAL:
+      return "FATAL";
+    default:
+      return "UNK";
+  }
+}
+
 static inline void
 logging(enum loglevel_t loglevel, const char* format, ...) {
   va_list arg;
-  static const char* loglevel2str[] = {
-    [DEBUG] = "DEBUG",
-    [WARN] = "WARN",
-    [ERROR] = "ERROR",
-    [FATAL] = "FATAL",
-  };
 
   /* debug message is available on verbose mode */
   if ((loglevel == DEBUG) && (VERBOSE == false))
     return;
 
-  fprintf(stderr, ">>%s<<\t", loglevel2str[loglevel]);
+  fprintf(stderr, ">>%s<<\t", loglevel2str(loglevel));
 
   va_start(arg, format);
   vfprintf(stderr, format, arg);

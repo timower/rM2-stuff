@@ -15,8 +15,6 @@ namespace {
 #define KEY_POWER 116
 #endif
 
-constexpr auto config_path_suffix = ".config/rocket/config";
-
 std::vector<pid_t> stoppedChildren;
 std::function<void()> stopCallback;
 
