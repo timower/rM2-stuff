@@ -384,10 +384,10 @@ term_init(struct terminal_t* term, int width, int height) {
   term->width = width;
   term->height = height;
 
-  term->cols = term->width / CELL_WIDTH;
-  term->lines = term->height / CELL_HEIGHT;
+  term->cols = (term->width - 2) / CELL_WIDTH;
+  term->lines = (term->height - 2) / CELL_HEIGHT;
 
-  term->marginTop = (term->height - term->lines * CELL_HEIGHT);
+  term->marginTop = (term->height - term->lines * CELL_HEIGHT) / 2;
   term->shouldClear = false;
 
   term->esc.size = ESCSEQ_SIZE;
