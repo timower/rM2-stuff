@@ -1,13 +1,15 @@
 #include "FrameBuffer.h"
 #include "Device.h"
 
+#include <array>
+#include <cassert>
+#include <iostream>
+
 #include <sys/ioctl.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
 
-#include <cassert>
 #include <fcntl.h>
-#include <iostream>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -301,10 +303,24 @@ FrameBuffer::~FrameBuffer() {
   close();
 }
 
+#ifdef EMULATE
+const char*
+getStr(Waveform wave) {
+  switch (wave) {
+    case Waveform::DU:
+      return "DU";
+    case Waveform::GC16:
+      return "GC16";
+    case Waveform::GC16Fast:
+      return "GC16Fast";
+  }
+}
+#endif
+
 void
 FrameBuffer::doUpdate(Rect region, Waveform waveform, UpdateFlags flags) const {
 #ifdef EMULATE
-  std::cout << (waveform == Waveform::DU ? "DU" : "Other") << " ";
+  std::cout << getStr(waveform) << " ";
   updateEmulatedCanvas(canvas, region);
 #else
   if (type != Swtcon) {

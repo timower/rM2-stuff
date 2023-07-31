@@ -18,6 +18,7 @@
 
 #ifdef EMULATE
 #include <atomic>
+#include <signal.h>
 #include <thread>
 
 #include <SDL2/SDL.h>
@@ -374,6 +375,7 @@ uinput_thread() {
   }
 
   libevdev_uinput_destroy(uidev);
+  kill(getpid(), SIGINT);
 }
 
 #endif
