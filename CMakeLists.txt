@@ -12,6 +12,7 @@ add_compile_options(-fdiagnostics-color=always)
 add_subdirectory(libs)
 add_subdirectory(tools)
 add_subdirectory(apps)
+add_subdirectory(vendor)
 
 
 set(CPACK_GENERATOR "DEB")

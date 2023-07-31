@@ -37,7 +37,8 @@ if (NOT APPLE)
   target_link_libraries(${PROJECT_NAME}
     PRIVATE
       ${LIBEVDEV_LIBRARY}
-      udev)
+      udev
+      linux::mxcfb)
 
     target_include_directories(${PROJECT_NAME}
       PRIVATE ${LIBEVDEV_INCLUDE_DIR})

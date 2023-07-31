@@ -1,0 +1,7 @@
+project(rm2fb-tests)
+
+add_executable(server server.cpp)
+target_link_libraries(server PRIVATE rm2fb_lib)
+
+add_executable(client client.cpp)
+target_link_libraries(client PRIVATE rm2fb_lib)
