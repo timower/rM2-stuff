@@ -49,7 +49,7 @@ brightness2gray(uint16_t brightness) {
 }
 
 inline void
-draw_sixel(rmlib::fb::FrameBuffer& fb, int y_start, int col, uint8_t* pixmap) {
+draw_sixel(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int y_start, int margin_left, int col, uint8_t* pixmap) {
   int h, w, src_offset, dst_offset;
   uint32_t pixel, color = 0;
 
@@ -58,8 +58,13 @@ draw_sixel(rmlib::fb::FrameBuffer& fb, int y_start, int col, uint8_t* pixmap) {
       src_offset = BYTES_PER_PIXEL * (h * CELL_WIDTH + w);
       memcpy(&color, pixmap + src_offset, BYTES_PER_PIXEL);
 
-      dst_offset = (y_start + h) * fb.canvas.lineSize() +
-                   (col * CELL_WIDTH + w) * fb.canvas.components();
+      if (term->isLandscape) {
+        dst_offset = (margin_left + w) * fb.canvas.lineSize() +
+                     (y_start - h) * fb.canvas.components();
+      } else {
+        dst_offset = (y_start + h) * fb.canvas.lineSize() +
+                     (margin_left + w) * fb.canvas.components();
+      }
       auto grayMode = brightness2gray(color2brightness(color));
 
       switch (grayMode) {
@@ -89,7 +94,11 @@ draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
   struct color_pair_t color_pair;
   struct cell_t* cellp;
 
-  y_start = term->marginTop + line * CELL_HEIGHT;
+  if (term->isLandscape) {
+    y_start = term->height - (term->marginTop + line * CELL_HEIGHT);
+  } else {
+    y_start = term->marginTop + line * CELL_HEIGHT;
+  }
 
   for (col = 0; col < term->cols; col++) {
     margin_left =
@@ -100,7 +109,7 @@ draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
 
     /* draw sixel pixmap */
     if (cellp->has_pixmap) {
-      draw_sixel(fb, y_start, col, cellp->pixmap);
+      draw_sixel(fb, term, y_start, margin_left, col, cellp->pixmap);
       continue;
     }
 
@@ -156,8 +165,13 @@ draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
       }
 
       for (w = 0; w < CELL_WIDTH; w++) {
-        pos = (margin_left + w) * fb.canvas.components() +
-              (y_start + h) * fb.canvas.lineSize();
+        if (term->isLandscape) {
+          pos = (margin_left + w) * fb.canvas.lineSize() +
+                (y_start - h) * fb.canvas.components();
+        } else {
+          pos = (margin_left + w) * fb.canvas.components() +
+                (y_start + h) * fb.canvas.lineSize();
+        }
 
         /* set fg or bg */
         const auto* glyph = (cellp->attribute & ATTR_BOLD) != 0
@@ -190,17 +204,13 @@ draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
   /* actual display update (bit blit) */
   // TODO: group updates.
   fb.doUpdate(
-    { { 0, y_start }, { fb.canvas.width() - 1, y_start + CELL_HEIGHT - 1 } },
+    term->isLandscape ?
+      (rmlib::Rect){ { y_start, 0 }, { y_start - CELL_HEIGHT, term->width - 1 } } :
+      (rmlib::Rect){ { 0, y_start }, { fb.canvas.width() - 1, y_start + CELL_HEIGHT - 1 } },
     rmlib::fb::Waveform::DU,
     rmlib::fb::UpdateFlags::None);
   update_count++;
 
-  /* TODO: page flip
-          if fb_fix_screeninfo.ypanstep > 0, we can use hardware panning.
-          set fb_fix_screeninfo.{yres_virtual,yoffset} and call
-     ioctl(FBIOPAN_DISPLAY) but drivers  of recent hardware (inteldrmfb,
-     nouveaufb, radeonfb) don't support... (maybe we can use this by using
-     libdrm) */
   /* TODO: vertical synchronizing */
 
   term->line_dirty[line] =

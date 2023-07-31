@@ -193,6 +193,8 @@ main(int argc, const char* argv[]) {
   extern const char* shell_cmd; /* defined in conf.h */
   const char* cmd;
   const char** args;
+  int w, h;
+  bool isLandscape;
   uint8_t buf[BUFSIZE];
   ssize_t size;
   struct terminal_t term;
@@ -214,7 +216,16 @@ main(int argc, const char* argv[]) {
     goto fb_init_failed;
   }
 
-  if (!term_init(&term, fb->canvas.width(), fb->canvas.height())) {
+  isLandscape = is_pogo_connected();
+  if (isLandscape) {
+    w = fb->canvas.height();
+    h = fb->canvas.width();
+  } else {
+    w = fb->canvas.width();
+    h = fb->canvas.height();
+  }
+
+  if (!term_init(&term, w, h, isLandscape)) {
     logging(FATAL, "terminal initialize failed\n");
     goto term_init_failed;
   }
