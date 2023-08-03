@@ -2,14 +2,6 @@ project(rMlib)
 
 option(EMULATE "Emulate a rM tablet using SDL" OFF)
 
-set(RMLIB_INCLUDES
-  include/Canvas.h
-  include/Device.h
-  include/FrameBuffer.h
-  include/Graphics.h
-  include/Input.h
-  include/MathUtil.h)
-
 set(RMLIB_SOURCES
   Device.cpp
   FrameBuffer.cpp
@@ -69,4 +61,4 @@ if (EMULATE)
 endif()
 
 install(TARGETS ${PROJECT_NAME} DESTINATION lib)
-install(FILES ${RMLIB_INCLUDES} DESTINATION include/rmlib)
+install(DIRECTORY include/ DESTINATION include/rmlib)
