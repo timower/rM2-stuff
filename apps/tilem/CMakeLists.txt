@@ -16,6 +16,6 @@ target_link_libraries(${PROJECT_NAME}
     tiemu
     rMlib)
 
-install(TARGETS ${PROJECT_NAME} DESTINATION opt/bin)
-install(FILES draft/tilem.draft DESTINATION opt/etc/draft)
-install(FILES draft/tilem.png DESTINATION opt/etc/draft/icons)
+install(TARGETS ${PROJECT_NAME} DESTINATION bin)
+install(FILES draft/tilem.draft DESTINATION etc/draft)
+install(FILES draft/tilem.png DESTINATION etc/draft/icons)

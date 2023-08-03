@@ -14,27 +14,23 @@ jobs:
       - name: Create Build Environment
         run: |
           cmake -E make_directory build
-          cmake -E make_directory install
 
       - name: Configure CMake
         run: |
           cd build
-          cmake $GITHUB_WORKSPACE -DCMAKE_TOOLCHAIN_FILE="/usr/share/cmake/$CHOST.cmake" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD/../install
+          cmake $GITHUB_WORKSPACE -DCMAKE_TOOLCHAIN_FILE="/usr/share/cmake/$CHOST.cmake" -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: cd build && cmake --build .
 
-      - name: Install
-        run: cd build && cmake --build . --target install
-
       - name: Package
-        run: cd install && tar -czvf package.tar.gz *
+        run: cd build && cmake --build . --target package
 
       - name: Upload
         uses: actions/upload-artifact@v2
         with:
           name: package
-          path: install/package.tar.gz
+          path: build/rm2stuff.ipk
   release:
     runs-on: ubuntu-latest
     needs: build
