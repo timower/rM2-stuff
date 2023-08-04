@@ -825,11 +825,27 @@ Keyboard::handleEvents(const std::vector<rmlib::input::Event>& events) {
 
 void
 Keyboard::updateRepeat() {
+  const auto time = time_source::now();
+
+  for (auto& [_, key] : physicalKeys) {
+    (void)_;
+
+    if (!key.down) {
+      continue;
+    }
+
+    if (time > key.nextRepeat) {
+      if (!isModifier(key.info.scancode)) {
+        sendKeyDown(key);
+      }
+
+      key.nextRepeat += repeat_time;
+    }
+  }
+
   if (term->isLandscape) {
     return;
   }
-
-  const auto time = time_source::now();
 
   for (auto& key : keys) {
     if (key.slot == -1) {
@@ -855,22 +871,6 @@ Keyboard::updateRepeat() {
         break;
 
       } else {
-        sendKeyDown(key);
-      }
-
-      key.nextRepeat += repeat_time;
-    }
-  }
-
-  for (auto& [_, key] : physicalKeys) {
-    (void)_;
-
-    if (!key.down) {
-      continue;
-    }
-
-    if (time > key.nextRepeat) {
-      if (!isModifier(key.info.scancode)) {
         sendKeyDown(key);
       }
 
