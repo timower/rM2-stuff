@@ -381,17 +381,9 @@ bool
 term_init(struct terminal_t* term, int width, int height, bool isLandscape) {
   extern const uint32_t color_list[COLORS]; /* global */
 
-  term->width = width;
-  term->height = height;
-  term->isLandscape = isLandscape;
+  term_resize(term, width, height, isLandscape, false);
 
-  /* 1 px margin on edges */
-  term->cols = (term->width - 2) / CELL_WIDTH;
-  term->lines = (term->height - 2) / CELL_HEIGHT;
-
-  term->marginTop = (term->height - term->lines * CELL_HEIGHT) / 2;
   term->shouldClear = false;
-
   term->esc.size = ESCSEQ_SIZE;
 
   logging(DEBUG, "terminal cols:%d lines:%d\n", term->cols, term->lines);
@@ -450,7 +442,7 @@ term_init(struct terminal_t* term, int width, int height, bool isLandscape) {
 }
 
 void
-term_resize(struct terminal_t* term, int width, int height, bool isLandscape) {
+term_resize(struct terminal_t* term, int width, int height, bool isLandscape, bool report) {
   if (width == term->width && height == term->height && isLandscape == term->isLandscape)
     return;
 
@@ -458,18 +450,22 @@ term_resize(struct terminal_t* term, int width, int height, bool isLandscape) {
   term->height = height;
   term->isLandscape = isLandscape;
 
-  term->cols = term->width / CELL_WIDTH;
-  term->lines = term->height / CELL_HEIGHT;
-  term->marginTop = (term->height - term->lines * CELL_HEIGHT);
+  /* 1 px margin on edges */
+  term->cols = (term->width - X_MARGIN) / CELL_WIDTH;
+  term->lines = (term->height - Y_MARGIN) / CELL_HEIGHT;
+  term->marginTop = (term->height - term->lines * CELL_HEIGHT) / 2;
+  term->marginLeft = (term->width - term->cols * CELL_WIDTH) / 2;
 
   term->scroll.top = 0;
   term->scroll.bottom = term->lines - 1;
 
-  struct winsize ws;
-  ws.ws_col = term->cols;
-  ws.ws_row = term->lines;
-  ws.ws_xpixel = CELL_WIDTH * term->cols;
-  ws.ws_ypixel = CELL_HEIGHT * term->lines;
-  ioctl(term->fd, TIOCSWINSZ, &ws);
+  if (report) {
+    struct winsize ws;
+    ws.ws_col = term->cols;
+    ws.ws_row = term->lines;
+    ws.ws_xpixel = CELL_WIDTH * term->cols;
+    ws.ws_ypixel = CELL_HEIGHT * term->lines;
+    ioctl(term->fd, TIOCSWINSZ, &ws);
+  }
 }
 }
