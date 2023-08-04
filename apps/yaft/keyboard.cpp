@@ -43,8 +43,20 @@ enum SpecialKeys {
   Down,
 
   PageUp,
-  PageDown
+  PageDown,
 
+  F1,
+  F2,
+  F3,
+  F4,
+  F5,
+  F6,
+  F7,
+  F8,
+  F9,
+  F10,
+  F11,
+  F12,
 };
 
 enum ModifierKeys {
@@ -211,16 +223,16 @@ const std::vector<EvKeyInfo> keymap = {
   { KEY_LEFTALT, Alt },
   { KEY_SPACE, ' ' },
   // { KEY_CAPSLOCK
-  // { KEY_F1 59
-  // { KEY_F2 60
-  // { KEY_F3 61
-  // { KEY_F4 62
-  // { KEY_F5 63
-  // { KEY_F6 64
-  // { KEY_F7 65
-  // { KEY_F8 66
-  // { KEY_F9 67
-  // { KEY_F10 68
+  { KEY_F1, F1 },
+  { KEY_F2, F2 },
+  { KEY_F3, F3 },
+  { KEY_F4, F4 },
+  { KEY_F5, F5 },
+  { KEY_F6, F6 },
+  { KEY_F7, F7 },
+  { KEY_F8, F8 },
+  { KEY_F9, F9 },
+  { KEY_F10, F10 },
   // { KEY_NUMLOCK 69
   // { KEY_SCROLLLOCK 70
   { KEY_KP7, '7' },
@@ -239,8 +251,8 @@ const std::vector<EvKeyInfo> keymap = {
 
   // { KEY_ZENKAKUHANKAKU 85
   // { KEY_102ND 86
-  // { KEY_F11 87
-  // { KEY_F12 88
+  { KEY_F11, F11 },
+  { KEY_F12, F12 },
   // { KEY_RO 89
   // { KEY_KATAKANA 90
   // { KEY_HIRAGANA 91
@@ -286,6 +298,22 @@ getKeyCodeStr(int scancode, bool shift, bool alt, bool ctrl, bool appCursor) {
     buf[2] = code;
     buf[3] = '~';
     buf[4] = 0;
+  };
+
+  constexpr auto write_ss3 = [](char code) {
+    buf[0] = esc_char;
+    buf[1] = 'O';
+    buf[2] = code;
+    buf[3] = 0;
+  };
+
+  constexpr auto write_hi_vt_code = [](char a, char b) {
+    buf[0] = esc_char;
+    buf[1] = '[';
+    buf[2] = a;
+    buf[3] = b;
+    buf[4] = '~';
+    buf[5] = 0;
   };
 
   constexpr auto write_xt_code = [](char code, bool appCursor) {
@@ -342,6 +370,43 @@ getKeyCodeStr(int scancode, bool shift, bool alt, bool ctrl, bool appCursor) {
         return buf.data();
       case PageDown:
         write_vt_code('6');
+        return buf.data();
+
+      case F1:
+        write_ss3('P');
+        return buf.data();
+      case F2:
+        write_ss3('Q');
+        return buf.data();
+      case F3:
+        write_ss3('R');
+        return buf.data();
+      case F4:
+        write_ss3('S');
+        return buf.data();
+      case F5:
+        write_hi_vt_code('1', '5');
+        return buf.data();
+      case F6:
+        write_hi_vt_code('1', '7');
+        return buf.data();
+      case F7:
+        write_hi_vt_code('1', '8');
+        return buf.data();
+      case F8:
+        write_hi_vt_code('1', '9');
+        return buf.data();
+      case F9:
+        write_hi_vt_code('2', '0');
+        return buf.data();
+      case F10:
+        write_hi_vt_code('2', '1');
+        return buf.data();
+      case F11:
+        write_hi_vt_code('2', '3');
+        return buf.data();
+      case F12:
+        write_hi_vt_code('2', '4');
         return buf.data();
     }
 
