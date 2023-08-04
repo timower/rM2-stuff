@@ -256,6 +256,7 @@ struct terminal_t {
   struct sixel_canvas_t sixel;
 
   int marginTop;
+  int marginLeft;
   bool shouldClear;
 };
 
