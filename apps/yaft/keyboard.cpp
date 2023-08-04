@@ -402,16 +402,27 @@ Keyboard::initKeyMap() {
     physicalKeys.emplace(keyInfo.code, PhysicalKey{ keyInfo });
   }
 
+  // calculate valid screen region
+  startHeight =
+    (term->isLandscape ? fb->canvas.width() : fb->canvas.height()) -
+    (term->isLandscape ? 0
+                       : (hidden ? hidden_keyboard_height : keyboard_height)) -
+    1;
+
+  this->screenRect = Rect{
+    { term->marginLeft, term->marginTop },
+    { term->width - term->marginLeft - 1, startHeight - term->marginTop }
+  };
+
+  // skip virtual keys if in landscape mode
   if (term->isLandscape) {
     return;
   }
 
   baseKeyWidth = fb->canvas.width() / row_size;
-  startHeight =
-    fb->canvas.height() - (hidden ? hidden_keyboard_height : keyboard_height);
 
   // Resize the terminal to make place for the keyboard.
-  term_resize(term, fb->canvas.width(), startHeight, /* isLandscape */ false);
+  term_resize(term, fb->canvas.width(), startHeight, /* isLandscape */ false, /* report */ true);
 
   // Setup the keymap.
   keys.clear();
@@ -446,10 +457,6 @@ Keyboard::initKeyMap() {
 
     y += key_height;
   }
-
-  int marginLeft = term->width - term->cols * CELL_WIDTH;
-  this->screenRect = Rect{ { marginLeft, term->marginTop },
-                           { term->width - 1, term->height - 1 } };
 }
 
 void
@@ -617,7 +624,7 @@ struct event_traits<PenEvent> {
 };
 
 void
-initMouseBuf(std::array<char, 6>& buf, Point loc) {
+initMouseBuf(terminal_t* term, std::array<char, 6>& buf, Point loc) {
   loc.x /= CELL_WIDTH;
   loc.y /= CELL_HEIGHT;
 
@@ -635,7 +642,7 @@ handleGesture(Keyboard& kb, const SwipeGesture& gesture) {
 
   std::array<char, 6> buf;
   const auto loc = gesture.startPosition - kb.screenRect.topLeft;
-  initMouseBuf(buf, loc);
+  initMouseBuf(kb.term, buf, loc);
 
   constexpr auto scroll_size = 4 * CELL_HEIGHT;
   const auto distance = std::max(
@@ -656,7 +663,7 @@ handleGesture(Keyboard& kb, const SwipeGesture& gesture) {
 
 template<typename Event>
 void
-handleScreenEvent(Keyboard& kb, const Event& ev) {
+handleScreenEvent(Keyboard& kb, const Event& ev, const Point loc) {
   if ((kb.term->mode & ALL_MOUSE_MODES) == 0) {
     return;
   }
@@ -673,9 +680,9 @@ handleScreenEvent(Keyboard& kb, const Event& ev) {
   }
 
   const auto slot = event_traits<Event>::getSlot(ev);
-  const auto loc = ev.location - kb.screenRect.topLeft;
+  auto _loc = loc - kb.screenRect.topLeft;
   std::array<char, 6> buf;
-  initMouseBuf(buf, loc);
+  initMouseBuf(kb.term, buf, _loc);
 
   // Mouse down on first finger if mouse is not down.
   if (ev.type == event_traits<Event>::down_type && kb.mouseSlot == -1 &&
@@ -696,20 +703,20 @@ handleScreenEvent(Keyboard& kb, const Event& ev) {
     // Send mouse up code
     buf[3] += 3; // mouse release
     write(kb.term->fd, buf.data(), buf.size());
-  } else if (kb.mouseSlot == slot && kb.lastMousePos != loc &&
+  } else if (kb.mouseSlot == slot && kb.lastMousePos != _loc &&
              (kb.term->mode & MODE_MOUSE_MOVE) != 0) {
     buf[3] += 32; // mouse move
     write(kb.term->fd, buf.data(), buf.size());
   }
-  kb.lastMousePos = loc;
+  kb.lastMousePos = _loc;
 }
 
 template<typename Event>
 void
-handleKeyEvent(Keyboard& kb, const Event& ev) {
+handleKeyEvent(Keyboard& kb, const Event& ev, const Point loc) {
   if (ev.type == event_traits<Event>::down_type) {
     // lookup key, skip if outside
-    auto* key = kb.getKey(ev.location);
+    auto* key = kb.getKey(loc);
     if (key == nullptr) {
       return;
     }
@@ -810,10 +817,17 @@ Keyboard::handleEvents(const std::vector<rmlib::input::Event>& events) {
           // If the event is not on the screen or it's a release event of a
           // previously pressed key, handle it as a keyboard event. Otherwise
           // handle it as a screen (mouse) event.
-          if ((!screenRect.contains(ev.location) || isKeyRelease(*this, ev)) && !term->isLandscape) {
-            handleKeyEvent(*this, ev);
+          auto loc = ev.location;
+          if (term->isLandscape) {
+            loc = Point{
+              loc.y,
+              term->height - loc.x,
+            };
+          }
+          if (!screenRect.contains(loc) || isKeyRelease(*this, ev)) {
+            handleKeyEvent(*this, ev, loc);
           } else {
-            handleScreenEvent(*this, ev);
+            handleScreenEvent(*this, ev, loc);
           }
         } else {
           handlePhysicalKeyEvent(*this, ev);
@@ -827,6 +841,7 @@ void
 Keyboard::updateRepeat() {
   const auto time = time_source::now();
 
+  // handle repeat of physical keys
   for (auto& [_, key] : physicalKeys) {
     (void)_;
 
@@ -843,10 +858,12 @@ Keyboard::updateRepeat() {
     }
   }
 
+  // skip virtual keys if in landscape mode
   if (term->isLandscape) {
     return;
   }
 
+  // handle repeat of virtual keys
   for (auto& key : keys) {
     if (key.slot == -1) {
       continue;
@@ -861,8 +878,8 @@ Keyboard::updateRepeat() {
         fb->doUpdate(
           key.keyRect, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::None);
 
+      // if escape is long pressed, toggle visibility
       } else if (key.info.code == Escape) {
-
         if (hidden) {
           show();
         } else {
@@ -870,6 +887,7 @@ Keyboard::updateRepeat() {
         }
         break;
 
+      // otherwise, fire the key
       } else {
         sendKeyDown(key);
       }

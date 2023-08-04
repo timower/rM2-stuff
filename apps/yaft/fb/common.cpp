@@ -91,8 +91,7 @@ draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
   }
 
   for (col = 0; col < term->cols; col++) {
-    margin_left =
-      (term->width - term->cols * CELL_WIDTH) / 2 + col * CELL_WIDTH;
+    margin_left = term->marginLeft + col * CELL_WIDTH;
 
     /* target cell */
     cellp = &term->cells[line][col];
