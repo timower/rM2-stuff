@@ -202,7 +202,7 @@ main(int argc, const char* argv[]) {
   extern volatile sig_atomic_t need_redraw;
   extern volatile sig_atomic_t child_alive;
   extern struct termios termios_orig;
-  static const char* shell_args[2] = { shell_cmd, NULL };
+  static const char* shell_args[3] = { shell_cmd, "-l", NULL };
 
   Keyboard keyboard;
 
