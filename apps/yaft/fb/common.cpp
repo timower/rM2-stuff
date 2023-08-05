@@ -34,7 +34,12 @@ brightness2gray(uint16_t brightness) {
 }
 
 inline void
-draw_sixel(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int y_start, int margin_left, int col, uint8_t* pixmap) {
+draw_sixel(rmlib::fb::FrameBuffer& fb,
+           struct terminal_t* term,
+           int y_start,
+           int margin_left,
+           int col,
+           uint8_t* pixmap) {
   int h, w, src_offset, dst_offset;
   uint32_t pixel, color = 0;
 
@@ -188,15 +193,14 @@ draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
 
   /* actual display update (bit blit) */
   // TODO: group updates.
-  fb.doUpdate(
-    term->isLandscape ?
-      (rmlib::Rect){ { y_start, 0 }, { y_start - CELL_HEIGHT, term->width - 1 } } :
-      (rmlib::Rect){ { 0, y_start }, { fb.canvas.width() - 1, y_start + CELL_HEIGHT - 1 } },
-    rmlib::fb::Waveform::DU,
-    rmlib::fb::UpdateFlags::None);
+  fb.doUpdate(term->isLandscape ? rmlib::Rect{ { y_start - CELL_HEIGHT, 0 },
+                                               { y_start, term->width - 1 } }
+                                : rmlib::Rect{ { 0, y_start },
+                                               { fb.canvas.width() - 1,
+                                                 y_start + CELL_HEIGHT - 1 } },
+              rmlib::fb::Waveform::DU,
+              rmlib::fb::UpdateFlags::None);
   update_count++;
-
-  /* TODO: vertical synchronizing */
 
   term->line_dirty[line] =
     ((term->mode & MODE_CURSOR) && term->cursor.y == line) ? true : false;
