@@ -22,6 +22,9 @@ SimpleFunction::hook(void* replacement) {
 
 bool
 InlinedFunction::hook(void* replacement) {
+  std::cerr << "Hooking " << hookStart << " - " << hookEnd << " with "
+            << (uintptr_t)replacement << "\n";
+
   const gsize distance = (intptr_t)hookEnd - (intptr_t)hookStart;
 
   gum_mprotect((gpointer)hookStart, distance, GUM_PAGE_RWX);

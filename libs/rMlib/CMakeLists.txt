@@ -61,5 +61,5 @@ if (EMULATE)
     EMULATE_SCALE=2)
 endif()
 
-install(TARGETS ${PROJECT_NAME} DESTINATION lib)
-install(DIRECTORY include/ DESTINATION include/rmlib)
+install(TARGETS ${PROJECT_NAME} DESTINATION opt/lib)
+install(DIRECTORY include/ DESTINATION opt/include/rmlib)

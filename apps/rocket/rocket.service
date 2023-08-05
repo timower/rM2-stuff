@@ -1,0 +1,16 @@
+[Unit]
+Description=Rocket Launcher
+After=home.mount
+StartLimitIntervalSec=600
+StartLimitBurst=4
+
+[Service]
+ExecStart=/opt/bin/rocket
+Restart=on-failure
+RestartSec=5
+Environment="HOME=/home/root"
+Environment=LD_PRELOAD=/opt/lib/librm2fb_client.so
+
+[Install]
+Alias=launcher.service
+WantedBy=multi-user.target
