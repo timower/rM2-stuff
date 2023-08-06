@@ -381,7 +381,7 @@ bool
 term_init(struct terminal_t* term, int width, int height, bool isLandscape) {
   extern const uint32_t color_list[COLORS]; /* global */
 
-  term_resize(term, width, height, isLandscape, false);
+  term_resize(term, width, height, isLandscape, /* report */ false);
 
   term->shouldClear = false;
   term->esc.size = ESCSEQ_SIZE;
@@ -442,8 +442,13 @@ term_init(struct terminal_t* term, int width, int height, bool isLandscape) {
 }
 
 void
-term_resize(struct terminal_t* term, int width, int height, bool isLandscape, bool report) {
-  if (width == term->width && height == term->height && isLandscape == term->isLandscape)
+term_resize(struct terminal_t* term,
+            int width,
+            int height,
+            bool isLandscape,
+            bool report) {
+  if (width == term->width && height == term->height &&
+      isLandscape == term->isLandscape)
     return;
 
   term->width = width;

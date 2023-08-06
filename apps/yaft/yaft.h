@@ -234,7 +234,7 @@ struct terminal_t {
   int fd;                 /* master of pseudo terminal */
   int width, height;      /* terminal size (pixel) */
   int cols, lines;        /* terminal size (cell) */
-  bool isLandscape;         /* screen orientation */
+  bool isLandscape;       /* screen orientation */
   struct cell_t** cells;  /* pointer to each cell: cells[y * lines + x] */
   struct margin_t scroll; /* scroll margin */
   struct point_t cursor;  /* cursor pos (x, y) */
