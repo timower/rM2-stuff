@@ -212,13 +212,18 @@ refresh(rmlib::fb::FrameBuffer& fb, struct terminal_t* term) {
   if (term->mode & MODE_CURSOR)
     term->line_dirty[term->cursor.y] = true;
 
+  bool full = term->shouldClear || update_count > 1024;
+  if (full) {
+    fb.canvas.set(0xFFFF);
+  }
+
   for (int line = 0; line < term->lines; line++) {
-    if (term->line_dirty[line]) {
+    if (term->line_dirty[line] || full) {
       draw_line(fb, term, line);
     }
   }
 
-  if (term->shouldClear || update_count > 1024) {
+  if (full) {
     std::cout << "FULL UPDATE: " << update_count << std::endl;
     fb.doUpdate(fb.canvas.rect(),
                 rmlib::fb::Waveform::GC16,
