@@ -2,7 +2,7 @@
 
 #include <FrameBuffer.h>
 
-#include "../yaft.h"
+#include "yaft.h"
 
 void
 refresh(rmlib::fb::FrameBuffer& fb, struct terminal_t* term);

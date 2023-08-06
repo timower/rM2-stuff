@@ -1,7 +1,7 @@
 #include "common.h"
 
-#include "../conf.h"
-#include "../util.h"
+#include "conf.h"
+#include "util.h"
 
 #include <iostream>
 
