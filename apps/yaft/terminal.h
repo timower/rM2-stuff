@@ -50,7 +50,11 @@ bool
 term_init(struct terminal_t* term, int width, int height, bool isLandscape);
 
 void
-term_resize(struct terminal_t* term, int width, int height, bool isLandscape, bool report);
+term_resize(struct terminal_t* term,
+            int width,
+            int height,
+            bool isLandscape,
+            bool report);
 
 #ifdef __cplusplus
 }

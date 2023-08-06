@@ -468,16 +468,15 @@ Keyboard::initKeyMap() {
   }
 
   // calculate valid screen region
-  startHeight =
-    (term->isLandscape ? fb->canvas.width() : fb->canvas.height()) -
-    (term->isLandscape ? 0
-                       : (hidden ? hidden_keyboard_height : keyboard_height)) -
-    1;
+  if (term->isLandscape) {
+    startHeight = fb->canvas.width() - 1;
+  } else {
+    startHeight = fb->canvas.height() - (hidden ? hidden_keyboard_height : keyboard_height) - 1;
+  }
 
-  this->screenRect = Rect{
-    { term->marginLeft, term->marginTop },
-    { term->width - term->marginLeft - 1, startHeight - term->marginTop }
-  };
+  this->screenRect = Rect{ { term->marginLeft, term->marginTop },
+                           { term->width - term->marginLeft - 1,
+                             startHeight - term->marginTop } };
 
   // skip virtual keys if in landscape mode
   if (term->isLandscape) {
@@ -487,7 +486,11 @@ Keyboard::initKeyMap() {
   baseKeyWidth = fb->canvas.width() / row_size;
 
   // Resize the terminal to make place for the keyboard.
-  term_resize(term, fb->canvas.width(), startHeight, /* isLandscape */ false, /* report */ true);
+  term_resize(term,
+              fb->canvas.width(),
+              startHeight,
+              /* isLandscape */ false,
+              /* report */ true);
 
   // Setup the keymap.
   keys.clear();
@@ -689,7 +692,7 @@ struct event_traits<PenEvent> {
 };
 
 void
-initMouseBuf(terminal_t* term, std::array<char, 6>& buf, Point loc) {
+initMouseBuf(std::array<char, 6>& buf, Point loc) {
   loc.x /= CELL_WIDTH;
   loc.y /= CELL_HEIGHT;
 
@@ -707,7 +710,7 @@ handleGesture(Keyboard& kb, const SwipeGesture& gesture) {
 
   std::array<char, 6> buf;
   const auto loc = gesture.startPosition - kb.screenRect.topLeft;
-  initMouseBuf(kb.term, buf, loc);
+  initMouseBuf(buf, loc);
 
   constexpr auto scroll_size = 4 * CELL_HEIGHT;
   const auto distance = std::max(
@@ -745,9 +748,9 @@ handleScreenEvent(Keyboard& kb, const Event& ev, const Point loc) {
   }
 
   const auto slot = event_traits<Event>::getSlot(ev);
-  auto _loc = loc - kb.screenRect.topLeft;
+  const auto scaled_loc = loc - kb.screenRect.topLeft;
   std::array<char, 6> buf;
-  initMouseBuf(kb.term, buf, _loc);
+  initMouseBuf(buf, scaled_loc);
 
   // Mouse down on first finger if mouse is not down.
   if (ev.type == event_traits<Event>::down_type && kb.mouseSlot == -1 &&
@@ -768,12 +771,12 @@ handleScreenEvent(Keyboard& kb, const Event& ev, const Point loc) {
     // Send mouse up code
     buf[3] += 3; // mouse release
     write(kb.term->fd, buf.data(), buf.size());
-  } else if (kb.mouseSlot == slot && kb.lastMousePos != _loc &&
+  } else if (kb.mouseSlot == slot && kb.lastMousePos != scaled_loc &&
              (kb.term->mode & MODE_MOUSE_MOVE) != 0) {
     buf[3] += 32; // mouse move
     write(kb.term->fd, buf.data(), buf.size());
   }
-  kb.lastMousePos = _loc;
+  kb.lastMousePos = scaled_loc;
 }
 
 template<typename Event>
@@ -943,7 +946,7 @@ Keyboard::updateRepeat() {
         fb->doUpdate(
           key.keyRect, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::None);
 
-      // if escape is long pressed, toggle visibility
+        // if escape is long pressed, toggle visibility
       } else if (key.info.code == Escape) {
         if (hidden) {
           show();
@@ -952,7 +955,7 @@ Keyboard::updateRepeat() {
         }
         break;
 
-      // otherwise, fire the key
+        // otherwise, fire the key
       } else {
         sendKeyDown(key);
       }
