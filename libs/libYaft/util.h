@@ -414,17 +414,3 @@ sum(struct parm_t* parm) {
 
   return sum;
 }
-
-static inline bool
-is_pogo_connected() {
-  int fd = open("/sys/pogo/status/pogo_connected", O_RDWR);
-  if (fd == -1) {
-    return false;
-  }
-
-  char buf = '\0';
-  read(fd, &buf, 1);
-  close(fd);
-
-  return buf == '1';
-}

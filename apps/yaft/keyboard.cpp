@@ -450,9 +450,10 @@ Keyboard::Key::Key(const KeyInfo& info, rmlib::Rect rect)
   : info(info), keyRect(rect) {}
 
 OptError<>
-Keyboard::init(rmlib::fb::FrameBuffer& fb, terminal_t& term) {
+Keyboard::init(rmlib::fb::FrameBuffer& fb, terminal_t& term, bool isLandscape) {
   this->term = &term;
   this->fb = &fb;
+  this->isLandscape = isLandscape;
 
   TRY(input.openAll());
 
@@ -468,10 +469,11 @@ Keyboard::initKeyMap() {
   }
 
   // calculate valid screen region
-  if (term->isLandscape) {
+  if (isLandscape) {
     startHeight = fb->canvas.width() - 1;
   } else {
-    startHeight = fb->canvas.height() - (hidden ? hidden_keyboard_height : keyboard_height) - 1;
+    startHeight = fb->canvas.height() -
+                  (hidden ? hidden_keyboard_height : keyboard_height) - 1;
   }
 
   this->screenRect = Rect{ { term->marginLeft, term->marginTop },
@@ -479,7 +481,7 @@ Keyboard::initKeyMap() {
                              startHeight - term->marginTop } };
 
   // skip virtual keys if in landscape mode
-  if (term->isLandscape) {
+  if (isLandscape) {
     return;
   }
 
@@ -489,7 +491,6 @@ Keyboard::initKeyMap() {
   term_resize(term,
               fb->canvas.width(),
               startHeight,
-              /* isLandscape */ false,
               /* report */ true);
 
   // Setup the keymap.
@@ -584,7 +585,7 @@ Keyboard::drawKey(const Key& key) const {
 
 void
 Keyboard::draw() const {
-  if (term->isLandscape) {
+  if (isLandscape) {
     return;
   }
 
@@ -886,7 +887,7 @@ Keyboard::handleEvents(const std::vector<rmlib::input::Event>& events) {
           // previously pressed key, handle it as a keyboard event. Otherwise
           // handle it as a screen (mouse) event.
           auto loc = ev.location;
-          if (term->isLandscape) {
+          if (isLandscape) {
             loc = Point{
               loc.y,
               term->height - loc.x,
@@ -927,7 +928,7 @@ Keyboard::updateRepeat() {
   }
 
   // skip virtual keys if in landscape mode
-  if (term->isLandscape) {
+  if (isLandscape) {
     return;
   }
 

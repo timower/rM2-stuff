@@ -36,6 +36,7 @@ brightness2gray(uint16_t brightness) {
 inline void
 draw_sixel(rmlib::fb::FrameBuffer& fb,
            struct terminal_t* term,
+           bool isLandscape,
            int y_start,
            int margin_left,
            int col,
@@ -48,7 +49,7 @@ draw_sixel(rmlib::fb::FrameBuffer& fb,
       src_offset = BYTES_PER_PIXEL * (h * CELL_WIDTH + w);
       memcpy(&color, pixmap + src_offset, BYTES_PER_PIXEL);
 
-      if (term->isLandscape) {
+      if (isLandscape) {
         dst_offset = (margin_left + w) * fb.canvas.lineSize() +
                      (y_start - h) * fb.canvas.components();
       } else {
@@ -77,14 +78,17 @@ draw_sixel(rmlib::fb::FrameBuffer& fb,
 static int update_count = 0;
 
 inline void
-draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
+draw_line(rmlib::fb::FrameBuffer& fb,
+          struct terminal_t* term,
+          bool isLandscape,
+          int line) {
   int pos, bdf_padding, glyph_width, margin_left, y_start;
   int col, w, h;
   uint32_t pixel;
   struct color_pair_t color_pair;
   struct cell_t* cellp;
 
-  if (term->isLandscape) {
+  if (isLandscape) {
     y_start = term->height - (term->marginTop + line * CELL_HEIGHT);
   } else {
     y_start = term->marginTop + line * CELL_HEIGHT;
@@ -98,7 +102,8 @@ draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
 
     /* draw sixel pixmap */
     if (cellp->has_pixmap) {
-      draw_sixel(fb, term, y_start, margin_left, col, cellp->pixmap);
+      draw_sixel(
+        fb, term, isLandscape, y_start, margin_left, col, cellp->pixmap);
       continue;
     }
 
@@ -154,7 +159,7 @@ draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
       }
 
       for (w = 0; w < CELL_WIDTH; w++) {
-        if (term->isLandscape) {
+        if (isLandscape) {
           pos = (margin_left + w) * fb.canvas.lineSize() +
                 (y_start - h) * fb.canvas.components();
         } else {
@@ -192,11 +197,11 @@ draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
 
   /* actual display update (bit blit) */
   // TODO: group updates.
-  fb.doUpdate(term->isLandscape ? rmlib::Rect{ { y_start - CELL_HEIGHT, 0 },
-                                               { y_start, term->width - 1 } }
-                                : rmlib::Rect{ { 0, y_start },
-                                               { fb.canvas.width() - 1,
-                                                 y_start + CELL_HEIGHT - 1 } },
+  fb.doUpdate(isLandscape ? rmlib::Rect{ { y_start - CELL_HEIGHT, 0 },
+                                         { y_start, term->width - 1 } }
+                          : rmlib::Rect{ { 0, y_start },
+                                         { fb.canvas.width() - 1,
+                                           y_start + CELL_HEIGHT - 1 } },
               rmlib::fb::Waveform::DU,
               rmlib::fb::UpdateFlags::None);
   update_count++;
@@ -208,7 +213,7 @@ draw_line(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, int line) {
 } // namespace
 
 void
-refresh(rmlib::fb::FrameBuffer& fb, struct terminal_t* term) {
+refresh(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, bool isLandscape) {
   if (term->mode & MODE_CURSOR)
     term->line_dirty[term->cursor.y] = true;
 
@@ -219,7 +224,7 @@ refresh(rmlib::fb::FrameBuffer& fb, struct terminal_t* term) {
 
   for (int line = 0; line < term->lines; line++) {
     if (term->line_dirty[line] || full) {
-      draw_line(fb, term, line);
+      draw_line(fb, term, isLandscape, line);
     }
   }
 

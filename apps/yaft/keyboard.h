@@ -60,7 +60,9 @@ struct Keyboard {
     time_source::time_point nextRepeat = {};
   };
 
-  OptError<> init(rmlib::fb::FrameBuffer& fb, terminal_t& term);
+  OptError<> init(rmlib::fb::FrameBuffer& fb,
+                  terminal_t& term,
+                  bool isLandscape);
   void initKeyMap();
 
   void draw() const;
@@ -102,4 +104,7 @@ struct Keyboard {
   std::unordered_map<int, PhysicalKey> physicalKeys;
 
   bool hidden = false;
+
+  // True if the pogo keyboard is connected.
+  bool isLandscape = false;
 };

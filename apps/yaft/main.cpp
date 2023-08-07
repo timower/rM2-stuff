@@ -186,6 +186,20 @@ fork_and_exec(int* master,
   return true;
 }
 
+static bool
+is_pogo_connected() {
+  int fd = open("/sys/pogo/status/pogo_connected", O_RDWR);
+  if (fd == -1) {
+    return false;
+  }
+
+  char buf = '\0';
+  read(fd, &buf, 1);
+  close(fd);
+
+  return buf == '1';
+}
+
 constexpr auto select_timeout = std::chrono::microseconds(SELECT_TIMEOUT);
 
 int
@@ -225,7 +239,7 @@ main(int argc, const char* argv[]) {
     h = fb->canvas.height();
   }
 
-  if (!term_init(&term, w, h, isLandscape)) {
+  if (!term_init(&term, w, h)) {
     logging(FATAL, "terminal initialize failed\n");
     goto term_init_failed;
   }
@@ -250,7 +264,7 @@ main(int argc, const char* argv[]) {
   }
   child_alive = true;
 
-  if (keyboard.init(*fb, term).isError()) {
+  if (keyboard.init(*fb, term, isLandscape).isError()) {
     logging(FATAL, "Keyboard failed\n");
     goto tty_init_failed;
   }
@@ -262,7 +276,7 @@ main(int argc, const char* argv[]) {
     if (need_redraw) {
       need_redraw = false;
       redraw(&term);
-      refresh(*fb, &term);
+      refresh(*fb, &term, isLandscape);
     }
 
     auto eventAndFds = [&] {
@@ -293,7 +307,7 @@ main(int argc, const char* argv[]) {
         parse(&term, buf, size);
         if (LAZY_DRAW && size == BUFSIZE)
           continue; /* maybe more data arrives soon */
-        refresh(*fb, &term);
+        refresh(*fb, &term, isLandscape);
       }
     }
 
