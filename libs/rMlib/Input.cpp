@@ -401,16 +401,7 @@ InputDeviceBase::~InputDeviceBase() {
   }
 }
 
-InputManager::InputManager() {
-#ifdef EMULATE
-  if (!input_ready) {
-    inputThread = std::thread(uinput_thread);
-    while (!input_ready) {
-      usleep(100);
-    }
-  }
-#endif
-}
+InputManager::InputManager() {}
 
 InputManager::~InputManager() {
   if (udevHandle != nullptr) {
@@ -459,6 +450,15 @@ InputManager::open(std::string_view input) {
 
 ErrorOr<BaseDevices>
 InputManager::openAll(bool monitor) {
+#ifdef EMULATE
+  if (!input_ready) {
+    inputThread = std::thread(uinput_thread);
+    while (!input_ready) {
+      usleep(100);
+    }
+  }
+#endif
+
   udev* udevHandle =
     this->udevHandle == nullptr ? udev_new() : this->udevHandle;
 

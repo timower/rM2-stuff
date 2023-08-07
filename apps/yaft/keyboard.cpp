@@ -482,6 +482,8 @@ Keyboard::initKeyMap() {
 
   // skip virtual keys if in landscape mode
   if (isLandscape) {
+    term_resize(
+      term, fb->canvas.height(), fb->canvas.width(), /* report */ true);
     return;
   }
 
@@ -972,10 +974,10 @@ Keyboard::hide() {
     return;
   }
 
+  hidden = true;
+
   initKeyMap();
   draw();
-
-  hidden = true;
 }
 
 void
@@ -984,8 +986,8 @@ Keyboard::show() {
     return;
   }
 
+  hidden = false;
+
   initKeyMap();
   draw();
-
-  hidden = false;
 }

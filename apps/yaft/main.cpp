@@ -188,7 +188,14 @@ fork_and_exec(int* master,
 
 static bool
 is_pogo_connected() {
-  int fd = open("/sys/pogo/status/pogo_connected", O_RDWR);
+  int fd = open(
+#ifndef EMULATE
+    "/sys/pogo/status/pogo_connected"
+#else
+    "/tmp/pogo"
+#endif
+    ,
+    O_RDWR);
   if (fd == -1) {
     return false;
   }
@@ -207,8 +214,8 @@ main(int argc, const char* argv[]) {
   extern const char* shell_cmd; /* defined in conf.h */
   const char* cmd;
   const char** args;
-  int w, h;
-  bool isLandscape;
+  int max_dim;
+  bool isLandscape, wasLandscape;
   uint8_t buf[BUFSIZE];
   ssize_t size;
   struct terminal_t term;
@@ -230,16 +237,9 @@ main(int argc, const char* argv[]) {
     goto fb_init_failed;
   }
 
-  isLandscape = is_pogo_connected();
-  if (isLandscape) {
-    w = fb->canvas.height();
-    h = fb->canvas.width();
-  } else {
-    w = fb->canvas.width();
-    h = fb->canvas.height();
-  }
-
-  if (!term_init(&term, w, h)) {
+  // Initialize the keyboard with the maximum possible rows and columns.
+  max_dim = std::max(fb->canvas.width(), fb->canvas.height());
+  if (!term_init(&term, max_dim, max_dim)) {
     logging(FATAL, "terminal initialize failed\n");
     goto term_init_failed;
   }
@@ -264,15 +264,27 @@ main(int argc, const char* argv[]) {
   }
   child_alive = true;
 
+  isLandscape = is_pogo_connected();
+  wasLandscape = isLandscape;
   if (keyboard.init(*fb, term, isLandscape).isError()) {
     logging(FATAL, "Keyboard failed\n");
     goto tty_init_failed;
   }
-
   keyboard.draw();
 
   /* main loop */
   while (child_alive) {
+    isLandscape = is_pogo_connected();
+    if (isLandscape != wasLandscape) {
+      fb->clear();
+      keyboard.isLandscape = isLandscape;
+      keyboard.initKeyMap();
+      keyboard.draw();
+      need_redraw = true;
+
+      wasLandscape = isLandscape;
+    }
+
     if (need_redraw) {
       need_redraw = false;
       redraw(&term);
