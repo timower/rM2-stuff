@@ -129,6 +129,18 @@ ioctl(int fd, unsigned long request, char* ptr) {
 extern "C" {
 
 int
+setenv(const char* name, const char* value, int overwrite) {
+  static const auto originalFunc =
+    (int (*)(const char*, const char*, int))dlsym(RTLD_NEXT, "setenv");
+
+  if (!inXochitl && strcmp(name, "QT_QPA_EVDEV_TOUCHSCREEN_PARAMETERS") == 0) {
+    value = "rotate=180:invertx";
+  }
+
+  return originalFunc(name, value, overwrite);
+}
+
+int
 __libc_start_main(int (*_main)(int, char**, char**),
                   int argc,
                   char** argv,

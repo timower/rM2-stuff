@@ -8,5 +8,5 @@ set(CPACK_DEBIAN_ARCHIVE_TYPE "gnutar")
 set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "rmall")
 
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "xochitl")
-set(CPACK_DEBIAN_PACKAGE_PROVIDES "display;rm2fb-client")
-set(CPACK_DEBIAN_PACKAGE_CONFLICTS "display;rm2fb-client;rm2fb")
+set(CPACK_DEBIAN_PACKAGE_PROVIDES "display, rm2fb-client")
+set(CPACK_DEBIAN_PACKAGE_CONFLICTS "display, rm2fb-client, rm2fb")
