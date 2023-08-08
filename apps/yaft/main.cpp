@@ -274,19 +274,26 @@ main(int argc, const char* argv[]) {
 
   /* main loop */
   while (child_alive) {
+
+    // If landscape changed, update keymap.
     isLandscape = is_pogo_connected();
     if (isLandscape != wasLandscape) {
-      fb->clear();
       keyboard.isLandscape = isLandscape;
       keyboard.initKeyMap();
-      keyboard.draw();
-      need_redraw = true;
-
+      term.shouldClear = true; // redraw terminal.
       wasLandscape = isLandscape;
     }
 
+    // Handle signal handler redraw msg.
     if (need_redraw) {
+      term.shouldClear = true;
       need_redraw = false;
+    }
+
+    // If we need to refresh the screen, redraw everything.
+    if (term.shouldClear) {
+      fb->canvas.set(0xFFFF);
+      keyboard.draw();
       redraw(&term);
       refresh(*fb, &term, isLandscape);
     }

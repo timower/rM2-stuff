@@ -205,6 +205,9 @@ draw_line(rmlib::fb::FrameBuffer& fb,
               rmlib::fb::Waveform::DU,
               rmlib::fb::UpdateFlags::None);
   update_count++;
+  if (update_count > 1024) {
+    term->shouldClear = true;
+  }
 
   term->line_dirty[line] =
     ((term->mode & MODE_CURSOR) && term->cursor.y == line) ? true : false;
@@ -217,18 +220,13 @@ refresh(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, bool isLandscape) {
   if (term->mode & MODE_CURSOR)
     term->line_dirty[term->cursor.y] = true;
 
-  bool full = term->shouldClear || update_count > 1024;
-  if (full) {
-    fb.canvas.set(0xFFFF);
-  }
-
   for (int line = 0; line < term->lines; line++) {
-    if (term->line_dirty[line] || full) {
+    if (term->line_dirty[line]) {
       draw_line(fb, term, isLandscape, line);
     }
   }
 
-  if (full) {
+  if (term->shouldClear) {
     std::cout << "FULL UPDATE: " << update_count << std::endl;
     fb.doUpdate(fb.canvas.rect(),
                 rmlib::fb::Waveform::GC16,
