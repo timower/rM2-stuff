@@ -1,21 +1,11 @@
 #include "keyboard.h"
 
+#include "keymap.h"
 #include "layout.h"
 
 #include "yaft.h"
 
-#ifdef __APPLE__
-#include "event-codes.h"
-#else
-#include <linux/input-event-codes.h>
-#endif
-
 using namespace rmlib;
-
-struct EvKeyInfo {
-  int scancode;
-  int altscancode = 0; // Code when pressed with shift.
-};
 
 namespace {
 
@@ -35,138 +25,6 @@ constexpr bool
 isModifier(int scancode) {
   return scancode == Shift || scancode == Ctrl || scancode == Alt;
 }
-
-#if 0 // C++ 20
-static_assert(layout.size() == num_rows);
-static_assert(
-  std::max_element(layout.begin(), layout.end(), [](auto& a, auto& b) {
-    return a.size() < b.size();
-  })->size() == row_size);
-#endif
-
-const std::unordered_map<int, EvKeyInfo> keymap = {
-  { KEY_ESC, { Escape } },
-  { KEY_1, { '1', '!' } },
-  { KEY_2, { '2', '@' } },
-  { KEY_3, { '3', '#' } },
-  { KEY_4, { '4', '$' } },
-  { KEY_5, { '5', '%' } },
-  { KEY_6, { '6', '^' } },
-  { KEY_7, { '7', '&' } },
-  { KEY_8, { '8', '*' } },
-  { KEY_9, { '9', '(' } },
-  { KEY_0, { '0', ')' } },
-  { KEY_MINUS, { '-', '_' } },
-  { KEY_EQUAL, { '=', '+' } },
-  { KEY_BACKSPACE, { Backspace } },
-  { KEY_TAB, { Tab } },
-  { KEY_Q, { 'Q' } },
-  { KEY_W, { 'W' } },
-  { KEY_E, { 'E' } },
-  { KEY_R, { 'R' } },
-  { KEY_T, { 'T' } },
-  { KEY_Y, { 'Y' } },
-  { KEY_U, { 'U' } },
-  { KEY_I, { 'I' } },
-  { KEY_O, { 'O' } },
-  { KEY_P, { 'P' } },
-  { KEY_LEFTBRACE, { '[', '{' } },
-  { KEY_RIGHTBRACE, { ']', '}' } },
-  { KEY_ENTER, { Enter } },
-  { KEY_LEFTCTRL, { Ctrl } },
-  { KEY_A, { 'A' } },
-  { KEY_S, { 'S' } },
-  { KEY_D, { 'D' } },
-  { KEY_F, { 'F' } },
-  { KEY_G, { 'G' } },
-  { KEY_H, { 'H' } },
-  { KEY_J, { 'J' } },
-  { KEY_K, { 'K' } },
-  { KEY_L, { 'L' } },
-  { KEY_SEMICOLON, { ';', ':' } },
-  { KEY_APOSTROPHE, { '\'', '"' } },
-  { KEY_GRAVE, { '`', '~' } },
-  { KEY_LEFTSHIFT, { Shift } },
-  { KEY_BACKSLASH, { '\\', '|' } },
-  { KEY_Z, { 'Z' } },
-  { KEY_X, { 'X' } },
-  { KEY_C, { 'C' } },
-  { KEY_V, { 'V' } },
-  { KEY_B, { 'B' } },
-  { KEY_N, { 'N' } },
-  { KEY_M, { 'M' } },
-  { KEY_COMMA, { ',', '<' } },
-  { KEY_DOT, { '.', '>' } },
-  { KEY_SLASH, { '/', '?' } },
-  { KEY_RIGHTSHIFT, { Shift } },
-  { KEY_KPASTERISK, { '*' } },
-  { KEY_LEFTALT, { Alt } },
-  { KEY_SPACE, { ' ' } },
-  // { KEY_CAPSLOCK
-  // { KEY_F1 59
-  // { KEY_F2 60
-  // { KEY_F3 61
-  // { KEY_F4 62
-  // { KEY_F5 63
-  // { KEY_F6 64
-  // { KEY_F7 65
-  // { KEY_F8 66
-  // { KEY_F9 67
-  // { KEY_F10 68
-  // { KEY_NUMLOCK 69
-  // { KEY_SCROLLLOCK 70
-  { KEY_KP7, { '7' } },
-  { KEY_KP8, { '8' } },
-  { KEY_KP9, { '9' } },
-  { KEY_KPMINUS, { '-' } },
-  { KEY_KP4, { '4' } },
-  { KEY_KP5, { '5' } },
-  { KEY_KP6, { '6' } },
-  { KEY_KPPLUS, { '+' } },
-  { KEY_KP1, { '1' } },
-  { KEY_KP2, { '2' } },
-  { KEY_KP3, { '3' } },
-  { KEY_KP0, { '0' } },
-  { KEY_KPDOT, { '.' } },
-
-  // { KEY_ZENKAKUHANKAKU 85
-  // { KEY_102ND 86
-  // { KEY_F11 87
-  // { KEY_F12 88
-  // { KEY_RO 89
-  // { KEY_KATAKANA 90
-  // { KEY_HIRAGANA 91
-  // { KEY_HENKAN 92
-  // { KEY_KATAKANAHIRAGANA 93
-  // { KEY_MUHENKAN 94
-  // { KEY_KPJPCOMMA 95
-  { KEY_KPENTER, { Enter } },
-  { KEY_RIGHTCTRL, { Ctrl } },
-  { KEY_KPSLASH, { '/' } },
-  // { KEY_SYSRQ 99
-  { KEY_RIGHTALT, { Alt } },
-  { KEY_LINEFEED, { Enter } },
-  { KEY_HOME, { Home } },
-  { KEY_UP, { Up } },
-  { KEY_PAGEUP, { PageUp } },
-  { KEY_LEFT, { Left } },
-  { KEY_RIGHT, { Right } },
-  { KEY_END, { End } },
-  { KEY_DOWN, { Down } },
-  { KEY_PAGEDOWN, { PageDown } },
-  // { KEY_INSERT 110
-  { KEY_DELETE, { Del } },
-  // { KEY_MACRO 112
-  // { KEY_MUTE 113
-  // { KEY_VOLUMEDOWN 114
-  // { KEY_VOLUMEUP 115
-  // { KEY_POWER 116 /* SC System Power Down */
-  { KEY_KPEQUAL, { '=' } },
-  { KEY_KPPLUSMINUS, { '+', '-' } },
-  // { KEY_PAUSE 119
-  // { KEY_SCALE 120 /* AL Compiz Scale (Expose) */
-
-};
 
 const char*
 getKeyCodeStr(int scancode, bool shift, bool alt, bool ctrl, bool appCursor) {
@@ -394,19 +252,16 @@ KeyboardRenderObject::updateRepeat() {
         state.held = true;
         state.dirty = true;
         markNeedsDraw(/* full */ false);
-      } else if (key->code == Escape) {
-        // if (hidden) {
-        //   show();
-        // } else {
-        //   hide();
-        // }
-        // break;
-
       } else {
-        sendKeyDown(*key);
+        sendKeyDown(*key, /* repeat */ true);
       }
 
-      state.nextRepeat += repeat_time;
+      // Don't continue to repeat keys with special actions on longpress
+      if (key->longPressCode == 0) {
+        state.nextRepeat += repeat_time;
+      } else {
+        state.nextRepeat += std::chrono::hours(5);
+      }
     }
   }
 
@@ -417,7 +272,7 @@ KeyboardRenderObject::updateRepeat() {
 
     if (time > state.nextRepeat) {
       if (!isModifier(key->scancode)) {
-        sendKeyDown(*key);
+        sendKeyDown(*key, /* repeat */ true);
       }
 
       state.nextRepeat += repeat_time;
@@ -451,20 +306,18 @@ KeyboardRenderObject::updateLayout() {
 }
 
 void
-KeyboardRenderObject::sendKeyDown(const KeyInfo& key) {
-  if (isModifier(key.code)) {
-    return;
-  }
-
-  // Lookup modifier state.
-  bool shift = shiftKey == nullptr ? false : keyState[shiftKey].isDown();
-  bool alt = altKey == nullptr ? false : keyState[altKey].isDown();
-  bool ctrl = ctrlKey == nullptr ? false : keyState[ctrlKey].isDown();
-
+KeyboardRenderObject::sendKeyDown(int scancode,
+                                  bool shift,
+                                  bool alt,
+                                  bool ctrl) {
   bool appCursor = (widget->term->mode & MODE_APP_CURSOR) != 0;
 
-  // scancode, use alt code if shift is pressed.
-  auto scancode = (key.altCode != 0 && shift) ? key.altCode : key.code;
+  if (isCallback(scancode)) {
+    if (widget->callback) {
+      widget->callback(getCallback(scancode));
+    }
+    return;
+  }
 
   const auto* code = getKeyCodeStr(scancode, shift, alt, ctrl, appCursor);
   if (code != nullptr) {
@@ -474,8 +327,27 @@ KeyboardRenderObject::sendKeyDown(const KeyInfo& key) {
               << " ctrl " << ctrl << " alt " << alt << std::endl;
   }
 }
+
 void
-KeyboardRenderObject::sendKeyDown(const EvKeyInfo& key) {
+KeyboardRenderObject::sendKeyDown(const KeyInfo& key, bool repeat) {
+  if (isModifier(key.code)) {
+    return;
+  }
+
+  // Lookup modifier state.
+  bool shift = shiftKey == nullptr ? false : keyState[shiftKey].isDown();
+  bool alt = altKey == nullptr ? false : keyState[altKey].isDown();
+  bool ctrl = ctrlKey == nullptr ? false : keyState[ctrlKey].isDown();
+
+  // scancode, use alt code if shift is pressed.
+  auto scancode = (key.altCode != 0 && shift) ? key.altCode : key.code;
+  if (repeat) {
+    scancode = key.longPressCode;
+  }
+  sendKeyDown(scancode, shift, alt, ctrl);
+}
+void
+KeyboardRenderObject::sendKeyDown(const EvKeyInfo& key, bool repeat) {
   if (isModifier(key.scancode)) {
     return;
   }
@@ -493,18 +365,9 @@ KeyboardRenderObject::sendKeyDown(const EvKeyInfo& key) {
   bool alt = anyKeyDown(Alt);
   bool ctrl = anyKeyDown(Ctrl);
 
-  bool appCursor = (widget->term->mode & MODE_APP_CURSOR) != 0;
-
   auto scancode =
     (key.altscancode != 0 && shift) ? key.altscancode : key.scancode;
-
-  const auto* code = getKeyCodeStr(scancode, shift, alt, ctrl, appCursor);
-  if (code != nullptr) {
-    write(widget->term->fd, code, strlen(code));
-  } else {
-    std::cerr << "unknown key combo: " << scancode << " shift " << shift
-              << " ctrl " << ctrl << " alt " << alt << std::endl;
-  }
+  sendKeyDown(scancode, shift, alt, ctrl);
 }
 
 const KeyInfo*
@@ -589,8 +452,8 @@ KeyboardRenderObject::handleTouchEvent(const Ev& ev) {
 
 void
 KeyboardRenderObject::handleKeyEvent(const rmlib::input::KeyEvent& ev) {
-  auto it = keymap.find(ev.keyCode);
-  if (it == keymap.end()) {
+  auto it = qwerty_keymap.find(ev.keyCode);
+  if (it == qwerty_keymap.end()) {
     std::cout << "Unknown physical key: " << ev.keyCode << "\n";
     return;
   }

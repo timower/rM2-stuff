@@ -11,6 +11,8 @@ struct KeyInfo {
   int altCode = 0;
 
   int width = 1;
+
+  int longPressCode = 0;
 };
 
 struct Layout {
@@ -35,9 +37,25 @@ enum SpecialKeys {
   Down,
 
   PageUp,
-  PageDown
+  PageDown,
 
+  Callback = 0x1100000,
 };
+
+inline bool
+isCallback(int code) {
+  return (code & Callback) == Callback;
+}
+
+inline int
+getCallback(int code) {
+  return code & 0x00fffff;
+}
+
+inline int
+makeCallback(int num) {
+  return num | Callback;
+}
 
 enum ModifierKeys {
   Shift = 0x2000000,

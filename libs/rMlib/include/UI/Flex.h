@@ -7,6 +7,7 @@
 
 namespace rmlib {
 
+// TODO: this won't work with DynamicWidgets..
 template<typename Child>
 class Expanded {
 public:

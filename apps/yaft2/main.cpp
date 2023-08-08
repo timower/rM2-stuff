@@ -142,13 +142,18 @@ public:
   }
 
   auto build(AppContext& ctx, const BuildContext& buildCtx) const {
-    return Column(Expanded(Screen(term.get())),
-                  Keyboard(term.get(), qwerty_layout));
+    return Column(
+      Expanded(Screen(term.get())),
+      Keyboard(
+        term.get(), hidden ? hidden_layout : qwerty_layout, [this](int num) {
+          setState([](auto& self) { self.hidden = !self.hidden; });
+        }));
   }
 
 private:
   // TODO: remove the mutable
   std::unique_ptr<terminal_t> term;
+  bool hidden = false;
 };
 
 YaftState
@@ -160,7 +165,7 @@ Yaft::createState() const {
 
 int
 main(int argc, char* argv[]) {
-  static const char* shell_args[2] = { shell_cmd, NULL };
+  static const char* shell_args[3] = { shell_cmd, "-l", NULL };
 
   if (setlocale(LC_ALL, "") == NULL) /* for wcwidth() */ {
     std::cout << "setlocale failed\n";

@@ -10,14 +10,18 @@ struct Layout;
 
 class KeyboardRenderObject;
 
+using KeyboardCallback = std::function<void(int)>;
+
+/// Keyboard widget, displays a virtual keyboard of the given layout.
+/// Also interprets physical key presses.
 class Keyboard : public rmlib::Widget<KeyboardRenderObject> {
 public:
   // default size:
   constexpr static int key_height = 64;
   constexpr static int key_width = 128;
 
-  Keyboard(struct terminal_t* term, const Layout& layout)
-    : term(term), layout(layout) {}
+  Keyboard(struct terminal_t* term, const Layout& layout, KeyboardCallback cb)
+    : term(term), layout(layout), callback(std::move(cb)) {}
 
   std::unique_ptr<rmlib::RenderObject> createRenderObject() const;
 
@@ -26,8 +30,12 @@ private:
 
   struct terminal_t* term;
   const Layout& layout;
+  KeyboardCallback callback;
 };
 
+/// Keyboard render object
+///
+///
 class KeyboardRenderObject : public rmlib::LeafRenderObject<Keyboard> {
   using time_source = std::chrono::steady_clock;
 
@@ -49,8 +57,9 @@ private:
 
   void updateLayout();
 
-  void sendKeyDown(const KeyInfo& key);
-  void sendKeyDown(const EvKeyInfo& key);
+  void sendKeyDown(const KeyInfo& key, bool repeat = false);
+  void sendKeyDown(const EvKeyInfo& key, bool repeat = false);
+  void sendKeyDown(int scancode, bool shift, bool alt, bool ctrl);
 
   const KeyInfo* getKey(const rmlib::Point& point);
 

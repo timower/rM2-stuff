@@ -27,7 +27,7 @@ Layout::numCols() const {
 }
 
 const Layout qwerty_layout = { {
-  { { "esc", Escape },
+  { { "esc", Escape, "", 0, /* width */ 1, /* longPress */ makeCallback(1) },
     { ">", 0x3e, "<", 0x3c },
     { "|", 0x7c, "&", 0x26 },
     { "!", 0x21, "?", 0x3f },
@@ -99,7 +99,7 @@ const Layout qwerty_layout = { {
 } };
 
 const Layout hidden_layout = { { {
-  { "esc", Escape },
+  { "esc", Escape, "", 0, /* width */ 1, /* longPress */ makeCallback(1) },
   { "pgup", PageUp },
   { "pgdn", PageDown },
   { "home", Home },
