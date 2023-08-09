@@ -39,6 +39,18 @@ brightness2gray(uint16_t brightness) {
   }
   return White;
 }
+
+void
+initMouseBuf(std::array<char, 6>& buf, Point loc) {
+  constexpr char esc_char = '\x1b';
+
+  loc.x /= CELL_WIDTH;
+  loc.y /= CELL_HEIGHT;
+
+  char cx = 33 + loc.x;
+  char cy = 33 + loc.y;
+  buf = { esc_char, '[', 'M', 32, cx, cy };
+}
 // \}
 } // namespace
 
@@ -202,4 +214,74 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
     { { 0, y_start }, { rect.width() - 1, y_start + CELL_HEIGHT - 1 } },
     rmlib::fb::Waveform::DU,
     rmlib::fb::UpdateFlags::None);
+}
+
+template<typename Ev>
+void
+ScreenRenderObject::handleTouchEvent(const Ev& ev) {
+  if ((widget->term->mode & ALL_MOUSE_MODES) == 0) {
+    return;
+  }
+
+  // TODO: two finger scrolling?
+  // const auto lastFingers = kb.gestureCtrlr.getCurrentFingers();
+  // if constexpr (std::is_same_v<Event, TouchEvent>) {
+  //   const auto [gestures, _] = kb.gestureCtrlr.handleEvents({ ev });
+  //   for (const auto& gesture : gestures) {
+  //     if (std::holds_alternative<SwipeGesture>(gesture)) {
+  //       handleGesture(kb, std::get<SwipeGesture>(gesture));
+  //     }
+  //   }
+  // }
+
+  const auto slot = [&ev]() {
+    if constexpr (std::is_same_v<Ev, input::PenEvent>) {
+      (void)ev;
+      return 0x1000;
+    } else {
+      return ev.slot;
+    }
+  }();
+  const auto scaled_loc = ev.location - getRect().topLeft;
+  std::array<char, 6> buf;
+  initMouseBuf(buf, scaled_loc);
+
+  // Mouse down on first finger if mouse is not down.
+  if (ev.isDown() && mouseSlot == -1 /*&& lastFingers == 0*/) {
+    mouseSlot = slot;
+
+    // Send mouse down code
+    buf[3] += 0; // mouse button 1
+    write(widget->term->fd, buf.data(), buf.size());
+
+  } else if ((ev.isUp() && slot == mouseSlot) /*||
+             (kb.mouseSlot != -1 && kb.gestureCtrlr.getCurrentFingers() > 1)*/) {
+
+    // Mouse up after finger lift or second finger down (for scrolling).
+    mouseSlot = -1;
+
+    // Send mouse up code
+    buf[3] += 3; // mouse release
+    write(widget->term->fd, buf.data(), buf.size());
+  } else if (mouseSlot == slot && lastMousePos != scaled_loc &&
+             (widget->term->mode & MODE_MOUSE_MOVE) != 0) {
+    buf[3] += 32; // mouse move
+    write(widget->term->fd, buf.data(), buf.size());
+  }
+  lastMousePos = scaled_loc;
+}
+
+void
+ScreenRenderObject::handleInput(const rmlib::input::Event& ev) {
+  std::visit(
+    [this](const auto& ev) {
+      if constexpr (rmlib::input::is_pointer_event<
+                      std::decay_t<decltype(ev)>>) {
+
+        if (getRect().contains(ev.location)) {
+          handleTouchEvent(ev);
+        }
+      }
+    },
+    ev);
 }

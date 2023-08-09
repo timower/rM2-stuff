@@ -29,9 +29,16 @@ protected:
 
   rmlib::UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) final;
 
+  void handleInput(const rmlib::input::Event& ev) final;
+
 private:
   rmlib::UpdateRegion drawLine(rmlib::Canvas& canvas,
                                rmlib::Rect rect,
                                terminal_t& term,
                                int line) const;
+  template<typename Ev>
+  void handleTouchEvent(const Ev& ev);
+
+  int mouseSlot = -1;
+  rmlib::Point lastMousePos;
 };
