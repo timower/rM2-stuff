@@ -196,17 +196,20 @@ draw_line(rmlib::fb::FrameBuffer& fb,
   }
 
   /* actual display update (bit blit) */
-  // TODO: group updates.
-  fb.doUpdate(isLandscape ? rmlib::Rect{ { y_start - CELL_HEIGHT, 0 },
-                                         { y_start, term->width - 1 } }
-                          : rmlib::Rect{ { 0, y_start },
-                                         { fb.canvas.width() - 1,
-                                           y_start + CELL_HEIGHT - 1 } },
-              rmlib::fb::Waveform::DU,
-              rmlib::fb::UpdateFlags::None);
-  update_count++;
-  if (update_count > 1024) {
-    term->shouldClear = true;
+  // Skip update if we're doing a full clear anyway.
+  if (!term->shouldClear) {
+    fb.doUpdate(isLandscape ? rmlib::Rect{ { y_start - CELL_HEIGHT, 0 },
+                                           { y_start, term->width - 1 } }
+                            : rmlib::Rect{ { 0, y_start },
+                                           { fb.canvas.width() - 1,
+                                             y_start + CELL_HEIGHT - 1 } },
+                rmlib::fb::Waveform::DU,
+                rmlib::fb::UpdateFlags::None);
+
+    update_count++;
+    if (update_count > 1024) {
+      term->shouldClear = true;
+    }
   }
 
   term->line_dirty[line] =
