@@ -26,7 +26,7 @@
 #include <string.h>
 #include "tilem.h"
 
-TilemLCDBuffer* tilem_lcd_buffer_new()
+TilemLCDBuffer* tilem_lcd_buffer_new(void)
 {
 	return tilem_new0(TilemLCDBuffer, 1);
 }

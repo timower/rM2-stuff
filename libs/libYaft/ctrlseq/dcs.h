@@ -492,8 +492,8 @@ decdld_bitmap(struct glyph_t* glyph,
       if (height_shift < CELL_HEIGHT) {
         logging(
           DEBUG, "height_shift:%d width_shift:%d\n", height_shift, width_shift);
-        // glyph->bitmap[height_shift] |= bit_mask[CELL_WIDTH] & (0x01 <<
-        // width_shift);
+        glyph->bitmap[height_shift] |=
+          bit_mask[CELL_WIDTH] & (0x01 << width_shift);
       }
     }
   }
@@ -506,8 +506,8 @@ init_glyph(struct glyph_t* glyph) {
   glyph->width = 1; /* drcs glyph must be HALF */
   glyph->code = 0;  /* this value not used: drcs call by DRCSMMv1 */
 
-  // for (i = 0; i < CELL_HEIGHT; i++)
-  // 	glyph->bitmap[i] = 0;
+  for (i = 0; i < CELL_HEIGHT; i++)
+  	glyph->bitmap[i] = 0;
 }
 
 void
