@@ -8,6 +8,7 @@
 namespace rmlib {
 
 // TODO: this won't work with DynamicWidgets..
+// TODO: will this work with changing flex?
 template<typename Child>
 class Expanded {
 public:
@@ -104,6 +105,8 @@ protected:
     const auto remainingSpace = isVertical()
                                   ? constraints.max.height - result.height
                                   : constraints.max.width - result.width;
+
+    // TODO: if totalFlex or remainingSpace changed, then we need to re-layout
 
     for (auto i = 0u; i < num_children; i++) {
       if (this->widget->flexes[i] == 0) {

@@ -40,7 +40,9 @@ public:
   }
 
   Size layout(const Constraints& constraints) {
-    if (needsLayout()) {
+    if (needsLayout() || constraints != lastConstraints) {
+      lastConstraints = constraints;
+
       const auto result = doLayout(constraints);
       assert(result.width != Constraints::unbound &&
              result.height != Constraints::unbound);
@@ -143,6 +145,7 @@ private:
   rmlib::Rect rect;
 
   Size lastSize = { 0, 0 };
+  Constraints lastConstraints = {};
 
   // TODO: are both needed?
   CachedBool needsLayoutCache;

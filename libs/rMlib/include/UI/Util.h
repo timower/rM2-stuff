@@ -79,6 +79,14 @@ struct Constraints {
     return Size{ std::min(newWidth, max.width),
                  std::min(newHeight, max.height) };
   }
+
+  constexpr bool operator==(const Constraints& other) const {
+    return min == other.min && max == other.max;
+  }
+
+  constexpr bool operator!=(const Constraints& other) const {
+    return !(*this == other);
+  }
 };
 
 struct UpdateRegion {
