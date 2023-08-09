@@ -327,6 +327,7 @@ uinput_thread() {
     return;
   }
   bool down = false;
+  bool quit = false;
 
   while (!stop_input) {
     SDL_Event event;
@@ -335,6 +336,7 @@ uinput_thread() {
     switch (event.type) {
       case SDL_QUIT:
         stop_input = true;
+        quit = true;
         break;
       case SDL_MOUSEMOTION:
         if (down) {
@@ -375,7 +377,9 @@ uinput_thread() {
   }
 
   libevdev_uinput_destroy(uidev);
-  kill(getpid(), SIGINT);
+  if (quit) {
+    kill(getpid(), SIGINT);
+  }
 }
 
 #endif
