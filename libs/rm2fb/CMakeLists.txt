@@ -1,3 +1,6 @@
+if (${EMULATE})
+  return()
+endif()
 project(rm2fb)
 
 set(COMMON_SRC

@@ -1,3 +1,7 @@
+if (NOT "${CMAKE_SIZEOF_VOID_P}" STREQUAL "4")
+  return()
+endif()
+
 project(swtcon)
 
 add_library(${PROJECT_NAME} STATIC

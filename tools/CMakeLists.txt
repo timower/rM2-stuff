@@ -5,4 +5,7 @@ add_subdirectory(ui-tests)
 add_subdirectory(rm2fb-tests)
 
 add_custom_target(tools)
-add_dependencies(tools misc-test swtcon-preload input-test ui-tests)
+add_dependencies(tools misc-test  input-test ui-tests)
+if (TARGET swtcon-preload)
+  add_dependencies(tools swtcon-preload)
+endif()

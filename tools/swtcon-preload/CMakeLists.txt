@@ -1,3 +1,7 @@
+if (NOT TARGET swtcon)
+  return()
+endif()
+
 project(swtcon-preload)
 
 add_library(${PROJECT_NAME} SHARED

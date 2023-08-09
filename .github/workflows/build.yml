@@ -11,26 +11,20 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
-      - name: Create Build Environment
-        run: |
-          cmake -E make_directory build
-
       - name: Configure CMake
-        run: |
-          cd build
-          cmake $GITHUB_WORKSPACE -DCMAKE_TOOLCHAIN_FILE="/usr/share/cmake/$CHOST.cmake" -DCMAKE_BUILD_TYPE=Release
+        run: cmake --preset release-toltec
 
       - name: Build
-        run: cd build && cmake --build .
+        run: cmake --build build/release-toltec
 
       - name: Package
-        run: cd build && cmake --build . --target package
+        run: cmake --build build/release-toltec --target package
 
       - name: Upload
         uses: actions/upload-artifact@v2
         with:
           name: package
-          path: build/rm2stuff.ipk
+          path: build/release-toltec/rm2stuff.ipk
   release:
     runs-on: ubuntu-latest
     needs: build

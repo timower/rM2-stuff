@@ -1,0 +1,87 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja"
+    },
+    {
+      "name": "rm",
+      "hidden": true,
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/rm-toolchain.cmake"
+      }
+    },
+    {
+      "name": "toltec",
+      "hidden": true,
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "/usr/share/cmake/$env{CHOST}.cmake"
+      }
+    },
+    {
+      "name": "clang",
+      "hidden": true,
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true
+      }
+    },
+    {
+      "name": "release-base",
+      "hidden": true,
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "MinSizeRel" }
+    },
+    {
+      "name": "debug-base",
+      "hidden": true,
+      "environment": {
+        "BASE_FLAGS": "-Wall -Wextra -Wpedantic",
+        "BASE_FLAGS_CXX": "$env{BASE_FLAGS} -Wno-c++20-designator"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_FLAGS": "$env{BASE_FLAGS}",
+        "CMAKE_CXX_FLAGS": "$env{BASE_FLAGS_CXX}"
+      }
+    },
+
+    {
+      "name": "dev-host",
+      "inherits": ["base", "clang", "debug-base"],
+      "binaryDir": "${sourceDir}/build/host",
+      "cacheVariables": { "EMULATE": true }
+    },
+    {
+      "name": "dev-tidy",
+      "inherits": ["base", "clang", "debug-base"],
+      "binaryDir": "${sourceDir}/build/tidy",
+      "cacheVariables": {
+        "CMAKE_CXX_CLANG_TIDY": "clang-tidy;-warnings-as-errors=*",
+        "CMAKE_C_FLAGS": "$env{BASE_FLAGS} -Werror",
+        "CMAKE_CXX_FLAGS": "$env{BASE_FLAGS_CXX} -Werror"
+      }
+    },
+    {
+      "name": "dev",
+      "inherits": ["base", "rm"],
+      "binaryDir": "${sourceDir}/build/dev",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+    },
+    {
+      "name": "release",
+      "inherits": ["base", "rm", "release-base"],
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "MinSizeRel"
+      }
+    },
+    {
+      "name": "release-toltec",
+      "inherits": ["base", "toltec", "release-base"],
+      "binaryDir": "${sourceDir}/build/release-toltec"
+    }
+  ]
+}

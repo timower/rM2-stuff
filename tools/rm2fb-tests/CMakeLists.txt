@@ -1,3 +1,7 @@
+if (NOT TARGET rm2fb_lib)
+  return()
+endif()
+
 project(rm2fb-tests)
 
 add_executable(server server.cpp)
