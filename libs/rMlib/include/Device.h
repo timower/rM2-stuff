@@ -41,4 +41,7 @@ getInputTransform(std::string_view path);
 std::vector<std::string>
 listDirectory(std::string_view path, bool onlyFiles = true);
 
+bool
+IsPogoConnected();
+
 } // namespace rmlib::device

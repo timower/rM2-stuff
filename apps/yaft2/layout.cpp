@@ -23,8 +23,10 @@ Layout::numCols() const {
     });
   }());
 
-  return getSize(rows.front());
+  return rows.empty() ? 0 : getSize(rows.front());
 }
+
+const Layout empty_layout = {};
 
 const Layout qwerty_layout = { {
   { { "esc", Escape, "", 0, /* width */ 1, /* longPress */ makeCallback(1) },

@@ -1,7 +1,9 @@
 #include "Device.h"
 
 #include <dirent.h>
+#include <fcntl.h>
 #include <fstream>
+#include <unistd.h>
 
 namespace rmlib::device {
 
@@ -148,4 +150,24 @@ listDirectory(std::string_view path, bool onlyFiles) {
   return result;
 }
 
+bool
+IsPogoConnected() {
+  int fd = open(
+#ifndef EMULATE
+    "/sys/pogo/status/pogo_connected"
+#else
+    "/tmp/pogo"
+#endif
+    ,
+    O_RDWR);
+  if (fd == -1) {
+    return false;
+  }
+
+  char buf = '\0';
+  read(fd, &buf, 1);
+  close(fd);
+
+  return buf == '1';
+}
 } // namespace rmlib::device

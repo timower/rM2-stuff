@@ -10,6 +10,7 @@
 #include "screen.h"
 
 // rmLib
+#include <Device.h>
 #include <UI.h>
 
 // stdlib
@@ -95,9 +96,11 @@ class YaftState : public StateBase<Yaft> {
 public:
   void init(AppContext& ctx, const BuildContext&) {
     term = std::make_unique<terminal_t>();
+
     // term_init needs the maximum size of the terminal.
-    if (!term_init(
-          term.get(), ctx.getFbCanvas().width(), ctx.getFbCanvas().height())) {
+    int maxSize =
+      std::max(ctx.getFbCanvas().width(), ctx.getFbCanvas().height());
+    if (!term_init(term.get(), maxSize, maxSize)) {
       std::cout << "Error init term\n";
       ctx.stop();
       return;
@@ -130,30 +133,50 @@ public:
     });
 
     // listen to stdin in debug.
-#ifndef NDEBUG
-    ctx.listenFd(STDIN_FILENO, [this] {
-      std::array<char, 512> buf;
-      auto size = read(STDIN_FILENO, &buf[0], buf.size());
-      if (size > 0) {
-        write(term->fd, &buf[0], size);
-      }
+    if constexpr (USE_STDIN) {
+      ctx.listenFd(STDIN_FILENO, [this] {
+        std::array<char, 512> buf;
+        auto size = read(STDIN_FILENO, &buf[0], buf.size());
+        if (size > 0) {
+          write(term->fd, &buf[0], size);
+        }
+      });
+    }
+
+    isLandscape = device::IsPogoConnected();
+    ctx.onDeviceUpdate([this, &ctx] {
+      // The pogo state updates after a delay, so wait 100 ms before checking.
+      pogoTimer = ctx.addTimer(std::chrono::milliseconds(100), [this] {
+        setState(
+          [](auto& self) { self.isLandscape = device::IsPogoConnected(); });
+      });
     });
-#endif
   }
 
   auto build(AppContext& ctx, const BuildContext& buildCtx) const {
-    return Column(
-      Expanded(Screen(term.get())),
-      Keyboard(
-        term.get(), hidden ? hidden_layout : qwerty_layout, [this](int num) {
-          setState([](auto& self) { self.hidden = !self.hidden; });
-        }));
+    const auto& layout = [this]() -> const Layout& {
+      if (isLandscape) {
+        return empty_layout;
+      }
+
+      if (hidden) {
+        return hidden_layout;
+      }
+
+      return qwerty_layout;
+    }();
+
+    return Column(Expanded(Screen(term.get(), isLandscape)),
+                  Keyboard(term.get(), layout, [this](int num) {
+                    setState([](auto& self) { self.hidden = !self.hidden; });
+                  }));
   }
 
 private:
-  // TODO: remove the mutable
   std::unique_ptr<terminal_t> term;
   bool hidden = false;
+  bool isLandscape = false;
+  TimerHandle pogoTimer;
 };
 
 YaftState

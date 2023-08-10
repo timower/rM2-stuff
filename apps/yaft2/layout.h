@@ -65,3 +65,4 @@ enum ModifierKeys {
 
 extern const Layout qwerty_layout;
 extern const Layout hidden_layout;
+extern const Layout empty_layout;

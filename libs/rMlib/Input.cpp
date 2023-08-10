@@ -275,11 +275,12 @@ handeDevice(InputManager& mgr, udev_device& dev) {
   }
 
   auto* action = udev_device_get_action(&dev);
+  std::cout << "action: " << (action == nullptr ? "null" : action) << "\n";
+
   if (action == nullptr || action == std::string_view("add")) {
     mgr.open(devnode);
     return;
   }
-  std::cout << "action: " << action << "\n";
   mgr.devices.erase(devnode);
 }
 

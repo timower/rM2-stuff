@@ -9,13 +9,16 @@ class ScreenRenderObject;
 
 class Screen : public rmlib::Widget<ScreenRenderObject> {
 public:
-  Screen(struct terminal_t* term) : term(term) {}
+  Screen(struct terminal_t* term, bool isLandscape)
+    : term(term), isLandscape(isLandscape) {}
 
   std::unique_ptr<rmlib::RenderObject> createRenderObject() const;
 
 private:
   friend class ScreenRenderObject;
   struct terminal_t* term;
+
+  bool isLandscape = false;
 };
 
 class ScreenRenderObject : public rmlib::LeafRenderObject<Screen> {

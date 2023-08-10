@@ -182,13 +182,13 @@ KeyboardRenderObject::doLayout(const rmlib::Constraints& constraints) {
   const auto numRows = widget->layout.numRows();
   const auto numCols = widget->layout.numCols();
 
-  if (constraints.hasBoundedHeight()) {
+  if (constraints.hasBoundedHeight() && numRows != 0) {
     keyHeight = float(constraints.max.height) / numRows;
     keyWidth = keyHeight / Keyboard::key_height * Keyboard::key_width;
     return Size{ int(keyWidth * numCols), int(keyHeight * numRows) };
   }
 
-  if (constraints.hasBoundedWidth()) {
+  if (constraints.hasBoundedWidth() && numCols != 0) {
     keyWidth = float(constraints.max.width) / numCols;
     keyHeight = keyWidth / Keyboard::key_width * Keyboard::key_height;
     return Size{ int(keyWidth * numCols), int(keyHeight * numRows) };

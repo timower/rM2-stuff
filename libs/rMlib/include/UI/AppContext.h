@@ -65,12 +65,20 @@ public:
 
   const Canvas& getFbCanvas() const { return canvas; }
 
+  void onDeviceUpdate(Callback fn) {
+    onDeviceUpdates.emplace_back(std::move(fn));
+  }
+
   void listenFd(int fd, Callback callback) {
     extraFds.emplace(fd, std::move(callback));
   }
 
   ErrorOr<std::vector<input::Event>> waitForInput(
     std::optional<std::chrono::microseconds> durantion) {
+
+    std::size_t startDevices = inputManager.devices.size();
+    std::vector<input::Event> result;
+
     if (!extraFds.empty()) {
       int maxFd = std::max_element(extraFds.begin(),
                                    extraFds.end(),
@@ -93,17 +101,29 @@ public:
         }
       }
 
-      return evs;
+      result = std::move(evs);
     } else {
-      return inputManager.waitForInput(durantion);
+      auto evs = TRY(inputManager.waitForInput(durantion));
+      result = std::move(evs);
     }
+
+    if (inputManager.devices.size() != startDevices) {
+      for (const auto& onDeviceUpdate : onDeviceUpdates) {
+        onDeviceUpdate();
+      }
+    }
+
+    return result;
   }
 
 private:
-  input::InputManager inputManager;
-  TimerQueue timers;
-  std::vector<Callback> doLaters;
   Canvas& canvas;
+  input::InputManager inputManager;
+
+  TimerQueue timers;
+  // TODO: use handles to destroy these
+  std::vector<Callback> doLaters;
+  std::vector<Callback> onDeviceUpdates;
 
   std::unordered_map<int, Callback> extraFds;
 

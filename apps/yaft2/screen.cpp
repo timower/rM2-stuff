@@ -68,6 +68,11 @@ ScreenRenderObject::update(const Screen& newWidget) {
     }
   }
 
+  if (newWidget.isLandscape != widget->isLandscape) {
+    markNeedsLayout();
+    markNeedsDraw(/* full */ true);
+  }
+
   widget = &newWidget;
 }
 
@@ -76,7 +81,11 @@ ScreenRenderObject::doLayout(const rmlib::Constraints& constraints) {
   const auto size = constraints.isBounded() ? constraints.max : constraints.min;
   assert(size.width != 0 && size.height != 0);
 
-  term_resize(widget->term, size.width, size.height, /* report */ true);
+  if (widget->isLandscape) {
+    term_resize(widget->term, size.height, size.width, /* report */ true);
+  } else {
+    term_resize(widget->term, size.width, size.height, /* report */ true);
+  }
   return size;
 }
 
@@ -111,11 +120,18 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
                              rmlib::Rect rect,
                              terminal_t& term,
                              int line) const {
-  int y_start = term.marginTop + line * CELL_HEIGHT + rect.topLeft.y;
+
+  const bool isLandscape = widget->isLandscape;
+
+  // x in landscape, y in portrait.
+  int z_start =
+    isLandscape
+      ? term.height - (term.marginTop + line * CELL_HEIGHT) + rect.topLeft.x
+      : term.marginTop + line * CELL_HEIGHT + rect.topLeft.y;
 
   for (int col = 0; col < term.cols; col++) {
-    int margin_left = (rect.width() - term.cols * CELL_WIDTH) / 2 +
-                      col * CELL_WIDTH + rect.topLeft.x;
+    int margin_left = term.marginLeft + col * CELL_WIDTH +
+                      (isLandscape ? rect.topLeft.y : rect.topLeft.x);
 
     auto& cell = term.cells[line][col];
 
@@ -175,8 +191,10 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
       }
 
       for (int w = 0; w < CELL_WIDTH; w++) {
-        int pos = (margin_left + w) * canvas.components() +
-                  (y_start + h) * canvas.lineSize();
+        int pos = isLandscape ? (margin_left + w) * canvas.lineSize() +
+                                  (z_start - h) * canvas.components()
+                              : (margin_left + w) * canvas.components() +
+                                  (z_start + h) * canvas.lineSize();
 
         /* set fg or bg */
         const auto* glyph = (cell.attribute & ATTR_BOLD) != 0
@@ -211,7 +229,9 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
     ((term.mode & MODE_CURSOR) && term.cursor.y == line) ? true : false;
 
   return UpdateRegion(
-    { { 0, y_start }, { rect.width() - 1, y_start + CELL_HEIGHT - 1 } },
+    isLandscape
+      ? Rect{ { z_start - CELL_HEIGHT, 0 }, { z_start, rect.height() - 1 } }
+      : Rect{ { 0, z_start }, { rect.width() - 1, z_start + CELL_HEIGHT - 1 } },
     rmlib::fb::Waveform::DU,
     rmlib::fb::UpdateFlags::None);
 }
