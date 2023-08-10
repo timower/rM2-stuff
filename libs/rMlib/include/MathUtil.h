@@ -186,6 +186,14 @@ struct Rect {
   }
 
   constexpr Rect& operator|=(const Rect& other) {
+    if (other.empty()) {
+      return *this;
+    }
+    if (empty()) {
+      *this = other;
+      return *this;
+    }
+
     topLeft = { std::min(topLeft.x, other.topLeft.x),
                 std::min(topLeft.y, other.topLeft.y) };
     bottomRight = { std::max(bottomRight.x, other.bottomRight.x),

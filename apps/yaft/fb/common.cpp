@@ -77,7 +77,7 @@ draw_sixel(rmlib::fb::FrameBuffer& fb,
 
 static int update_count = 0;
 
-inline void
+inline rmlib::Rect
 draw_line(rmlib::fb::FrameBuffer& fb,
           struct terminal_t* term,
           bool isLandscape,
@@ -195,25 +195,14 @@ draw_line(rmlib::fb::FrameBuffer& fb,
     }
   }
 
-  /* actual display update (bit blit) */
-  // Skip update if we're doing a full clear anyway.
-  if (!term->shouldClear) {
-    fb.doUpdate(isLandscape ? rmlib::Rect{ { y_start - CELL_HEIGHT, 0 },
-                                           { y_start, term->width - 1 } }
-                            : rmlib::Rect{ { 0, y_start },
-                                           { fb.canvas.width() - 1,
-                                             y_start + CELL_HEIGHT - 1 } },
-                rmlib::fb::Waveform::DU,
-                rmlib::fb::UpdateFlags::None);
-
-    update_count++;
-    if (update_count > 1024) {
-      term->shouldClear = true;
-    }
-  }
-
   term->line_dirty[line] =
     ((term->mode & MODE_CURSOR) && term->cursor.y == line) ? true : false;
+
+  return isLandscape ? rmlib::Rect{ { y_start - CELL_HEIGHT, 0 },
+                                    { y_start, term->width - 1 } }
+                     : rmlib::Rect{ { 0, y_start },
+                                    { fb.canvas.width() - 1,
+                                      y_start + CELL_HEIGHT - 1 } };
 }
 
 } // namespace
@@ -223,13 +212,28 @@ refresh(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, bool isLandscape) {
   if (term->mode & MODE_CURSOR)
     term->line_dirty[term->cursor.y] = true;
 
+  rmlib::Rect currentRegion;
+
+  const auto maybeDraw = [&] {
+    if (currentRegion.empty() || term->shouldClear) {
+      return;
+    }
+    fb.doUpdate(
+      currentRegion, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::None);
+    currentRegion = {};
+    update_count++;
+  };
+
   for (int line = 0; line < term->lines; line++) {
     if (term->line_dirty[line]) {
-      draw_line(fb, term, isLandscape, line);
+      currentRegion |= draw_line(fb, term, isLandscape, line);
+    } else {
+      maybeDraw();
     }
   }
+  maybeDraw();
 
-  if (term->shouldClear) {
+  if (term->shouldClear || update_count > 1024) {
     std::cout << "FULL UPDATE: " << update_count << std::endl;
     fb.doUpdate(fb.canvas.rect(),
                 rmlib::fb::Waveform::GC16,
