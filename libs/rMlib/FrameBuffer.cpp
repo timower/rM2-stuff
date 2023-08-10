@@ -26,21 +26,7 @@
 namespace rmlib::fb {
 namespace {
 #ifndef EMULATE
-constexpr auto shm_path = "/dev/shm/swtfb.01";
 constexpr auto fb_path = "/dev/fb0";
-
-constexpr int msg_q_id = 0x2257c;
-
-// TODO: import this from rm2-fb
-struct msgq_msg {
-  long type = 2;
-
-  mxcfb_update_data update;
-};
-
-// Global msgq:
-int msqid = -1;
-
 #else
 
 constexpr auto canvas_width = 1404;
@@ -183,7 +169,7 @@ ErrorOr<FrameBuffer>
 FrameBuffer::open() {
 #ifdef EMULATE
   auto canvas = TRY(makeEmulatedCanvas());
-  return FrameBuffer(FrameBuffer::Swtcon, 1337, canvas);
+  return FrameBuffer(FrameBuffer::rM2fb, 1337, canvas);
 #else
   int components = sizeof(uint16_t);
   int width;
@@ -205,6 +191,8 @@ FrameBuffer::open() {
         return rM1;
       case device::DeviceType::reMarkable2:
 
+        // Not all of the rm2 fb modes support retrieving the size, so hard code
+        // it here.
         width = 1404;
         height = 1872;
         stride = width * components;
@@ -214,23 +202,11 @@ FrameBuffer::open() {
           return Shim;
         }
 
-        // Not all of the rm2 fb modes support retrieving the size, so hard code
-        // it here.
-
         // check if shared mem exists
-        if (access(shm_path, F_OK) == 0) {
-          std::cerr << "Using rm2fb ipc\n";
-          return rM2fb;
-        }
-
-        // start swtcon
-        return Swtcon;
+        assert(false);
+        return rM2fb;
     }
   }();
-
-  if (fbType == Swtcon) {
-    return Error{ "No rm2fb found, swtcon not implemented yet\n" };
-  }
 
   const auto* path = [fbType] {
     switch (fbType) {
@@ -239,9 +215,7 @@ FrameBuffer::open() {
         return fb_path;
 
       case rM2fb:
-        return shm_path;
 
-      case Swtcon:
       default:
         assert(false);
         return "";
@@ -263,12 +237,7 @@ FrameBuffer::open() {
   }
 
   if (fbType == rM2fb) {
-    msqid = msgget(msg_q_id, IPC_CREAT | 0600);
-    if (msqid < 0) {
-      perror("Error opening msgq");
-      ::close(fd);
-      return Error{ "Error open message queue" };
-    }
+    return Error{ "rm2fb not supported" };
   }
 
   Canvas canvas(memory, width, height, stride, components);
@@ -323,58 +292,43 @@ FrameBuffer::doUpdate(Rect region, Waveform waveform, UpdateFlags flags) const {
   std::cout << getStr(waveform) << " ";
   updateEmulatedCanvas(canvas, region);
 #else
-  if (type != Swtcon) {
-    auto update = mxcfb_update_data{};
+  auto update = mxcfb_update_data{};
 
-    update.waveform_mode = static_cast<int>(waveform);
-    update.update_mode = (flags & UpdateFlags::FullRefresh) != 0 ? 1 : 0;
+  update.waveform_mode = static_cast<int>(waveform);
+  update.update_mode = (flags & UpdateFlags::FullRefresh) != 0 ? 1 : 0;
 
 #define TEMP_USE_REMARKABLE_DRAW 0x0018
 #define EPDC_FLAG_EXP1 0x270ce20
-    update.update_marker = 0;
-    update.dither_mode = EPDC_FLAG_EXP1;
-    update.temp = TEMP_USE_REMARKABLE_DRAW;
-    update.flags = 0;
+  update.update_marker = 0;
+  update.dither_mode = EPDC_FLAG_EXP1;
+  update.temp = TEMP_USE_REMARKABLE_DRAW;
+  update.flags = 0;
 
-    update.update_region.left = region.topLeft.x;
-    update.update_region.top = region.topLeft.y;
-    update.update_region.width = region.width();
-    update.update_region.height = region.height();
+  update.update_region.left = region.topLeft.x;
+  update.update_region.top = region.topLeft.y;
+  update.update_region.width = region.width();
+  update.update_region.height = region.height();
 
 #ifndef NDEBUG
-    const auto waveformStr = [waveform] {
-      switch (waveform) {
-        case Waveform::DU:
-          return "DU";
-        case Waveform::GC16:
-          return "GC16";
-        case Waveform::GC16Fast:
-          return "GC16Fast";
-        default:
-          return "???";
-      }
-    }();
-    std::cerr << "UPDATE " << waveformStr << " region: {"
-              << update.update_region.left << " "
-              << " " << update.update_region.top << " "
-              << update.update_region.width << " "
-              << update.update_region.height << "}\n";
-#endif
-
-    if (type == rM2fb) {
-      auto msg = msgq_msg{};
-      msg.update = update;
-
-      if (msgsnd(msqid, reinterpret_cast<void*>(&msg), sizeof(msgq_msg), 0) !=
-          0) {
-        perror("Error sending update msg");
-      }
-    } else {
-      ioctl(fd, MXCFB_SEND_UPDATE, &update);
+  const auto waveformStr = [waveform] {
+    switch (waveform) {
+      case Waveform::DU:
+        return "DU";
+      case Waveform::GC16:
+        return "GC16";
+      case Waveform::GC16Fast:
+        return "GC16Fast";
+      default:
+        return "???";
     }
-  } else {
-    assert(false && "Unimplemented");
-  }
+  }();
+  std::cerr << "UPDATE " << waveformStr << " region: {"
+            << update.update_region.left << " "
+            << " " << update.update_region.top << " "
+            << update.update_region.width << " " << update.update_region.height
+            << "}\n";
+#endif
+  ioctl(fd, MXCFB_SEND_UPDATE, &update);
 #endif
 }
 
