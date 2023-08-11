@@ -97,25 +97,37 @@ ScreenRenderObject::doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) {
     term.line_dirty[term.cursor.y] = true;
   }
 
-  UpdateRegion result;
+  Rect currentRect;
+  const auto maybeDraw = [&] {
+    if (currentRect.empty() || term.shouldClear) {
+      return;
+    }
+    fb->doUpdate(
+      currentRect, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::None);
+    currentRect = {};
+
+    // TODO: update count tracker?
+    // update_count++;
+  };
 
   for (int line = 0; line < term.lines; line++) {
     if (!isPartialDraw() || term.line_dirty[line]) {
-      result |= drawLine(canvas, rect, term, line);
+      currentRect |= drawLine(canvas, rect, term, line);
+    } else {
+      maybeDraw();
     }
   }
+  maybeDraw();
 
-  // TODO: update count tracker?
   if (term.shouldClear) {
-    result |=
-      UpdateRegion(rect, fb::Waveform::GC16, fb::UpdateFlags::FullRefresh);
     term.shouldClear = false;
+    return UpdateRegion(rect, fb::Waveform::GC16, fb::UpdateFlags::FullRefresh);
   }
 
-  return result;
+  return {};
 }
 
-rmlib::UpdateRegion
+rmlib::Rect
 ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
                              rmlib::Rect rect,
                              terminal_t& term,
@@ -228,12 +240,10 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
   term.line_dirty[line] =
     ((term.mode & MODE_CURSOR) && term.cursor.y == line) ? true : false;
 
-  return UpdateRegion(
-    isLandscape
-      ? Rect{ { z_start - CELL_HEIGHT, 0 }, { z_start, rect.height() - 1 } }
-      : Rect{ { 0, z_start }, { rect.width() - 1, z_start + CELL_HEIGHT - 1 } },
-    rmlib::fb::Waveform::DU,
-    rmlib::fb::UpdateFlags::None);
+  return isLandscape ? Rect{ { z_start - CELL_HEIGHT, 0 },
+                             { z_start, rect.height() - 1 } }
+                     : Rect{ { 0, z_start },
+                             { rect.width() - 1, z_start + CELL_HEIGHT - 1 } };
 }
 
 template<typename Ev>
@@ -304,4 +314,9 @@ ScreenRenderObject::handleInput(const rmlib::input::Event& ev) {
       }
     },
     ev);
+}
+
+void
+ScreenRenderObject::doRebuild(AppContext& ctx, const BuildContext&) {
+  this->fb = &ctx.getFramebuffer();
 }

@@ -9,7 +9,7 @@ namespace rmlib {
 
 class AppContext {
 public:
-  AppContext(Canvas& fbCanvas) : canvas(fbCanvas) {}
+  AppContext(fb::FrameBuffer& framebuffer) : framebuffer(framebuffer) {}
 
   TimerHandle addTimer(
     std::chrono::microseconds duration,
@@ -63,7 +63,8 @@ public:
 
   input::InputManager& getInputManager() { return inputManager; }
 
-  const Canvas& getFbCanvas() const { return canvas; }
+  const Canvas& getFbCanvas() const { return framebuffer.canvas; }
+  const fb::FrameBuffer& getFramebuffer() const { return framebuffer; }
 
   void onDeviceUpdate(Callback fn) {
     onDeviceUpdates.emplace_back(std::move(fn));
@@ -117,7 +118,7 @@ public:
   }
 
 private:
-  Canvas& canvas;
+  fb::FrameBuffer& framebuffer;
   input::InputManager inputManager;
 
   TimerQueue timers;

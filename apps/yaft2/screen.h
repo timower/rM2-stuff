@@ -23,7 +23,10 @@ private:
 
 class ScreenRenderObject : public rmlib::LeafRenderObject<Screen> {
 public:
-  using LeafRenderObject<Screen>::LeafRenderObject;
+  ScreenRenderObject(const Screen& screen)
+    : rmlib::LeafRenderObject<Screen>(screen) {
+    markNeedsRebuild();
+  }
 
   void update(const Screen& newWidget);
 
@@ -32,16 +35,20 @@ protected:
 
   rmlib::UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) final;
 
+  void doRebuild(rmlib::AppContext& ctx, const rmlib::BuildContext&) final;
+
   void handleInput(const rmlib::input::Event& ev) final;
 
 private:
-  rmlib::UpdateRegion drawLine(rmlib::Canvas& canvas,
-                               rmlib::Rect rect,
-                               terminal_t& term,
-                               int line) const;
+  rmlib::Rect drawLine(rmlib::Canvas& canvas,
+                       rmlib::Rect rect,
+                       terminal_t& term,
+                       int line) const;
   template<typename Ev>
   void handleTouchEvent(const Ev& ev);
 
   int mouseSlot = -1;
   rmlib::Point lastMousePos;
+
+  const rmlib::fb::FrameBuffer* fb = nullptr;
 };

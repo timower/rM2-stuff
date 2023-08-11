@@ -44,7 +44,7 @@ OptError<>
 runApp(AppWidget widget) {
   auto fb = TRY(rmlib::fb::FrameBuffer::open());
 
-  AppContext context(fb.canvas);
+  AppContext context(fb);
   details::currentContext = &context;
 
   TRY(context.getInputManager().openAll());
