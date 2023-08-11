@@ -1,6 +1,8 @@
 #pragma once
 
-#include "UI.h"
+#include <UI.h>
+
+#include "keymap.h"
 
 struct KeyInfo;
 struct EvKeyInfo;
@@ -20,8 +22,11 @@ public:
   constexpr static int key_height = 64;
   constexpr static int key_width = 128;
 
-  Keyboard(struct terminal_t* term, const Layout& layout, KeyboardCallback cb)
-    : term(term), layout(layout), callback(std::move(cb)) {}
+  Keyboard(struct terminal_t* term,
+           const Layout& layout,
+           const KeyMap& keymap,
+           KeyboardCallback cb)
+    : term(term), layout(layout), keymap(keymap), callback(std::move(cb)) {}
 
   std::unique_ptr<rmlib::RenderObject> createRenderObject() const;
 
@@ -30,6 +35,7 @@ private:
 
   struct terminal_t* term;
   const Layout& layout;
+  const KeyMap& keymap;
   KeyboardCallback callback;
 };
 

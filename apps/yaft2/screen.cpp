@@ -89,6 +89,12 @@ ScreenRenderObject::doLayout(const rmlib::Constraints& constraints) {
   return size;
 }
 
+bool
+ScreenRenderObject::shouldRefresh() const {
+  return isFullDraw() || widget->term->shouldClear ||
+         (widget->autoRefresh > 0 && numUpdates > widget->autoRefresh);
+}
+
 rmlib::UpdateRegion
 ScreenRenderObject::doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) {
   auto& term = *widget->term;
@@ -99,15 +105,14 @@ ScreenRenderObject::doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) {
 
   Rect currentRect;
   const auto maybeDraw = [&] {
-    if (currentRect.empty() || term.shouldClear) {
+    if (currentRect.empty() || shouldRefresh()) {
       return;
     }
     fb->doUpdate(
       currentRect, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::None);
     currentRect = {};
 
-    // TODO: update count tracker?
-    // update_count++;
+    numUpdates++;
   };
 
   for (int line = 0; line < term.lines; line++) {
@@ -119,8 +124,9 @@ ScreenRenderObject::doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) {
   }
   maybeDraw();
 
-  if (term.shouldClear) {
+  if (shouldRefresh()) {
     term.shouldClear = false;
+    numUpdates = 0;
     return UpdateRegion(rect, fb::Waveform::GC16, fb::UpdateFlags::FullRefresh);
   }
 

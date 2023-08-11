@@ -9,7 +9,7 @@ class ScreenRenderObject;
 
 class Screen : public rmlib::Widget<ScreenRenderObject> {
 public:
-  Screen(struct terminal_t* term, bool isLandscape)
+  Screen(struct terminal_t* term, bool isLandscape, int autoRefresh)
     : term(term), isLandscape(isLandscape) {}
 
   std::unique_ptr<rmlib::RenderObject> createRenderObject() const;
@@ -19,6 +19,7 @@ private:
   struct terminal_t* term;
 
   bool isLandscape = false;
+  int autoRefresh = 0;
 };
 
 class ScreenRenderObject : public rmlib::LeafRenderObject<Screen> {
@@ -46,6 +47,10 @@ private:
                        int line) const;
   template<typename Ev>
   void handleTouchEvent(const Ev& ev);
+
+  bool shouldRefresh() const;
+
+  int numUpdates = 0;
 
   int mouseSlot = -1;
   rmlib::Point lastMousePos;

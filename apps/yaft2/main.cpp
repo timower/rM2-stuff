@@ -5,6 +5,7 @@
 #include "yaft.h"
 
 // yaft(2)
+#include "config.h"
 #include "keyboard.h"
 #include "layout.h"
 #include "screen.h"
@@ -14,6 +15,7 @@
 #include <UI.h>
 
 // stdlib
+#include <sstream>
 #include <unistd.h>
 
 #ifdef __APPLE__
@@ -94,6 +96,31 @@ private:
 
 class YaftState : public StateBase<Yaft> {
 public:
+  /// Logs the given string to the terminal console.
+  void logTerm(std::string_view str) {
+    parse(term.get(), reinterpret_cast<const uint8_t*>(str.data()), str.size());
+  }
+
+  YaftConfig getConfig() {
+    auto cfgOrErr = loadConfig();
+
+    if (cfgOrErr.isError()) {
+      const auto& err = cfgOrErr.getError();
+      if (err.type == YaftConfigError::Missing) {
+        logTerm("No config, creating new one\r\n");
+        saveDefaultConfig();
+      } else {
+        std::stringstream ss;
+        ss << "Config syntax error: " << err.msg << "\r\n";
+        logTerm(ss.str());
+      }
+
+      return YaftConfig::getDefault();
+    }
+
+    return *cfgOrErr;
+  }
+
   void init(AppContext& ctx, const BuildContext&) {
     term = std::make_unique<terminal_t>();
 
@@ -105,6 +132,8 @@ public:
       ctx.stop();
       return;
     }
+
+    config = getConfig();
 
     initSignalHandler(ctx);
 
@@ -143,14 +172,18 @@ public:
       });
     }
 
-    isLandscape = device::IsPogoConnected();
-    ctx.onDeviceUpdate([this, &ctx] {
-      // The pogo state updates after a delay, so wait 100 ms before checking.
-      pogoTimer = ctx.addTimer(std::chrono::milliseconds(100), [this] {
-        setState(
-          [](auto& self) { self.isLandscape = device::IsPogoConnected(); });
+    if (config.orientation == YaftConfig::Orientation::Auto) {
+      isLandscape = device::IsPogoConnected();
+      ctx.onDeviceUpdate([this, &ctx] {
+        // The pogo state updates after a delay, so wait 100 ms before checking.
+        pogoTimer = ctx.addTimer(std::chrono::milliseconds(100), [this] {
+          setState(
+            [](auto& self) { self.isLandscape = device::IsPogoConnected(); });
+        });
       });
-    });
+    } else {
+      isLandscape = config.orientation == YaftConfig::Orientation::Landscape;
+    }
   }
 
   auto build(AppContext& ctx, const BuildContext& buildCtx) const {
@@ -163,20 +196,23 @@ public:
         return hidden_layout;
       }
 
-      return qwerty_layout;
+      return *config.layout;
     }();
 
-    return Column(Expanded(Screen(term.get(), isLandscape)),
-                  Keyboard(term.get(), layout, [this](int num) {
+    return Column(Expanded(Screen(term.get(), isLandscape, config.autoRefresh)),
+                  Keyboard(term.get(), layout, *config.keymap, [this](int num) {
                     setState([](auto& self) { self.hidden = !self.hidden; });
                   }));
   }
 
 private:
   std::unique_ptr<terminal_t> term;
+  TimerHandle pogoTimer;
+
+  YaftConfig config;
+
   bool hidden = false;
   bool isLandscape = false;
-  TimerHandle pogoTimer;
 };
 
 YaftState

@@ -5,7 +5,8 @@ add_executable(${PROJECT_NAME}
   keyboard.cpp
   screen.cpp
   layout.cpp
-  keymap.cpp)
+  keymap.cpp
+  config.cpp)
 
 target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_17)
 
@@ -13,7 +14,8 @@ target_link_libraries(${PROJECT_NAME}
   PRIVATE
     rMlib
     libYaft
-    util)
+    util
+    tomlplusplus::tomlplusplus)
 
 install(TARGETS ${PROJECT_NAME} DESTINATION opt/bin)
 

@@ -39,6 +39,9 @@ enum SpecialKeys {
   PageUp,
   PageDown,
 
+  Mod1,
+  Mod2,
+
   Callback = 0x1100000,
 };
 
@@ -66,3 +69,8 @@ enum ModifierKeys {
 extern const Layout qwerty_layout;
 extern const Layout hidden_layout;
 extern const Layout empty_layout;
+
+const std::initializer_list<std::pair<std::string_view, const Layout*>>
+  layouts = {
+    { "qwerty", &qwerty_layout },
+  };

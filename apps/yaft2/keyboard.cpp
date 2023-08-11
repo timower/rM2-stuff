@@ -1,6 +1,5 @@
 #include "keyboard.h"
 
-#include "keymap.h"
 #include "layout.h"
 
 #include "yaft.h"
@@ -364,9 +363,22 @@ KeyboardRenderObject::sendKeyDown(const EvKeyInfo& key, bool repeat) {
   bool shift = anyKeyDown(Shift);
   bool alt = anyKeyDown(Alt);
   bool ctrl = anyKeyDown(Ctrl);
+  bool mod1 = anyKeyDown(Mod1);
+  bool mod2 = anyKeyDown(Mod2);
 
-  auto scancode =
-    (key.altscancode != 0 && shift) ? key.altscancode : key.scancode;
+  auto scancode = [&] {
+    if (key.mod1Scancode != 0 && mod1) {
+      return key.mod1Scancode;
+    }
+    if (key.mod2Scancode != 0 && mod2) {
+      return key.mod2Scancode;
+    }
+    if (key.shfitScancode != 0 && shift) {
+      return key.shfitScancode;
+    }
+
+    return key.scancode;
+  }();
   sendKeyDown(scancode, shift, alt, ctrl);
 }
 
@@ -452,8 +464,10 @@ KeyboardRenderObject::handleTouchEvent(const Ev& ev) {
 
 void
 KeyboardRenderObject::handleKeyEvent(const rmlib::input::KeyEvent& ev) {
-  auto it = qwerty_keymap.find(ev.keyCode);
-  if (it == qwerty_keymap.end()) {
+  const auto& keymap = widget->keymap;
+
+  auto it = keymap.find(ev.keyCode);
+  if (it == keymap.end()) {
     std::cout << "Unknown physical key: " << ev.keyCode << "\n";
     return;
   }
