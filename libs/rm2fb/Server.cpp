@@ -67,6 +67,10 @@ server_main(int argc, char* argv[], char** envp) {
 
   std::cout << "SWTCON initalized!\n";
 
+  if (strcmp(argv[0], "/usr/bin/xochitl") == 0) {
+    strcpy(argv[0], "__rm2fb_server__");
+  }
+
   while (running) {
     auto [msg, addr] = serverSock.recvfrom<UpdateParams>();
     if (!msg.has_value()) {
