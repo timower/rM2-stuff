@@ -54,8 +54,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: package.tar.gz
-          asset_name: package.tar.gz
+          asset_path: rm2stuff.ipk
+          asset_name: rm2stuff.ipk
           asset_content_type: application/gzip
 
 
