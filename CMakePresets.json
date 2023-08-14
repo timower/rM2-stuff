@@ -38,7 +38,7 @@
       "name": "debug-base",
       "hidden": true,
       "environment": {
-        "BASE_FLAGS": "-Wall -Wextra -Wpedantic",
+        "BASE_FLAGS": "-Wall -Wextra -Wpedantic -Wno-unused-parameter -Wno-gnu-statement-expression-from-macro-expansion -fdiagnostics-color=always",
         "BASE_FLAGS_CXX": "$env{BASE_FLAGS} -Wno-c++20-designator"
       },
       "cacheVariables": {
