@@ -278,9 +278,15 @@ ScreenRenderObject::handleTouchEvent(const Ev& ev) {
       return ev.slot;
     }
   }();
+
   const auto scaled_loc = ev.location - getRect().topLeft;
+  const auto rotated_loc =
+    widget->isLandscape
+      ? Point{ scaled_loc.y, getRect().width() - scaled_loc.x }
+      : scaled_loc;
+
   std::array<char, 6> buf;
-  initMouseBuf(buf, scaled_loc);
+  initMouseBuf(buf, rotated_loc);
 
   // Mouse down on first finger if mouse is not down.
   if (ev.isDown() && mouseSlot == -1 /*&& lastFingers == 0*/) {
@@ -299,12 +305,12 @@ ScreenRenderObject::handleTouchEvent(const Ev& ev) {
     // Send mouse up code
     buf[3] += 3; // mouse release
     write(widget->term->fd, buf.data(), buf.size());
-  } else if (mouseSlot == slot && lastMousePos != scaled_loc &&
+  } else if (mouseSlot == slot && lastMousePos != rotated_loc &&
              (widget->term->mode & MODE_MOUSE_MOVE) != 0) {
     buf[3] += 32; // mouse move
     write(widget->term->fd, buf.data(), buf.size());
   }
-  lastMousePos = scaled_loc;
+  lastMousePos = rotated_loc;
 }
 
 void
