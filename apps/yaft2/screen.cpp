@@ -104,12 +104,13 @@ ScreenRenderObject::doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) {
   }
 
   Rect currentRect;
-  const auto maybeDraw = [&] {
+  const auto maybeDraw = [&](bool last = false) {
     if (currentRect.empty() || shouldRefresh()) {
       return;
     }
-    fb->doUpdate(
-      currentRect, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::Priority);
+    fb->doUpdate(currentRect,
+                 last ? fb::Waveform::A2 : fb::Waveform::DU,
+                 last ? fb::UpdateFlags::None : fb::UpdateFlags::Priority);
     currentRect = {};
 
     numUpdates++;
@@ -122,7 +123,7 @@ ScreenRenderObject::doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) {
       maybeDraw();
     }
   }
-  maybeDraw();
+  maybeDraw(true);
 
   if (shouldRefresh()) {
     term.shouldClear = false;
