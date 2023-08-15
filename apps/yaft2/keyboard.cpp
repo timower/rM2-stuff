@@ -340,7 +340,7 @@ KeyboardRenderObject::sendKeyDown(const KeyInfo& key, bool repeat) {
 
   // scancode, use alt code if shift is pressed.
   auto scancode = (key.altCode != 0 && shift) ? key.altCode : key.code;
-  if (repeat) {
+  if (repeat && key.longPressCode != 0) {
     scancode = key.longPressCode;
   }
   sendKeyDown(scancode, shift, alt, ctrl);
