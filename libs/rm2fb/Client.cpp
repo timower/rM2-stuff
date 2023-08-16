@@ -150,6 +150,7 @@ __libc_start_main(int (*_main)(int, char**, char**),
                   void* stack_end) {
 
   setenv("RM2FB_SHIM", "1", true);
+  setenv("RM2STUFF_RM2FB", "1", true);
 
   if (fb.mem == nullptr) {
     return EXIT_FAILURE;

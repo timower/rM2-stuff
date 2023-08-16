@@ -1,13 +1,17 @@
 #include "IOCTL.h"
 
+// rm2fb
 #include "Client.h"
 #include "SharedBuffer.h"
 
+// libc
 #include <cstring>
 #include <iostream>
 #include <linux/ioctl.h>
 
+// 'linux'
 #include <mxcfb.h>
+#include <rm2.h>
 
 namespace {
 
@@ -21,6 +25,19 @@ static const int WAVEFORM_MODE_A2 = 4;
 int
 handleUpdate(const mxcfb_update_data& data) {
   const auto& rect = data.update_region;
+
+  if (data.update_mode == RM2_UPDATE_MODE) {
+    UpdateParams params;
+    params.x1 = rect.left;
+    params.y1 = rect.top;
+    params.x2 = rect.left + rect.width - 1;
+    params.y2 = rect.top + rect.height - 1;
+
+    params.waveform = data.waveform_mode;
+    params.flags = data.flags;
+
+    return sendUpdate(params);
+  }
 
   // There are three update modes on the rm2. But they are mapped to the five
   // rm1 modes as follows:
