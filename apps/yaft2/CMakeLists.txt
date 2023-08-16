@@ -17,6 +17,10 @@ target_link_libraries(${PROJECT_NAME}
     util
     tomlplusplus::tomlplusplus)
 
+if (APPLE)
+  target_link_libraries(${PROJECT_NAME} PRIVATE linux::mxcfb)
+endif()
+
 install(TARGETS ${PROJECT_NAME} DESTINATION opt/bin)
 
 install(FILES draft/yaft2.draft DESTINATION opt/etc/draft)

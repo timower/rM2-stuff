@@ -30,7 +30,7 @@ struct FrameBuffer {
   }
 
   /// Closes the framebuffer and unmaps the memory.
-  ~FrameBuffer();
+  ~FrameBuffer() { close(); }
 
   void doUpdate(Rect region, Waveform waveform, UpdateFlags flags) const;
 

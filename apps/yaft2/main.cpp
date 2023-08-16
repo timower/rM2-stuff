@@ -4,6 +4,8 @@
 #include "terminal.h"
 #include "yaft.h"
 
+#include "util.h"
+
 // yaft(2)
 #include "config.h"
 #include "keyboard.h"
@@ -17,12 +19,6 @@
 // stdlib
 #include <sstream>
 #include <unistd.h>
-
-#ifdef __APPLE__
-#include <util.h>
-#else
-#include <pty.h>
-#endif
 
 using namespace rmlib;
 
@@ -68,10 +64,10 @@ fork_and_exec(int* master,
   ws.ws_ypixel = CELL_HEIGHT * lines;
   ws.ws_xpixel = CELL_WIDTH * cols;
 
-  pid = forkpty(master, NULL, NULL, &ws);
-  if (pid < 0)
+  pid = eforkpty(master, NULL, NULL, &ws);
+  if (pid < 0) {
     return false;
-  else if (pid == 0) { /* child */
+  } else if (pid == 0) { /* child */
     setenv("TERM", term_name, 1);
     execvp(cmd, argv);
     /* never reach here */

@@ -12,6 +12,9 @@ target_link_libraries(${PROJECT_NAME}
     rMlib
     libYaft)
 
+if (APPLE)
+  target_link_libraries(${PROJECT_NAME} PRIVATE linux::mxcfb)
+endif()
 
 install(TARGETS ${PROJECT_NAME} DESTINATION opt/bin)
 

@@ -4,15 +4,24 @@ option(EMULATE "Emulate a rM tablet using SDL" OFF)
 
 set(RMLIB_SOURCES
   Device.cpp
-  FrameBuffer.cpp
   Canvas.cpp
   Gesture.cpp)
 
-if (APPLE)
-  set(RMLIB_SOURCES ${RMLIB_SOURCES} InputApple.cpp)
+if (EMULATE)
+  list(APPEND RMLIB_SOURCES EmulatedFramebuffer.cpp)
 else()
-  set(RMLIB_SOURCES ${RMLIB_SOURCES} Input.cpp)
+  list(APPEND RMLIB_SOURCES FrameBuffer.cpp)
 endif()
+
+if (APPLE)
+  list(APPEND RMLIB_SOURCES InputApple.cpp)
+else()
+  list(APPEND RMLIB_SOURCES Input.cpp)
+  if(EMULATE)
+    list(APPEND RMLIB_SOURCES EmulatedInput.cpp)
+  endif()
+endif()
+
 add_library(${PROJECT_NAME} STATIC ${RMLIB_SOURCES})
 
 

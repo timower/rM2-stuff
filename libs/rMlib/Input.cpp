@@ -16,15 +16,6 @@
 #include <iostream>
 #include <memory>
 
-#ifdef EMULATE
-#include <atomic>
-#include <signal.h>
-#include <thread>
-
-#include <SDL2/SDL.h>
-#include <libevdev/libevdev-uinput.h>
-#endif
-
 namespace rmlib::input {
 
 namespace {
@@ -284,107 +275,6 @@ handeDevice(InputManager& mgr, udev_device& dev) {
   mgr.devices.erase(devnode);
 }
 
-#ifdef EMULATE
-
-std::thread inputThread;
-std::atomic_bool stop_input = false;
-std::atomic_bool input_ready = false;
-
-struct libevdev_uinput*
-makeDevice() {
-  auto* dev = libevdev_new();
-  libevdev_set_name(dev, "test device");
-  libevdev_enable_event_type(dev, EV_ABS);
-  struct input_absinfo info;
-  info.minimum = -1;
-  info.maximum = 10;
-  libevdev_enable_event_code(dev, EV_ABS, ABS_MT_SLOT, &info);
-  libevdev_enable_event_code(dev, EV_ABS, ABS_MT_TRACKING_ID, &info);
-
-  info.maximum = 0;
-  info.maximum = 1872;
-  libevdev_enable_event_code(dev, EV_ABS, ABS_MT_POSITION_X, &info);
-  libevdev_enable_event_code(dev, EV_ABS, ABS_MT_POSITION_Y, &info);
-
-  struct libevdev_uinput* uidev;
-  auto err = libevdev_uinput_create_from_device(
-    dev, LIBEVDEV_UINPUT_OPEN_MANAGED, &uidev);
-  if (err != 0) {
-    perror("uintput");
-    std::cerr << "Error making uinput device\n";
-    return nullptr;
-  }
-
-  std::cout << "Added sdl uintput device\n";
-
-  return uidev;
-}
-
-void
-uinput_thread() {
-  auto* uidev = makeDevice();
-  input_ready = true;
-  if (uidev == nullptr) {
-    return;
-  }
-  bool down = false;
-  bool quit = false;
-
-  while (!stop_input) {
-    SDL_Event event;
-    SDL_WaitEventTimeout(&event, 500);
-
-    switch (event.type) {
-      case SDL_QUIT:
-        stop_input = true;
-        quit = true;
-        break;
-      case SDL_MOUSEMOTION:
-        if (down) {
-          auto x = event.motion.x * EMULATE_SCALE;
-          auto y = event.motion.y * EMULATE_SCALE;
-          libevdev_uinput_write_event(uidev, EV_ABS, ABS_MT_POSITION_X, x);
-          libevdev_uinput_write_event(uidev, EV_ABS, ABS_MT_POSITION_Y, y);
-          libevdev_uinput_write_event(uidev, EV_SYN, SYN_REPORT, 0);
-        }
-        break;
-      case SDL_MOUSEBUTTONDOWN:
-        if (event.button.button == SDL_BUTTON_LEFT) {
-          auto x = event.button.x * EMULATE_SCALE;
-          auto y = event.button.y * EMULATE_SCALE;
-          down = true;
-
-          libevdev_uinput_write_event(uidev, EV_ABS, ABS_MT_SLOT, 0);
-          libevdev_uinput_write_event(uidev, EV_ABS, ABS_MT_TRACKING_ID, 1);
-          libevdev_uinput_write_event(uidev, EV_ABS, ABS_MT_POSITION_X, x);
-          libevdev_uinput_write_event(uidev, EV_ABS, ABS_MT_POSITION_Y, y);
-          libevdev_uinput_write_event(uidev, EV_SYN, SYN_REPORT, 0);
-        }
-        break;
-      case SDL_MOUSEBUTTONUP:
-        if (event.button.button == SDL_BUTTON_LEFT) {
-          auto x = event.button.x * EMULATE_SCALE;
-          auto y = event.button.y * EMULATE_SCALE;
-          down = false;
-
-          libevdev_uinput_write_event(uidev, EV_ABS, ABS_MT_SLOT, 0);
-          libevdev_uinput_write_event(uidev, EV_ABS, ABS_MT_TRACKING_ID, -1);
-          libevdev_uinput_write_event(uidev, EV_ABS, ABS_MT_POSITION_X, x);
-          libevdev_uinput_write_event(uidev, EV_ABS, ABS_MT_POSITION_Y, y);
-          libevdev_uinput_write_event(uidev, EV_SYN, SYN_REPORT, 0);
-        }
-        break;
-    }
-  }
-
-  libevdev_uinput_destroy(uidev);
-  if (quit) {
-    kill(getpid(), SIGINT);
-  }
-}
-
-#endif
-
 } // namespace
 
 void
@@ -415,13 +305,6 @@ InputManager::~InputManager() {
   if (udevMonitor != nullptr) {
     udev_monitor_unref(udevMonitor);
   }
-
-#ifdef EMULATE
-  stop_input = true;
-  if (inputThread.joinable()) {
-    inputThread.join();
-  }
-#endif
 }
 
 ErrorOr<InputDeviceBase*>
@@ -455,14 +338,6 @@ InputManager::open(std::string_view input) {
 
 ErrorOr<BaseDevices>
 InputManager::openAll(bool monitor) {
-#ifdef EMULATE
-  if (!input_ready) {
-    inputThread = std::thread(uinput_thread);
-    while (!input_ready) {
-      usleep(100);
-    }
-  }
-#endif
 
   udev* udevHandle =
     this->udevHandle == nullptr ? udev_new() : this->udevHandle;
