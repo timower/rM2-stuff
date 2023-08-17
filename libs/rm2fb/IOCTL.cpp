@@ -14,14 +14,6 @@
 #include <rm2.h>
 
 namespace {
-
-// Taken from KOreader
-static const int WAVEFORM_MODE_INIT = 0;
-static const int WAVEFORM_MODE_DU = 1;
-static const int WAVEFORM_MODE_GC16 = 2;
-static const int WAVEFORM_MODE_GL16 = 3;
-static const int WAVEFORM_MODE_A2 = 4;
-
 int
 handleUpdate(const mxcfb_update_data& data) {
   const auto& rect = data.update_region;
@@ -50,6 +42,18 @@ handleUpdate(const mxcfb_update_data& data) {
   // full = 1, partial = 0
   int flags = data.update_mode == UPDATE_MODE_FULL ? 0x1 : 0x0;
 
+  // mappings of different xochitls:
+  // mxcfb | 2.15 | 3.3 | 3.5
+  // ------+------+-----+----
+  // 0 INIT| 2    | 2   | 2
+  // 1 DU  | 0    | 0   | 0
+  // 2 GC16| 1    | 3   | 3
+  // 3 GL16| 2    | 2   | 2
+  // 4 A2  | /    | 0/8 | 0/8
+  // 5 GC? | /    | 1   | 1
+  // 6 Pan | 3    | 0   | 0
+  // 7 ?   | /    | 0   | 0
+  // 8 ?   | 1    | 0   | 0
   int waveform = [&] {
     switch (data.waveform_mode) {
       case WAVEFORM_MODE_INIT:

@@ -219,7 +219,7 @@ refresh(rmlib::fb::FrameBuffer& fb, struct terminal_t* term, bool isLandscape) {
       return;
     }
     fb.doUpdate(
-      currentRegion, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::None);
+      currentRegion, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::Priority);
     currentRegion = {};
     update_count++;
   };

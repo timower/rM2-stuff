@@ -15,71 +15,66 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+// 'linux'
 #include "mxcfb.h"
+#include "rm2.h"
 
 namespace rmlib::fb {
 namespace {
 constexpr auto fb_path = "/dev/fb0";
 } // namespace
 
+ErrorOr<FrameBuffer::Type>
+FrameBuffer::detectType() {
+  auto devType = TRY(device::getDeviceType());
+  switch (devType) {
+    default:
+    case device::DeviceType::reMarkable1:
+      std::cerr << "rM1 currently untested, please open a github issue if "
+                   "you encounter any issues\n";
+
+      return rM1;
+    case device::DeviceType::reMarkable2:
+      if (getenv("RM2STUFF_RM2FB") != nullptr) {
+        std::cerr << "Using our own rm2fb!\n";
+        return rM2fb;
+      }
+
+      if (getenv("RM2FB_SHIM") != nullptr) {
+        std::cerr << "Using rm2fb shim\n";
+        return Shim;
+      }
+
+      // check if shared mem exists
+      assert(false);
+      return Error{ "Unsupported device, please install rm2fb" };
+  }
+}
+
 ErrorOr<FrameBuffer>
 FrameBuffer::open() {
-  int components = sizeof(uint16_t);
-  int width;
-  int height;
-  int stride;
+  const auto fbType = TRY(detectType());
 
-  auto devType = TRY(device::getDeviceType());
-  const auto fbType = [&, devType] {
-    switch (devType) {
-      default:
-      case device::DeviceType::reMarkable1:
-        std::cerr << "rM1 currently untested, please open a github issue if "
-                     "you encounter any issues\n";
-
-        width = 1404; // TODO: use ioctl
-        height = 1872;
-        stride = 1408 * components;
-
-        return rM1;
-      case device::DeviceType::reMarkable2:
-
-        // Not all of the rm2 fb modes support retrieving the size, so hard code
-        // it here.
-        width = 1404;
-        height = 1872;
-        stride = width * components;
-
-        if (getenv("RM2FB_SHIM") != nullptr) {
-          std::cerr << "Using rm2fb shim\n";
-          return Shim;
-        }
-
-        // check if shared mem exists
-        assert(false);
-        return rM2fb;
-    }
-  }();
-
-  const auto* path = [fbType] {
-    switch (fbType) {
-      case rM1:
-      case Shim:
-        return fb_path;
-
-      case rM2fb:
-
-      default:
-        assert(false);
-        return "";
-    }
-  }();
-
-  auto fd = ::open(path, O_RDWR);
+  auto fd = ::open(fb_path, O_RDWR);
   if (fd < 0) {
     perror("error");
-    return Error{ "Error opening " + std::string(path) };
+    return Error{ "Error opening " + std::string(fb_path) };
   }
+
+  fb_var_screeninfo screeninfo;
+  int res = ioctl(fd, FBIOGET_VSCREENINFO, &screeninfo);
+  fb_fix_screeninfo fixScreenInfo;
+  res |= ioctl(fd, FBIOGET_FSCREENINFO, &fixScreenInfo);
+
+  if (res != 0) {
+    ::close(fd);
+    return Error{ "Error getting framebuffer size" };
+  }
+
+  int components = screeninfo.bits_per_pixel / 8;
+  auto width = screeninfo.xres;
+  auto height = screeninfo.yres;
+  auto stride = fixScreenInfo.line_length;
 
   auto* memory = static_cast<uint8_t*>(
     mmap(nullptr, stride * height, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
@@ -87,10 +82,6 @@ FrameBuffer::open() {
   if (memory == nullptr) {
     ::close(fd);
     return Error{ "Error mapping fb" };
-  }
-
-  if (fbType == rM2fb) {
-    return Error{ "rm2fb not supported" };
   }
 
   Canvas canvas(memory, width, height, stride, components);
@@ -114,21 +105,44 @@ void
 FrameBuffer::doUpdate(Rect region, Waveform waveform, UpdateFlags flags) const {
   auto update = mxcfb_update_data{};
 
-  update.waveform_mode = static_cast<int>(waveform);
-  update.update_mode = (flags & UpdateFlags::FullRefresh) != 0 ? 1 : 0;
-
-#define TEMP_USE_REMARKABLE_DRAW 0x0018
-#define EPDC_FLAG_EXP1 0x270ce20
-  update.update_marker = 0;
-  update.dither_mode = EPDC_FLAG_EXP1;
-  update.temp = TEMP_USE_REMARKABLE_DRAW;
-  update.flags = 0;
-
   update.update_region.left = region.topLeft.x;
   update.update_region.top = region.topLeft.y;
   update.update_region.width = region.width();
   update.update_region.height = region.height();
 
+  if (type == rM2fb) {
+    update.update_mode = RM2_UPDATE_MODE;
+    update.flags = static_cast<int>(flags);
+    update.waveform_mode = static_cast<int>(waveform);
+  } else {
+    update.update_mode = (flags & UpdateFlags::FullRefresh) != 0
+                           ? UPDATE_MODE_FULL
+                           : UPDATE_MODE_PARTIAL;
+
+    update.waveform_mode = [&] {
+      switch (waveform) {
+        case Waveform::DU:
+          return WAVEFORM_MODE_DU;
+        default:
+        case Waveform::GC16:
+          return WAVEFORM_MODE_GC16;
+        case Waveform::GC16Fast:
+          return WAVEFORM_MODE_GL16;
+        case Waveform::A2:
+          return WAVEFORM_MODE_A2;
+      }
+    }();
+
+#define TEMP_USE_REMARKABLE_DRAW 0x0018
+#define EPDC_FLAG_EXP1 0x270ce20
+    update.update_marker = 0;
+    update.dither_mode = EPDC_FLAG_EXP1;
+    update.temp = TEMP_USE_REMARKABLE_DRAW;
+    update.flags = 0;
+  }
+  ioctl(fd, MXCFB_SEND_UPDATE, &update);
+
+  // Debug logging.
   assert([&] {
     const auto waveformStr = [waveform] {
       switch (waveform) {
@@ -149,8 +163,6 @@ FrameBuffer::doUpdate(Rect region, Waveform waveform, UpdateFlags flags) const {
               << update.update_region.height << "}\n";
     return true;
   }());
-
-  ioctl(fd, MXCFB_SEND_UPDATE, &update);
 }
 
 } // namespace rmlib::fb

@@ -5,9 +5,10 @@
 
 namespace rmlib::fb {
 
-enum class Waveform { DU = 1, GC16 = 2, GC16Fast = 3 };
+// Waveform ints that match rm2 'actual' updates
+enum class Waveform { DU = 0, GC16 = 1, GC16Fast = 2, A2 = 3 };
 
-enum UpdateFlags { None = 0, Sync = 1, FullRefresh = 2, Unknown = 4 };
+enum UpdateFlags { None = 0, FullRefresh = 1, Sync = 2, Priority = 4 };
 
 struct FrameBuffer {
   enum Type { rM1, Shim, rM2fb };
@@ -59,6 +60,8 @@ private:
     : type(type), fd(fd), canvas(std::move(canvas)) {}
 
   void close();
+
+  static ErrorOr<Type> detectType();
 };
 
 } // namespace rmlib::fb

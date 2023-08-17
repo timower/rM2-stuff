@@ -36,6 +36,14 @@ int
 server_main(int argc, char* argv[], char** envp) {
   setupExitHandler();
 
+  const bool debugMode = [] {
+    const auto* debugEnv = getenv("RM2FB_DEBUG");
+    return debugEnv != nullptr && debugEnv != std::string_view("0");
+  }();
+  if (debugMode) {
+    std::cerr << "Debug Mode!\n";
+  }
+
   const char* socketAddr = /*argc == 2 ? argv[1] :*/ DEFAULT_SOCK_ADDR;
 
   // Setup server socket.
@@ -82,10 +90,9 @@ server_main(int argc, char* argv[], char** envp) {
         return update.template call<bool, const UpdateParams*>(&*msg);
       },
       addrs->update);
-    // ptrs->update(*msg, nullptr, 0);
 
     // Don't log Stroke updates
-    if (msg->flags != 4) {
+    if (debugMode || msg->flags != 4) {
       std::cerr << "UPDATE " << *msg << ": " << res << "\n";
     }
 
@@ -94,7 +101,6 @@ server_main(int argc, char* argv[], char** envp) {
 
   std::visit([](auto shutdown) { shutdown.template call<void>(); },
              addrs->shutdownThreads);
-  // ptrs->shutdownThreads();
 
   return EXIT_SUCCESS;
 }
@@ -115,7 +121,7 @@ __libc_start_main(int (*_main)(int, char**, char**),
   std::cout << "STARTING RM2FB\n";
 
   auto* func_main =
-    (typeof(&__libc_start_main))dlsym(RTLD_NEXT, "__libc_start_main");
+    (decltype(&__libc_start_main))dlsym(RTLD_NEXT, "__libc_start_main");
 
   return func_main(server_main, argc, argv, init, fini, rtld_fini, stack_end);
 };

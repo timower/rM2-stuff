@@ -383,7 +383,7 @@ protected:
     }
     std::swap(lcd, oldLcd);
 
-    return { rect, fb::Waveform::DU };
+    return { rect, fb::Waveform::DU, fb::UpdateFlags::Priority };
   }
 
 private:

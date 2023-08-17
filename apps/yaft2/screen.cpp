@@ -109,7 +109,7 @@ ScreenRenderObject::doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) {
       return;
     }
     fb->doUpdate(
-      currentRect, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::None);
+      currentRect, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::Priority);
     currentRect = {};
 
     numUpdates++;

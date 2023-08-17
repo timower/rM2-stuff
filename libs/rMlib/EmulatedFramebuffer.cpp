@@ -159,6 +159,8 @@ getStr(Waveform wave) {
       return "GC16";
     case Waveform::GC16Fast:
       return "GC16Fast";
+    case Waveform::A2:
+      return "A2";
   }
 }
 

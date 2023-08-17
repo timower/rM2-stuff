@@ -545,5 +545,5 @@ KeyboardRenderObject::drawKey(rmlib::Point pos,
   }
 
   state.dirty = false;
-  return UpdateRegion(keyRect, fb::Waveform::DU);
+  return UpdateRegion(keyRect, fb::Waveform::DU, fb::UpdateFlags::Priority);
 }
