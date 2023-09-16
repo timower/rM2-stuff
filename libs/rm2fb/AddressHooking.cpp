@@ -11,7 +11,7 @@ SimpleFunction::hook(void* replacement) {
   auto* interceptor = gum_interceptor_obtain();
 
   auto result = gum_interceptor_replace(
-    interceptor, (gpointer)address, (gpointer)replacement, nullptr);
+    interceptor, (gpointer)address, (gpointer)replacement, nullptr, nullptr);
   if (result != GUM_REPLACE_OK) {
     std::cerr << "Error replacing!\n";
     return false;
