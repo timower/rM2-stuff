@@ -11,24 +11,13 @@
 #include <dlfcn.h>
 
 #include <iostream>
+#include <string.h>
 #include <unistd.h>
 
 namespace {
 
 Socket clientSock;
 bool inXochitl = false;
-
-void
-new_create_threads() {
-  puts("HOOK: create threads called");
-}
-
-int
-new_shutdown() {
-  puts("HOOK: shutdown called");
-  return 0;
-}
-
 int
 setupHooks() {
   auto addrs = getAddresses();
@@ -38,34 +27,8 @@ setupHooks() {
 
   gum_init_embedded();
 
-  bool result = true;
-
-  // Hook create Instance
-  result = std::visit(
-    [](auto createInstance) {
-      return createInstance.hook((void*)new_create_threads);
-    },
-    addrs->createInstance);
-
-  if (!result)
-    return EXIT_FAILURE;
-
-  // Hook update
-  result = std::visit(
-    [](auto update) { return update.hook((void*)sendUpdate); }, addrs->update);
-
-  if (!result)
-    return EXIT_FAILURE;
-
-  // Hook shutdown
-  result =
-    std::visit([](auto shutdown) { return shutdown.hook((void*)new_shutdown); },
-               addrs->shutdownThreads);
-
-  if (!result)
-    return EXIT_FAILURE;
-
-  return EXIT_SUCCESS;
+  auto result = addrs->installHooks(sendUpdate);
+  return result ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 } // namespace

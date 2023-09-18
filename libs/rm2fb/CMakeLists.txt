@@ -13,10 +13,6 @@ target_compile_features(rm2fb_lib PUBLIC cxx_std_17)
 target_include_directories(rm2fb_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(rm2fb_lib PUBLIC rt dl)
 
-if (${EMULATE})
-  return()
-endif()
-
 add_library(rm2fb_server SHARED Server.cpp ${COMMON_SRC})
 target_compile_features(rm2fb_server PUBLIC cxx_std_17)
 target_link_libraries(rm2fb_server PRIVATE rt dl)

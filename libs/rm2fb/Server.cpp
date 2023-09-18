@@ -1,5 +1,6 @@
 #include "Address.h"
 #include "ImageHook.h"
+#include "Message.h"
 #include "Socket.h"
 
 #include <atomic>
@@ -70,8 +71,7 @@ server_main(int argc, char* argv[], char** envp) {
   memset(fb.mem, 0xff, fb_size);
 
   // Call the get or create Instance function.
-  std::visit([](auto createInstance) { createInstance.template call<void*>(); },
-             addrs->createInstance);
+  addrs->initThreads();
 
   std::cout << "SWTCON initalized!\n";
 
@@ -85,11 +85,7 @@ server_main(int argc, char* argv[], char** envp) {
       continue;
     }
 
-    bool res = std::visit(
-      [msg = msg](auto update) {
-        return update.template call<bool, const UpdateParams*>(&*msg);
-      },
-      addrs->update);
+    bool res = addrs->doUpdate(*msg);
 
     // Don't log Stroke updates
     if (debugMode || msg->flags != 4) {
@@ -98,9 +94,6 @@ server_main(int argc, char* argv[], char** envp) {
 
     serverSock.sendto(res, addr);
   }
-
-  std::visit([](auto shutdown) { shutdown.template call<void>(); },
-             addrs->shutdownThreads);
 
   return EXIT_SUCCESS;
 }
