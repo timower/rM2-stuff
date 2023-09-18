@@ -1,9 +1,12 @@
 set(CMAKE_SYSTEM_NAME Linux)
 set(CMAKE_SYSTEM_PROCESSOR arm)
 
-set(CMAKE_SYSROOT "/opt/codex/rm11x/3.1.2/sysroots/cortexa7hf-neon-remarkable-linux-gnueabi")
+#set(TOOLCHAIN_ROOT "/opt/codex/rm2/4.0.117-1")
+set(TOOLCHAIN_ROOT "/opt/codex/rm11x/3.1.2")
 
-set(host_root "/opt/codex/rm11x/3.1.2/sysroots/x86_64-codexsdk-linux")
+set(CMAKE_SYSROOT "${TOOLCHAIN_ROOT}/sysroots/cortexa7hf-neon-remarkable-linux-gnueabi")
+
+set(host_root "${TOOLCHAIN_ROOT}/sysroots/x86_64-codexsdk-linux")
 set(triple "arm-remarkable-linux-gnueabi")
 set(tools "${host_root}/usr/bin/${triple}")
 set(prefix "${tools}/${triple}-")
