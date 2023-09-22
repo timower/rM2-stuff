@@ -25,7 +25,7 @@ When pressing the power button, the app drawer will be shown with a timeout of 1
 After 10 seconds the device will go to sleep, unless an app is picked before that timeout.
 You can also interrupt the timeout by pressing the `[x]` button.
 
-This allows you to switch apps without relying on flaky gestures.
+This allows you to switch apps without relying on gestures.
 
 ### Tilem
 
