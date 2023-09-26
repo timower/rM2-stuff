@@ -32,25 +32,18 @@ target_include_directories(${PROJECT_NAME}
     ${CMAKE_CURRENT_SOURCE_DIR})
 
 if (NOT APPLE)
-  find_library(LIBEVDEV_LIBRARY
-    NAMES libevdev.so
-    HINTS "$ENV{SDKTARGETSYSROOT}/usr/lib"
-    REQUIRED)
 
-  find_path(LIBEVDEV_INCLUDE_PAR libevdev.h
-    PATH_SUFFIXES libevdev-1.0/libevdev libevdev
-    HINTS "$ENV{SDKTARGETSYSROOT}/usr/include"
-    REQUIRED)
-  get_filename_component(LIBEVDEV_INCLUDE_DIR ${LIBEVDEV_INCLUDE_PAR} DIRECTORY)
+  find_package(PkgConfig)
+  pkg_check_modules(LIBEVDEV REQUIRED libevdev)
 
   target_link_libraries(${PROJECT_NAME}
     PRIVATE
-      ${LIBEVDEV_LIBRARY}
+      ${LIBEVDEV_LIBRARIES}
       udev
       linux::mxcfb)
 
     target_include_directories(${PROJECT_NAME}
-      PRIVATE ${LIBEVDEV_INCLUDE_DIR})
+      PRIVATE ${LIBEVDEV_INCLUDE_DIRS})
 endif()
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)

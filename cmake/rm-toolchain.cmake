@@ -6,6 +6,10 @@ set(TOOLCHAIN_ROOT "/opt/codex/rm11x/3.1.2")
 
 set(CMAKE_SYSROOT "${TOOLCHAIN_ROOT}/sysroots/cortexa7hf-neon-remarkable-linux-gnueabi")
 
+set(ENV{PKG_CONFIG_DIR} "")
+set(ENV{PKG_CONFIG_LIBDIR} "${CMAKE_SYSROOT}/usr/lib/pkgconfig:${CMAKE_SYSROOT}/usr/share/pkgconfig")
+set(ENV{PKG_CONFIG_SYSROOT_DIR} ${CMAKE_SYSROOT})
+
 set(host_root "${TOOLCHAIN_ROOT}/sysroots/x86_64-codexsdk-linux")
 set(triple "arm-remarkable-linux-gnueabi")
 set(tools "${host_root}/usr/bin/${triple}")
@@ -14,15 +18,13 @@ set(prefix "${tools}/${triple}-")
 set(CMAKE_C_COMPILER "${prefix}gcc")
 set(CMAKE_C_COMPILER_AR "${prefix}gcc-ar")
 set(CMAKE_C_COMPILER_RANLIB "${prefix}gcc-ranlib")
-# TODO: remove sysroot?
-set(CMAKE_C_COMPILER_ARG1 "-mfpu=neon -mfloat-abi=hard -mcpu=cortex-a7 --sysroot=${sysroot}")
+set(CMAKE_C_COMPILER_ARG1 "-mfpu=neon -mfloat-abi=hard -mcpu=cortex-a7")
 
 
 set(CMAKE_CXX_COMPILER "${prefix}g++")
 set(CMAKE_CXX_COMPILER_AR "${prefix}gcc-ar")
 set(CMAKE_CXX_COMPILER_RANLIB "${prefix}gcc-ranlib")
-# TODO: remove sysroot?
-set(CMAKE_CXX_COMPILER_ARG1 "-mfpu=neon -mfloat-abi=hard -mcpu=cortex-a7 --sysroot=${sysroot}")
+set(CMAKE_CXX_COMPILER_ARG1 "-mfpu=neon -mfloat-abi=hard -mcpu=cortex-a7")
 
 set(CMAKE_ADDR2LINE "${prefix}addr2line")
 set(CMAKE_AR "${prefix}ar")
