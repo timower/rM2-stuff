@@ -8,7 +8,7 @@ set(COMMON_SRC
 
 
 # Library used for the (socket) testing tool
-add_library(rm2fb_lib OBJECT ${COMMON_SRC})
+add_library(rm2fb_lib STATIC ${COMMON_SRC})
 target_compile_features(rm2fb_lib PUBLIC cxx_std_17)
 target_include_directories(rm2fb_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(rm2fb_lib PUBLIC rt dl)
