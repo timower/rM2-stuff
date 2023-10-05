@@ -10,7 +10,7 @@
 #include <signal.h>
 #include <thread>
 
-#if __linux__
+#if EMULATE_UINPUT
 #include <libevdev/libevdev-uinput.h>
 #endif
 
@@ -164,7 +164,7 @@ getStr(Waveform wave) {
   }
 }
 
-#if __linux__
+#if EMULATE_UINPUT
 std::thread inputThread;
 std::atomic_bool stop_input = false;
 std::atomic_bool input_ready = false;
@@ -268,7 +268,7 @@ ErrorOr<FrameBuffer>
 FrameBuffer::open() {
   auto canvas = TRY(makeEmulatedCanvas());
 
-#if __linux__
+#if EMULATE_UINPUT
   inputThread = std::thread(uinput_thread);
   while (!input_ready) {
     usleep(200);
@@ -281,7 +281,7 @@ FrameBuffer::open() {
 void
 FrameBuffer::close() {
   if (fd == 1337) {
-#if __linux__
+#if EMULATE_UINPUT
     stop_input = true;
     inputThread.join();
 #endif

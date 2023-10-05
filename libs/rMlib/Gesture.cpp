@@ -2,7 +2,7 @@
 
 #include <iostream>
 
-#ifndef __APPLE__
+#if !defined(EMULATE) || defined(EMULATE_UINPUT)
 #include <libevdev/libevdev.h>
 #endif
 
@@ -176,7 +176,7 @@ GestureController::handleEvents(const std::vector<Event>& events) {
 
 void
 GestureController::sync(InputDeviceBase& device) {
-#ifndef __APPLE__
+#if !defined(EMULATE) || defined(EMULATE_UINPUT)
   const auto maxSlots =
     std::min<int>(int(slots.size()), libevdev_get_num_slots(device.evdev));
   for (int i = 0; i < maxSlots; i++) {

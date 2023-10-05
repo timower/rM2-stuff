@@ -275,7 +275,6 @@ main() {
         break;
       }
 
-      std::cout << "Input msg!\n";
       handleInput(inp, *uinputDev);
     }
   }

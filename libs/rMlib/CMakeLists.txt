@@ -1,6 +1,7 @@
 project(rMlib)
 
 option(EMULATE "Emulate a rM tablet using SDL" OFF)
+option(EMULATE_UINPUT "Emulate input devices using uinput" OFF)
 
 set(RMLIB_SOURCES
   Device.cpp
@@ -13,17 +14,14 @@ else()
   list(APPEND RMLIB_SOURCES FrameBuffer.cpp)
 endif()
 
-if (APPLE)
-  list(APPEND RMLIB_SOURCES InputApple.cpp)
+if(EMULATE AND NOT EMULATE_UINPUT)
+  list(APPEND RMLIB_SOURCES EmulatedInput.cpp)
 else()
   list(APPEND RMLIB_SOURCES Input.cpp)
-  if(EMULATE)
-    list(APPEND RMLIB_SOURCES EmulatedInput.cpp)
-  endif()
 endif()
 
-add_library(${PROJECT_NAME} STATIC ${RMLIB_SOURCES})
 
+add_library(${PROJECT_NAME} STATIC ${RMLIB_SOURCES})
 
 target_include_directories(${PROJECT_NAME}
   PUBLIC
@@ -31,8 +29,8 @@ target_include_directories(${PROJECT_NAME}
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR})
 
-if (NOT APPLE)
-
+# If not emulating, or emulating uinput, link in udev, evdev and linux headers.
+if (NOT EMULATE OR EMULATE_UINPUT)
   find_package(PkgConfig)
   pkg_check_modules(LIBEVDEV REQUIRED libevdev)
 
@@ -59,8 +57,11 @@ if (EMULATE)
   target_link_libraries(${PROJECT_NAME} PUBLIC  pthread)
 
   target_compile_definitions(${PROJECT_NAME} PUBLIC EMULATE)
-  target_compile_definitions(${PROJECT_NAME} PRIVATE
-    EMULATE_SCALE=2)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE EMULATE_SCALE=2)
+
+  if (EMULATE_UINPUT)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE EMULATE_UINPUT)
+  endif()
 endif()
 
 install(TARGETS ${PROJECT_NAME} DESTINATION opt/lib)

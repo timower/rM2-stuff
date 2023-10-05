@@ -1,5 +1,9 @@
 project(input-test)
 
+if (EMULATE AND NOT EMULATE_UINPUT)
+  return()
+endif()
+
 add_executable(${PROJECT_NAME}
   main.cpp)
 
