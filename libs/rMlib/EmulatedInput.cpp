@@ -35,7 +35,7 @@ struct FakeInputDevice : public InputDeviceBase {
   }
 
   void flood() final {}
-  OptError<> readEvents(std::vector<Event>& out) final { return NoError{}; }
+  OptError<> readEvents(std::vector<Event>& out) final { return {}; }
 };
 } // namespace
 
@@ -132,7 +132,7 @@ InputManager::waitForInput(fd_set& fdSet,
   switch (event.type) {
     case SDL_QUIT:
       std::exit(0);
-      return Error{ "stop" };
+      return Error::make("stop");
       break;
 
     case SDL_MOUSEMOTION:

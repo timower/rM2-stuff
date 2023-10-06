@@ -94,8 +94,8 @@ main(int argc, char* argv[]) {
   }
 
   auto fb = rmlib::fb::FrameBuffer::open();
-  if (fb.isError()) {
-    std::cerr << fb.getError().msg;
+  if (!fb.has_value()) {
+    std::cerr << fb.error().msg;
     return EXIT_FAILURE;
   }
 
@@ -106,8 +106,8 @@ main(int argc, char* argv[]) {
 
   while (running) {
     auto fdsOrErr = input.waitForInput(std::nullopt, sock);
-    if (fdsOrErr.isError()) {
-      std::cerr << "Error input: " << fdsOrErr.getError().msg;
+    if (!fdsOrErr.has_value()) {
+      std::cerr << "Error input: " << fdsOrErr.error().msg;
       break;
     }
 

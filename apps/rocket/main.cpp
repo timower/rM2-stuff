@@ -337,9 +337,8 @@ private:
     if (res == 0) {
       // Get the reason
       auto irq = rmlib::device::readFile("/sys/power/pm_wakeup_irq");
-      if (irq.isError()) {
-        std::cout << "Error getting reason: " << irq.getError().msg
-                  << std::endl;
+      if (!irq.has_value()) {
+        std::cout << "Error getting reason: " << irq.error().msg << std::endl;
 
         // If there is no irq it must be the user which pressed the button:
         return true;
@@ -581,7 +580,7 @@ main(int argc, char* argv[]) {
   runApp(LauncherWidget());
 
   auto fb = fb::FrameBuffer::open();
-  if (!fb.isError()) {
+  if (fb.has_value()) {
     fb->canvas.set(white);
     fb->doUpdate(
       fb->canvas.rect(), fb::Waveform::GC16Fast, fb::UpdateFlags::None);

@@ -100,8 +100,8 @@ public:
   YaftConfig getConfig() {
     auto cfgOrErr = loadConfig();
 
-    if (cfgOrErr.isError()) {
-      const auto& err = cfgOrErr.getError();
+    if (!cfgOrErr.has_value()) {
+      const auto& err = cfgOrErr.error();
       if (err.type == YaftConfigError::Missing) {
         logTerm("No config, creating new one\r\n");
         saveDefaultConfig();

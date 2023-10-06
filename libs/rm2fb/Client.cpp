@@ -137,7 +137,7 @@ __libc_start_main(int (*_main)(int, char**, char**),
   }
 
   auto* func_main =
-    (typeof(&__libc_start_main))dlsym(RTLD_NEXT, "__libc_start_main");
+    (decltype(&__libc_start_main))dlsym(RTLD_NEXT, "__libc_start_main");
 
   return func_main(_main, argc, argv, init, fini, rtld_fini, stack_end);
 };

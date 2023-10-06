@@ -66,7 +66,8 @@ putpixel(SDL_Surface* surface, int x, int y, Uint32 pixel) {
 ErrorOr<Canvas>
 makeEmulatedCanvas() {
   if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-    return Error{ std::string("could not initialize sdl2:") + SDL_GetError() };
+    return Error::make(std::string("could not initialize sdl2:") +
+                       SDL_GetError());
   }
   window = SDL_CreateWindow("rM emulator",
                             SDL_WINDOWPOS_UNDEFINED,
@@ -75,7 +76,8 @@ makeEmulatedCanvas() {
                             window_height,
                             SDL_WINDOW_SHOWN);
   if (window == NULL) {
-    return Error{ std::string("could not create window:") + SDL_GetError() };
+    return Error::make(std::string("could not create window:") +
+                       SDL_GetError());
   }
   auto* screenSurface = SDL_GetWindowSurface(window);
   SDL_FillRect(

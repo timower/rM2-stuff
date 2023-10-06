@@ -76,8 +76,8 @@ runApp(AppWidget widget) {
     context.checkTimers();
     context.doAllLaters();
 
-    if (evsOrError.isError()) {
-      std::cerr << evsOrError.getError().msg << std::endl;
+    if (!evsOrError.has_value()) {
+      std::cerr << evsOrError.error().msg << std::endl;
     } else {
       for (const auto& ev : *evsOrError) {
         rootRO->handleInput(ev);
@@ -91,7 +91,7 @@ runApp(AppWidget widget) {
   std::signal(SIGTERM, SIG_DFL);
   details::currentContext = nullptr;
 
-  return NoError{};
+  return {};
 }
 
 } // namespace rmlib

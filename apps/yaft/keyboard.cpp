@@ -458,7 +458,7 @@ Keyboard::init(rmlib::fb::FrameBuffer& fb, terminal_t& term, bool isLandscape) {
   TRY(input.openAll());
 
   initKeyMap();
-  return NoError{};
+  return {};
 }
 
 void

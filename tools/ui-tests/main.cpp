@@ -213,8 +213,8 @@ main() {
   auto optErr =
     runApp(Center(Button("TestButton", [] { std::cout << "Click\n"; })));
 
-  if (optErr.isError()) {
-    std::cerr << optErr.getError().msg << "\n";
+  if (!optErr.has_value()) {
+    std::cerr << optErr.error().msg << "\n";
     return EXIT_FAILURE;
   }
 

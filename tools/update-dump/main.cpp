@@ -67,7 +67,7 @@ setupHooks() {
                                         nullptr,
                                         &originalUpdate);
 
-  return EXIT_SUCCESS;
+  return result == GUM_REPLACE_OK ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 } // namespace
@@ -93,7 +93,7 @@ __libc_start_main(int (*_main)(int, char**, char**),
   }
 
   auto* func_main =
-    (typeof(&__libc_start_main))dlsym(RTLD_NEXT, "__libc_start_main");
+    (decltype(&__libc_start_main))dlsym(RTLD_NEXT, "__libc_start_main");
 
   return func_main(_main, argc, argv, init, fini, rtld_fini, stack_end);
 };

@@ -67,7 +67,8 @@ readFile(std::string_view path) {
   auto read = fread(result.data(), size, 1, f);
   if (read != size && !(read == 0 && feof(f))) {
     fclose(f);
-    return Error{ "Only read: " + std::to_string(read) + " bytes?" };
+    return tl::unexpected(
+      Error{ "Only read: " + std::to_string(read) + " bytes?" });
   }
 
   fclose(f);
@@ -83,7 +84,7 @@ getDeviceType() {
     constexpr auto path = "/sys/devices/soc0/machine";
     std::ifstream ifs(path);
     if (!ifs.is_open()) {
-      return Error{ "Couldn't open device path" };
+      return Error::make("Couldn't open device path");
     }
 
     std::string name;
@@ -114,20 +115,18 @@ getInputPaths(DeviceType type) {
 
 std::optional<Transform>
 getInputTransform(std::string_view path) {
-  auto devType = getDeviceType();
-  if (devType.isError()) {
-    return std::nullopt;
-  }
-
-  auto paths = getInputPaths(*devType);
-  if (path == paths.touchPath) {
-    return paths.touchTransform;
-  }
-  if (path == paths.penPath) {
-    return paths.penTransform;
-  }
-
-  return std::nullopt;
+  return getDeviceType()
+    .transform([&](auto devType) -> std::optional<Transform> {
+      auto paths = getInputPaths(devType);
+      if (path == paths.touchPath) {
+        return paths.touchTransform;
+      }
+      if (path == paths.penPath) {
+        return paths.penTransform;
+      }
+      return std::nullopt;
+    })
+    .value_or(std::nullopt);
 }
 
 std::vector<std::string>

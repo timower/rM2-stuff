@@ -47,7 +47,7 @@ FrameBuffer::detectType() {
 
       // check if shared mem exists
       assert(false);
-      return Error{ "Unsupported device, please install rm2fb" };
+      return Error::make("Unsupported device, please install rm2fb");
   }
 }
 
@@ -58,7 +58,7 @@ FrameBuffer::open() {
   auto fd = ::open(fb_path, O_RDWR);
   if (fd < 0) {
     perror("error");
-    return Error{ "Error opening " + std::string(fb_path) };
+    return Error::make("Error opening " + std::string(fb_path));
   }
 
   fb_var_screeninfo screeninfo;
@@ -68,7 +68,7 @@ FrameBuffer::open() {
 
   if (res != 0) {
     ::close(fd);
-    return Error{ "Error getting framebuffer size" };
+    return Error::make("Error getting framebuffer size");
   }
 
   int components = screeninfo.bits_per_pixel / 8;
@@ -81,7 +81,7 @@ FrameBuffer::open() {
 
   if (memory == nullptr) {
     ::close(fd);
-    return Error{ "Error mapping fb" };
+    return Error::make("Error mapping fb");
   }
 
   Canvas canvas(memory, width, height, stride, components);

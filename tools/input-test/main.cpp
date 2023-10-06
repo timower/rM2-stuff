@@ -161,21 +161,21 @@ main() {
   udev_unref(udev);
 
   auto deviceType = device::getDeviceType();
-  if (deviceType.isError()) {
+  if (!deviceType.has_value()) {
     std::cerr << "Unknown device\n";
     return -1;
   }
 
   InputManager input;
   auto err = input.openAll();
-  if (err.isError()) {
-    std::cerr << err.getError().msg << std::endl;
+  if (!err.has_value()) {
+    std::cerr << err.error().msg << std::endl;
   }
 
   while (true) {
     auto events = input.waitForInput(std::nullopt);
-    if (events.isError()) {
-      std::cerr << "Reading input error: " << events.getError().msg << "\n";
+    if (!events.has_value()) {
+      std::cerr << "Reading input error: " << events.error().msg << "\n";
       continue;
     }
 

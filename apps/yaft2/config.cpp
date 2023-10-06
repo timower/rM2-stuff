@@ -50,10 +50,10 @@ parseMapping(
   });
 
   if (it == mapping.end()) {
-    return YaftConfigError{
+    return tl::unexpected(YaftConfigError{
       YaftConfigError::Syntax,
       "Invalid " + std::string(name) + ": " + std::string(*entry),
-    };
+    });
   }
 
   return it->second;
@@ -93,15 +93,17 @@ loadConfig() {
 
   const auto path = getConfigPath();
   if (!std::filesystem::exists(path)) {
-    return YaftConfigError{ YaftConfigError::Missing, path.string() };
+    return tl::unexpected(
+      YaftConfigError{ YaftConfigError::Missing, path.string() });
   }
 
   try {
     tbl = toml::parse_file(getConfigPath().c_str());
   } catch (const toml::parse_error& err) {
-    return YaftConfigError{ YaftConfigError::Syntax,
-                            std::to_string(err.source().begin.line) + ": " +
-                              std::string(err.description()) };
+    return tl::unexpected(
+      YaftConfigError{ YaftConfigError::Syntax,
+                       std::to_string(err.source().begin.line) + ": " +
+                         std::string(err.description()) });
   }
 
   return getConfig(tbl);
@@ -119,5 +121,5 @@ saveDefaultConfig() {
   std::ofstream ofs(path);
   ofs << default_config;
 
-  return NoError{};
+  return {};
 }

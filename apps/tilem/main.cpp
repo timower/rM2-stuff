@@ -615,8 +615,8 @@ main(int argc, char* argv[]) {
 
   const auto err = runApp(Navigator(Calculator(calc_name)));
 
-  if (err.isError()) {
-    std::cerr << err.getError().msg << std::endl;
+  if (!err.has_value()) {
+    std::cerr << err.error().msg << std::endl;
     return EXIT_FAILURE;
   }
 

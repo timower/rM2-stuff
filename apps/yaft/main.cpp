@@ -213,7 +213,7 @@ main(int argc, const char* argv[]) {
     logging(WARN, "setlocale falied\n");
 
   auto fb = rmlib::fb::FrameBuffer::open();
-  if (fb.isError()) {
+  if (!fb.has_value()) {
     logging(FATAL, "framebuffer initialize failed\n");
     goto fb_init_failed;
   }
@@ -247,7 +247,7 @@ main(int argc, const char* argv[]) {
 
   isLandscape = rmlib::device::IsPogoConnected();
   wasLandscape = isLandscape;
-  if (keyboard.init(*fb, term, isLandscape).isError()) {
+  if (!keyboard.init(*fb, term, isLandscape).has_value()) {
     logging(FATAL, "Keyboard failed\n");
     goto tty_init_failed;
   }
@@ -291,9 +291,8 @@ main(int argc, const char* argv[]) {
     // Update repeat in any case (timeout, error or events).
     keyboard.updateRepeat();
 
-    if (eventAndFds.isError()) {
-      std::cerr << "Error reading input: " << eventAndFds.getError().msg
-                << "\n";
+    if (!eventAndFds.has_value()) {
+      std::cerr << "Error reading input: " << eventAndFds.error().msg << "\n";
       continue;
     }
 

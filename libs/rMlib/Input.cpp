@@ -77,7 +77,7 @@ struct InputDevice : public InputDeviceBase {
     } while (rc == LIBEVDEV_READ_STATUS_SYNC ||
              rc == LIBEVDEV_READ_STATUS_SUCCESS);
 
-    return NoError{};
+    return {};
   }
 };
 
@@ -315,13 +315,14 @@ InputManager::open(std::string_view input, Transform inputTransform) {
 
   int fd = ::open(input.data(), O_RDWR | O_NONBLOCK);
   if (fd < 0) {
-    return Error{ "Couldn't open '" + std::string(input) + "'" };
+    return Error::make("Couldn't open '" + std::string(input) + "'");
   }
 
   libevdev* dev = nullptr;
   if (libevdev_new_from_fd(fd, &dev) < 0) {
     close(fd);
-    return Error{ "Error initializing evdev for '" + std::string(input) + "'" };
+    return Error::make("Error initializing evdev for '" + std::string(input) +
+                       "'");
   }
 
   auto device = makeDevice(fd, dev, std::string(input), inputTransform);
@@ -413,7 +414,7 @@ InputManager::waitForInput(fd_set& fdSet,
     maxFd + 1, &fdSet, nullptr, nullptr, !timeout.has_value() ? nullptr : &tv);
   if (ret < 0) {
     perror("Select on input failed");
-    return Error{ "Select failed" };
+    return Error::make("Select failed");
   }
 
   if (ret == 0) {
@@ -437,8 +438,8 @@ InputManager::waitForInput(fd_set& fdSet,
       continue;
     }
 
-    if (auto err = device->readEvents(result); err.isError()) {
-      return err.getError();
+    if (auto err = device->readEvents(result); !err.has_value()) {
+      return tl::unexpected(err.error());
     }
   }
 
