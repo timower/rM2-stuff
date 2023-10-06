@@ -32,13 +32,17 @@
     {
       "name": "release-base",
       "hidden": true,
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "MinSizeRel" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "MinSizeRel",
+        "CMAKE_C_FLAGS": "-Wno-psabi",
+        "CMAKE_CXX_FLAGS": "-Wno-psabi"
+      }
     },
     {
       "name": "debug-base",
       "hidden": true,
       "environment": {
-        "BASE_FLAGS": "-Wall -Wextra -Wpedantic -Wno-unused-parameter -Wno-gnu-statement-expression-from-macro-expansion -fdiagnostics-color=always",
+        "BASE_FLAGS": "-Wall -Wextra -Wno-unused-parameter -Wno-gnu-statement-expression -Wno-gnu-statement-expression-from-macro-expansion -fdiagnostics-color=always -Wno-psabi",
         "BASE_FLAGS_CXX": "$env{BASE_FLAGS} -Wno-c++20-designator"
       },
       "cacheVariables": {
@@ -82,6 +86,12 @@
       "name": "release-toltec",
       "inherits": ["base", "toltec", "release-base"],
       "binaryDir": "${sourceDir}/build/release-toltec"
+    },
+    {
+      "name": "dev-toltec",
+      "inherits": ["base", "toltec", "debug-base"],
+      "binaryDir": "${sourceDir}/build/dev-toltec"
     }
+
   ]
 }
