@@ -264,6 +264,6 @@ struct parm_t { /* for parse_arg() */
   char* argv[MAX_ARGS];
 };
 
-volatile extern sig_atomic_t vt_active;   /* SIGUSR1: vt is active or not */
-volatile extern sig_atomic_t need_redraw; /* SIGUSR1: vt activated */
-volatile extern sig_atomic_t child_alive;
+extern volatile sig_atomic_t vt_active;   /* SIGUSR1: vt is active or not */
+extern volatile sig_atomic_t need_redraw; /* SIGUSR1: vt activated */
+extern volatile sig_atomic_t child_alive;

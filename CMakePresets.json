@@ -68,9 +68,12 @@
     },
     {
       "name": "dev",
-      "inherits": ["base", "rm"],
+      "inherits": ["base", "rm", "debug-base"],
       "binaryDir": "${sourceDir}/build/dev",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+      "cacheVariables": {
+        "BUILD_TESTS": false,
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
     },
     {
       "name": "release",
