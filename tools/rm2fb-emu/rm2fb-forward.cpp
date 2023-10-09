@@ -1,8 +1,8 @@
 #include "Messages.h"
 
+#include <ControlSocket.h>
 #include <ImageHook.h>
 #include <Message.h>
-#include <Socket.h>
 
 #include <atomic>
 #include <cstring>
@@ -180,8 +180,8 @@ main() {
     perror("Socket unlink");
   }
 
-  Socket serverSock;
-  if (!serverSock.bind(socketAddr)) {
+  ControlSocket serverSock;
+  if (!serverSock.init(socketAddr)) {
     return EXIT_FAILURE;
   }
 
@@ -200,12 +200,8 @@ main() {
 
   std::cout << "SWTCON :p!\n";
   while (running) {
-
-    std::vector<pollfd> pollfds = {
-      waitFor(*tcpFd, Wait::READ),
-      pollfd{ .fd = serverSock.sock, .events = POLLIN },
-    };
-
+    std::vector<pollfd> pollfds = { waitFor(*tcpFd, Wait::READ),
+                                    waitFor(serverSock.sock, Wait::READ) };
     auto res = unistdpp::poll(pollfds);
     if (!res) {
       std::cerr << "Poll error: " << toString(res.error()) << "\n";
@@ -213,19 +209,21 @@ main() {
     }
 
     if (canRead(pollfds[1])) {
-      auto [msg, addr] = serverSock.recvfrom<UpdateParams>();
-      if (!msg.has_value()) {
-        continue;
+      auto result =
+        serverSock.recvfrom<UpdateParams>().and_then([&](auto result) {
+          auto [msg, addr] = result;
+
+          bool res = doUpdate(*tcpFd, msg);
+
+          // Don't log Stroke updates
+          if (msg.flags != 4) {
+            std::cerr << "UPDATE " << msg << ": " << res << "\n";
+          }
+          return serverSock.sendto(res, addr);
+        });
+      if (!result) {
+        std::cerr << "Error update: " << toString(result.error()) << "\n";
       }
-
-      bool res = doUpdate(*tcpFd, *msg);
-
-      // Don't log Stroke updates
-      if (msg->flags != 4) {
-        std::cerr << "UPDATE " << *msg << ": " << res << "\n";
-      }
-
-      serverSock.sendto(res, addr);
     }
 
     if (canRead(pollfds[0])) {

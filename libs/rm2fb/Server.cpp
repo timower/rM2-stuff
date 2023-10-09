@@ -1,7 +1,7 @@
 #include "Address.h"
+#include "ControlSocket.h"
 #include "ImageHook.h"
 #include "Message.h"
-#include "Socket.h"
 
 #include <atomic>
 #include <dlfcn.h>
@@ -52,8 +52,8 @@ server_main(int argc, char* argv[], char** envp) {
     perror("Socket unlink");
   }
 
-  Socket serverSock;
-  if (!serverSock.bind(socketAddr)) {
+  ControlSocket serverSock;
+  if (!serverSock.init(socketAddr)) {
     return EXIT_FAILURE;
   }
 
@@ -80,19 +80,24 @@ server_main(int argc, char* argv[], char** envp) {
   }
 
   while (running) {
-    auto [msg, addr] = serverSock.recvfrom<UpdateParams>();
-    if (!msg.has_value()) {
+    auto msgAndAddrOrErr = serverSock.recvfrom<UpdateParams>();
+    if (!msgAndAddrOrErr.has_value()) {
+      std::cerr << "Recvfrom fail: "
+                << unistdpp::toString(msgAndAddrOrErr.error()) << "\n";
       continue;
     }
+    auto [msg, addr] = *msgAndAddrOrErr;
 
-    bool res = addrs->doUpdate(*msg);
+    bool res = addrs->doUpdate(msg);
 
-    // Don't log Stroke updates
-    if (debugMode || msg->flags != 4) {
-      std::cerr << "UPDATE " << *msg << ": " << res << "\n";
+    // Don't log Stroke updates, unless debug mode is on.
+    if (debugMode || msg.flags != 4) {
+      std::cerr << "UPDATE " << msg << ": " << res << "\n";
     }
 
-    serverSock.sendto(res, addr);
+    if (auto sendRes = serverSock.sendto(res, addr); !sendRes) {
+      std::cerr << "Send fail: " << unistdpp::toString(sendRes.error()) << "\n";
+    }
   }
 
   return EXIT_SUCCESS;

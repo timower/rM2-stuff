@@ -8,7 +8,7 @@ project(rm2fb)
 set(COMMON_SRC
   Address.cpp
   SharedBuffer.cpp
-  Socket.cpp
+  ControlSocket.cpp
   ImageHook.cpp)
 
 
@@ -16,16 +16,19 @@ set(COMMON_SRC
 add_library(rm2fb_lib STATIC ${COMMON_SRC})
 target_compile_features(rm2fb_lib PUBLIC cxx_std_17)
 target_include_directories(rm2fb_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(rm2fb_lib PUBLIC rt dl)
+target_link_libraries(rm2fb_lib
+  PUBLIC rt dl unistdpp)
 
 add_library(rm2fb_server SHARED Server.cpp ${COMMON_SRC})
 target_compile_features(rm2fb_server PUBLIC cxx_std_17)
-target_link_libraries(rm2fb_server PRIVATE rt dl)
+target_link_libraries(rm2fb_server
+  PRIVATE rt dl unistdpp)
 
 add_library(rm2fb_client SHARED
   Client.cpp IOCTL.cpp AddressHooking.cpp ${COMMON_SRC})
 target_compile_features(rm2fb_client PUBLIC cxx_std_17)
-target_link_libraries(rm2fb_client PRIVATE linux::mxcfb Frida::Gum rt dl)
+target_link_libraries(rm2fb_client
+  PRIVATE unistdpp linux::mxcfb Frida::Gum rt dl)
 
 # Utility target that builds both the client and server libs.
 add_custom_target(rm2fb DEPENDS rm2fb_client rm2fb_server)

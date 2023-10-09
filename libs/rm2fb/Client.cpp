@@ -4,7 +4,7 @@
 #include "ImageHook.h"
 
 #include "Address.h"
-#include "Socket.h"
+#include "ControlSocket.h"
 
 #include "frida-gum.h"
 
@@ -16,8 +16,9 @@
 
 namespace {
 
-Socket clientSock;
+ControlSocket clientSock;
 bool inXochitl = false;
+
 int
 setupHooks() {
   auto addrs = getAddresses();
@@ -35,9 +36,12 @@ setupHooks() {
 
 bool
 sendUpdate(const UpdateParams& params) {
-  clientSock.sendto(params);
-  auto [result, _] = clientSock.recvfrom<bool>();
-  return result.value_or(false);
+  return clientSock.sendto(params)
+    .and_then([](auto _) {
+      return clientSock.recvfrom<bool>().map(
+        [](auto pair) { return pair.first; });
+    })
+    .value_or(false);
 }
 
 extern "C" {
@@ -119,7 +123,7 @@ __libc_start_main(int (*_main)(int, char**, char**),
     return EXIT_FAILURE;
   }
 
-  if (!clientSock.bind(nullptr)) {
+  if (!clientSock.init(nullptr)) {
     return EXIT_FAILURE;
   }
   if (!clientSock.connect(DEFAULT_SOCK_ADDR)) {

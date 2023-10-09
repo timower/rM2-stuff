@@ -30,12 +30,6 @@ getClientSock(const char* host, int port) {
   auto sock = TRY(unistdpp::socket(AF_INET, SOCK_STREAM, 0));
   TRY(unistdpp::connect(sock, addr));
   return sock;
-  // return unistdpp::socket(AF_INET, SOCK_STREAM, 0).and_then([&](auto sockfd)
-  // {
-  //   return Address::fromHostPort(addr, port)
-  //     .and_then([&](auto addr) { return unistdpp::connect(sockfd, addr); })
-  //     .map([&]() { return std::move(sockfd); });
-  // });
 }
 
 } // namespace

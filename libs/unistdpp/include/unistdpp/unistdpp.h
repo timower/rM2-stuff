@@ -12,6 +12,10 @@ namespace unistdpp {
 /// Managed file descriptor. Prevents copy, closes on destruction.
 struct FD {
   static constexpr int invalid_fd = -1;
+
+  // Use ENODATA as EOF
+  static constexpr std::errc eof_error = std::errc::no_message_available;
+
   int fd = invalid_fd;
 
   explicit FD(int fd = invalid_fd) noexcept : fd(fd) {}

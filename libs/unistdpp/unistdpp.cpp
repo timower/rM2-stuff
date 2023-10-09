@@ -10,6 +10,11 @@ FD::readAll(void* buf, std::size_t size) const {
     if (res == -1) {
       return tl::unexpected(getErrno());
     }
+
+    if (res == 0) {
+      return tl::unexpected(eof_error);
+    }
+
     read += res;
   }
 
@@ -25,6 +30,7 @@ FD::writeAll(const void* buf, std::size_t size) const {
     if (res == -1) {
       return tl::unexpected(getErrno());
     }
+
     written += res;
   }
 
