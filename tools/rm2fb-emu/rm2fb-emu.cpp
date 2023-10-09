@@ -1,3 +1,7 @@
+#include "Messages.h"
+
+#include <unistdpp/socket.h>
+
 #include <FrameBuffer.h>
 #include <Input.h>
 
@@ -13,69 +17,25 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+using namespace unistdpp;
 using namespace rmlib::input;
 
 namespace {
 
 bool running = true;
 
-struct Params {
-  int32_t y1;
-  int32_t x1;
-  int32_t y2;
-  int32_t x2;
-
-  int32_t flags;
-  int32_t waveform;
-};
-static_assert(sizeof(Params) == 6 * 4, "Params has wrong size?");
-
-struct Input {
-  int32_t x;
-  int32_t y;
-  int32_t type; // 1 = down, 2 = up
-};
-
-int
-getClientSock(const char* addr, int port) {
-
-  int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-  if (sockfd < 0) {
-    perror("socket");
-    return -1;
-  }
-
-  struct sockaddr_in serv_addr;
-  memset(&serv_addr, '0', sizeof(serv_addr));
-
-  serv_addr.sin_family = AF_INET;
-  serv_addr.sin_port = htons(port);
-
-  if (inet_pton(AF_INET, addr, &serv_addr.sin_addr) <= 0) {
-    perror("\n inet_pton error occured\n");
-    return -1;
-  }
-
-  if (connect(sockfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
-    perror("Connect");
-    return -1;
-  }
-
-  return sockfd;
-}
-
-int
-readAll(int fd, char* buf, int size) {
-  int readden = 0;
-
-  while (readden < size) {
-    int res = read(fd, buf + readden, size - readden);
-    if (res == -1) {
-      return -1;
-    }
-    readden += res;
-  }
-  return readden;
+Result<FD>
+getClientSock(const char* host, int port) {
+  auto addr = TRY(Address::fromHostPort(host, port));
+  auto sock = TRY(unistdpp::socket(AF_INET, SOCK_STREAM, 0));
+  TRY(unistdpp::connect(sock, addr));
+  return sock;
+  // return unistdpp::socket(AF_INET, SOCK_STREAM, 0).and_then([&](auto sockfd)
+  // {
+  //   return Address::fromHostPort(addr, port)
+  //     .and_then([&](auto addr) { return unistdpp::connect(sockfd, addr); })
+  //     .map([&]() { return std::move(sockfd); });
+  // });
 }
 
 } // namespace
@@ -89,7 +49,8 @@ main(int argc, char* argv[]) {
 
   int port = atoi(argv[2]);
   auto sock = getClientSock(argv[1], port);
-  if (sock == -1) {
+  if (!sock.has_value()) {
+    std::cout << "Couldn't get tcp socket: " << toString(sock.error()) << "\n";
     return EXIT_FAILURE;
   }
 
@@ -105,7 +66,8 @@ main(int argc, char* argv[]) {
   fb->clear();
 
   while (running) {
-    auto fdsOrErr = input.waitForInput(std::nullopt, sock);
+    // TODO: use poll
+    auto fdsOrErr = input.waitForInput(std::nullopt, sock->fd);
     if (!fdsOrErr.has_value()) {
       std::cerr << "Error input: " << fdsOrErr.error().msg;
       break;
@@ -130,9 +92,9 @@ main(int argc, char* argv[]) {
       }();
 
       auto input = Input{ touchEv.location.x, touchEv.location.y, type };
-      int res = write(sock, &input, sizeof(Input));
-      if (res != sizeof(Input)) {
-        perror("Write input");
+      auto res = sock->writeAll(&input, sizeof(Input));
+      if (!res) {
+        std::cerr << "Error writing: " << toString(res.error()) << "\n";
       }
     }
 
@@ -140,13 +102,12 @@ main(int argc, char* argv[]) {
       continue;
     }
 
-    Params msg;
-    int size = read(sock, &msg, sizeof(Params));
-    if (size != sizeof(Params)) {
-      std::cerr << "Read: " << size;
-      perror(" Read failed?");
+    auto msgOrErr = sock->readAll<Params>();
+    if (!msgOrErr) {
+      std::cerr << "Error reading: " << toString(msgOrErr.error()) << "\n";
       break;
     }
+    auto msg = *msgOrErr;
 
     if ((msg.flags & 4) == 0) {
       std::cout << "Got msg: "
@@ -161,10 +122,9 @@ main(int argc, char* argv[]) {
     std::vector<uint16_t> buffer(bufSize);
 
     int readSize = bufSize * sizeof(uint16_t);
-    size = readAll(sock, (char*)buffer.data(), readSize);
-    if (size != readSize) {
-      std::cerr << "Read: " << size;
-      perror(" Read failed?");
+    auto res = sock->readAll(buffer.data(), readSize);
+    if (!res) {
+      std::cerr << "Error reading: " << toString(res.error()) << "\n";
       break;
     }
 

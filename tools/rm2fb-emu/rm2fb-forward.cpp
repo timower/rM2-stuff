@@ -1,6 +1,8 @@
-#include "ImageHook.h"
-#include "Message.h"
-#include "Socket.h"
+#include "Messages.h"
+
+#include <ImageHook.h>
+#include <Message.h>
+#include <Socket.h>
 
 #include <atomic>
 #include <cstring>
@@ -10,11 +12,13 @@
 #include <unistd.h>
 #include <vector>
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
+#include <unistdpp/poll.h>
+#include <unistdpp/socket.h>
+#include <unistdpp/unistdpp.h>
 
 #include <libevdev/libevdev-uinput.h>
+
+using namespace unistdpp;
 
 namespace {
 std::atomic_bool running = true;
@@ -38,26 +42,13 @@ setupExitHandler() {
   }
 }
 
-int
-writeAll(int fd, const char* buf, int size) {
-  int written = 0;
-
-  while (written < size) {
-    int res = write(fd, buf + written, size - written);
-    if (res == -1) {
-      return -1;
-    }
-
-    written += res;
-  }
-
-  return written;
-}
-
 bool
-doUpdate(const UpdateParams& params, int tcpFd) {
-  static_assert(sizeof(UpdateParams) == 6 * 4, "Params wrong size?");
-  write(tcpFd, &params, sizeof(UpdateParams));
+doUpdate(const FD& fd, const UpdateParams& params) {
+  static_assert(sizeof(UpdateParams) == sizeof(Params), "Params wrong size?");
+  if (auto res = fd.writeAll(params); !res) {
+    std::cerr << "Error writing: " << toString(res.error()) << "\n";
+    exit(EXIT_FAILURE);
+  }
 
   int width = params.x2 - params.x1 + 1;
   int height = params.y2 - params.y1 + 1;
@@ -73,9 +64,9 @@ doUpdate(const UpdateParams& params, int tcpFd) {
   }
 
   int writeSize = size * sizeof(uint16_t);
-  int written = writeAll(tcpFd, (const char*)buffer.data(), writeSize);
-  if (written == -1) {
-    perror("Write");
+  auto res = fd.writeAll(buffer.data(), writeSize);
+  if (!res) {
+    std::cerr << "Error writing: " << toString(res.error()) << "\n";
     exit(EXIT_FAILURE);
   }
 
@@ -83,41 +74,19 @@ doUpdate(const UpdateParams& params, int tcpFd) {
 }
 
 // Starts a tcp server and waits for a client to connect.
-int
+Result<FD>
 getTcpSocket(int port) {
-  int listenfd = socket(AF_INET, SOCK_STREAM, 0);
-  if (listenfd == -1) {
-    perror("Socket");
-    return -1;
-  }
+  auto listenfd = TRY(unistdpp::socket(AF_INET, SOCK_STREAM, 0));
+
   // lose the pesky "Address already in use" error message
   int yes = 1;
-  if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof yes) == -1) {
-    perror("setsockopt");
-    return -1;
-  }
+  TRY(unistdpp::setsockopt(
+    listenfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)));
 
-  sockaddr_in serv_addr;
-  memset(&serv_addr, '0', sizeof(serv_addr));
+  TRY(unistdpp::bind(listenfd, Address::fromHostPort(INADDR_ANY, port)));
+  TRY(unistdpp::listen(listenfd, 1));
 
-  serv_addr.sin_family = AF_INET;
-  serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-  serv_addr.sin_port = htons(port);
-
-  if (bind(listenfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) != 0) {
-    perror("bind");
-    return -1;
-  }
-
-  if (listen(listenfd, 1) != 0) {
-    perror("Listen");
-    return -1;
-  }
-
-  int res = accept(listenfd, nullptr, nullptr);
-  close(listenfd);
-
-  return res;
+  return unistdpp::accept(listenfd, nullptr, nullptr);
 }
 
 struct libevdev_uinput*
@@ -172,12 +141,6 @@ makeDevice() {
   return uidev;
 }
 
-struct Input {
-  int32_t x;
-  int32_t y;
-  int32_t type; // 1 = down, 2 = up
-};
-
 void
 handleInput(const Input& inp, libevdev_uinput& dev) {
   constexpr auto wacom_width = 15725;
@@ -229,8 +192,8 @@ main() {
   memset(fb.mem, 0xff, fb_size);
 
   std::cout << "Waiting for connection on port 8888\n";
-  int tcpFd = getTcpSocket(8888);
-  if (tcpFd == -1) {
+  auto tcpFd = getTcpSocket(8888);
+  if (!tcpFd) {
     std::cerr << "Unable to get TCP connection\n";
     return EXIT_FAILURE;
   }
@@ -238,25 +201,24 @@ main() {
   std::cout << "SWTCON :p!\n";
   while (running) {
 
-    fd_set fds;
-    FD_ZERO(&fds);
-    FD_SET(tcpFd, &fds);
-    FD_SET(serverSock.sock, &fds);
+    std::vector<pollfd> pollfds = {
+      waitFor(*tcpFd, Wait::READ),
+      pollfd{ .fd = serverSock.sock, .events = POLLIN },
+    };
 
-    auto res = select(
-      std::max(tcpFd, serverSock.sock) + 1, &fds, nullptr, nullptr, nullptr);
-    if (res < 0) {
-      perror("Select");
+    auto res = unistdpp::poll(pollfds);
+    if (!res) {
+      std::cerr << "Poll error: " << toString(res.error()) << "\n";
       break;
     }
 
-    if (FD_ISSET(serverSock.sock, &fds)) {
+    if (canRead(pollfds[1])) {
       auto [msg, addr] = serverSock.recvfrom<UpdateParams>();
       if (!msg.has_value()) {
         continue;
       }
 
-      bool res = doUpdate(*msg, tcpFd);
+      bool res = doUpdate(*tcpFd, *msg);
 
       // Don't log Stroke updates
       if (msg->flags != 4) {
@@ -266,16 +228,13 @@ main() {
       serverSock.sendto(res, addr);
     }
 
-    if (FD_ISSET(tcpFd, &fds)) {
-
-      Input inp;
-      auto len = read(tcpFd, &inp, sizeof(Input));
-      if (len != sizeof(Input)) {
-        perror("Reading input");
-        break;
-      }
-
-      handleInput(inp, *uinputDev);
+    if (canRead(pollfds[0])) {
+      tcpFd->readAll<Input>()
+        .map([&](auto input) { handleInput(input, *uinputDev); })
+        .or_else([&](auto err) {
+          std::cerr << "Reading input: " << toString(err) << "\n";
+          running = false;
+        });
     }
   }
 
