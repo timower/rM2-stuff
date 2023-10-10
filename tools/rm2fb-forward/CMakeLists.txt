@@ -3,7 +3,7 @@ project(rm2fb-forward)
 find_package(PkgConfig)
 pkg_check_modules(LIBEVDEV libevdev)
 
-if (NOT ${LIBEVDEV_FOUND})
+if (NOT LIBEVDEV_FOUND)
   return()
 endif()
 

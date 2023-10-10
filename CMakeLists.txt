@@ -11,6 +11,12 @@ add_subdirectory(tools)
 add_subdirectory(apps)
 add_subdirectory(vendor)
 
+option(BUILD_TESTS "Build Tests" OFF)
+if (${BUILD_TESTS})
+  enable_testing()
+  add_subdirectory(test)
+endif()
+
 
 set(CPACK_GENERATOR "DEB")
 set(CPACK_POST_BUILD_SCRIPTS "${PROJECT_SOURCE_DIR}/cmake/GenIPK.cmake")

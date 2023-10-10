@@ -48,7 +48,8 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_C_FLAGS": "$env{BASE_FLAGS}",
-        "CMAKE_CXX_FLAGS": "$env{BASE_FLAGS_CXX}"
+        "CMAKE_CXX_FLAGS": "$env{BASE_FLAGS_CXX}",
+        "BUILD_TESTS": true
       }
     },
 

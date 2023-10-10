@@ -1,5 +1,7 @@
 #pragma once
 
+#include <unistdpp/error.h>
+
 #include <cassert>
 #include <cstring>
 
@@ -24,12 +26,3 @@ using ErrorOr = tl::expected<T, E>;
 
 template<typename E = Error>
 using OptError = tl::expected<void, E>;
-
-#define TRY(x)                                                                 \
-  ({                                                                           \
-    auto xOrErr = x;                                                           \
-    if (!xOrErr.has_value()) {                                                 \
-      return tl::unexpected(xOrErr.error());                                   \
-    };                                                                         \
-    std::move(*xOrErr);                                                        \
-  })
