@@ -13,6 +13,7 @@ add_subdirectory(vendor)
 
 option(BUILD_TESTS "Build Tests" OFF)
 if (${BUILD_TESTS})
+  include(CTest)
   enable_testing()
   add_subdirectory(test)
 endif()

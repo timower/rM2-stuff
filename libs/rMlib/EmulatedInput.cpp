@@ -45,6 +45,11 @@ InputManager::~InputManager() {}
 
 ErrorOr<BaseDevices>
 InputManager::openAll(bool monitor) {
+  if (SDL_Init(SDL_INIT_EVENTS) < 0) {
+    return Error::make(std::string("could not initialize sdl2:") +
+                       SDL_GetError());
+  }
+
   auto fakeDev = std::make_unique<FakeInputDevice>();
   auto& fakeDevRef = *fakeDev;
   devices.emplace("Test", std::move(fakeDev));
@@ -110,11 +115,17 @@ InputManager::waitForInput(fd_set& fdSet,
     SDL_PushEvent(&event);
   });
 
+  int sdlRes = 1;
   SDL_Event event;
   if (timeout.has_value()) {
-    SDL_WaitEventTimeout(&event, timeout->count() / 1000);
+    SDL_ClearError();
+    sdlRes = SDL_WaitEventTimeout(&event, timeout->count() / 1000);
   } else {
-    SDL_WaitEvent(&event);
+    sdlRes = SDL_WaitEvent(&event);
+  }
+
+  if (const auto* err = SDL_GetError(); sdlRes == 0 && *err != 0) {
+    std::cerr << "SDL error: " << err << "\n";
   }
 
   if (event.type != dev.sdlUserEvent) {

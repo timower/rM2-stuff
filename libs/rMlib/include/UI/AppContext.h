@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Input.h>
+#include <UI/RenderObject.h>
 #include <UI/Timer.h>
 
 #include <vector>
@@ -9,7 +10,12 @@ namespace rmlib {
 
 class AppContext {
 public:
-  AppContext(fb::FrameBuffer& framebuffer) : framebuffer(framebuffer) {}
+  static ErrorOr<AppContext> makeContext() {
+    auto fb = TRY(fb::FrameBuffer::open());
+    auto ctx = AppContext(std::move(fb));
+    TRY(ctx.inputManager.openAll());
+    return ctx;
+  }
 
   TimerHandle addTimer(
     std::chrono::microseconds duration,
@@ -117,8 +123,51 @@ public:
     return result;
   }
 
+  void setRootRenderObject(std::unique_ptr<RenderObject> obj) {
+    rootRO = std::move(obj);
+  }
+
+  RenderObject& getRootRenderObject() { return *rootRO; }
+
+  void step() {
+    rootRO->rebuild(*this, nullptr);
+
+    const auto size = rootRO->layout(rootConstraints);
+    const auto rect = rmlib::Rect{ { 0, 0 }, size.toPoint() };
+
+    auto updateRegion = rootRO->cleanup(framebuffer.canvas);
+    updateRegion |= rootRO->draw(rect, framebuffer.canvas);
+
+    if (!updateRegion.region.empty()) {
+      framebuffer.doUpdate(
+        updateRegion.region, updateRegion.waveform, updateRegion.flags);
+    }
+
+    const auto duration = getNextDuration();
+    const auto evsOrError = waitForInput(duration);
+    checkTimers();
+    doAllLaters();
+
+    if (!evsOrError.has_value()) {
+      std::cerr << evsOrError.error().msg << std::endl;
+    } else {
+      for (const auto& ev : *evsOrError) {
+        rootRO->handleInput(ev);
+      }
+    }
+
+    rootRO->reset();
+  }
+
+protected:
+  AppContext(fb::FrameBuffer fb) : framebuffer(std::move(fb)) {
+    const auto fbSize =
+      Size{ framebuffer.canvas.width(), framebuffer.canvas.height() };
+    rootConstraints = Constraints{ fbSize, fbSize };
+  }
+
 private:
-  fb::FrameBuffer& framebuffer;
+  fb::FrameBuffer framebuffer;
   input::InputManager inputManager;
 
   TimerQueue timers;
@@ -129,6 +178,9 @@ private:
   std::unordered_map<int, Callback> extraFds;
 
   bool mShouldStop = false;
+
+  std::unique_ptr<RenderObject> rootRO;
+  Constraints rootConstraints;
 };
 
 } // namespace rmlib

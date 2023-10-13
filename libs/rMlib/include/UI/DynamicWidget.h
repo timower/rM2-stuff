@@ -57,6 +57,8 @@ private:
       child->reset();
     }
 
+    std::vector<RenderObject*> getChildren() final { return { child.get() }; }
+
   protected:
     Size doLayout(const Constraints& constraints) override {
       return child->layout(constraints);

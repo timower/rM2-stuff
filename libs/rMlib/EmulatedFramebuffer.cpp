@@ -14,6 +14,8 @@
 #include <libevdev/libevdev-uinput.h>
 #endif
 
+bool rmlib_disable_window = false;
+
 namespace rmlib::fb {
 namespace {
 constexpr auto canvas_width = 1404;
@@ -65,27 +67,29 @@ putpixel(SDL_Surface* surface, int x, int y, Uint32 pixel) {
 
 ErrorOr<Canvas>
 makeEmulatedCanvas() {
-  if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-    return Error::make(std::string("could not initialize sdl2:") +
-                       SDL_GetError());
-  }
-  window = SDL_CreateWindow("rM emulator",
-                            SDL_WINDOWPOS_UNDEFINED,
-                            SDL_WINDOWPOS_UNDEFINED,
-                            window_width,
-                            window_height,
-                            SDL_WINDOW_SHOWN);
-  if (window == NULL) {
-    return Error::make(std::string("could not create window:") +
-                       SDL_GetError());
-  }
-  auto* screenSurface = SDL_GetWindowSurface(window);
-  SDL_FillRect(
+  if (!rmlib_disable_window) {
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+      return Error::make(std::string("could not initialize sdl2:") +
+                         SDL_GetError());
+    }
+    window = SDL_CreateWindow("rM emulator",
+                              SDL_WINDOWPOS_UNDEFINED,
+                              SDL_WINDOWPOS_UNDEFINED,
+                              window_width,
+                              window_height,
+                              SDL_WINDOW_SHOWN);
+    if (window == NULL) {
+      return Error::make(std::string("could not create window:") +
+                         SDL_GetError());
+    }
+    auto* screenSurface = SDL_GetWindowSurface(window);
+    SDL_FillRect(
 
-    screenSurface,
-    NULL,
-    SDL_MapRGB(screenSurface->format, 0x1F << 3, 0x1F << 3, 0x1F << 3));
-  SDL_UpdateWindowSurface(window);
+      screenSurface,
+      NULL,
+      SDL_MapRGB(screenSurface->format, 0x1F << 3, 0x1F << 3, 0x1F << 3));
+    SDL_UpdateWindowSurface(window);
+  }
 
   const auto memSize = canvas_width * canvas_height * canvas_components;
   emuMem = std::make_unique<uint8_t[]>(memSize);
@@ -96,6 +100,10 @@ makeEmulatedCanvas() {
 void
 updateEmulatedCanvas(const Canvas& canvas, Rect region) {
   std::cout << "Update: " << region << "\n";
+  if (rmlib_disable_window) {
+    return;
+  }
+
   auto* surface = SDL_GetWindowSurface(window);
 
   const auto getPixel = [&canvas](int x, int y) {

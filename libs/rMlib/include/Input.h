@@ -118,12 +118,27 @@ struct InputManager {
   InputManager();
   ~InputManager();
 
-  InputManager(InputManager&& other) : devices(std::move(other.devices)) {
+  // TODO: rule of 0 this
+  InputManager(InputManager&& other)
+    : devices(std::move(other.devices))
+    , baseDevices(other.baseDevices)
+    , udevHandle(other.udevHandle)
+    , udevMonitor(other.udevMonitor)
+    , udevMonitorFd(other.udevMonitorFd) {
     other.devices.clear();
+    other.baseDevices = std::nullopt;
+    other.udevHandle = nullptr;
+    other.udevMonitor = nullptr;
+    other.udevMonitorFd = -1;
   }
 
   InputManager& operator=(InputManager&& other) {
     devices.clear();
+    baseDevices = std::nullopt;
+    udevHandle = nullptr;
+    udevMonitor = nullptr;
+    udevMonitorFd = -1;
+
     std::swap(other, *this);
     return *this;
   }

@@ -42,7 +42,7 @@
       "name": "debug-base",
       "hidden": true,
       "environment": {
-        "BASE_FLAGS": "-Wall -Wextra -Wno-unused-parameter -Wno-gnu-statement-expression -Wno-gnu-statement-expression-from-macro-expansion -fdiagnostics-color=always -Wno-psabi",
+        "BASE_FLAGS": "-Wall -Wextra -Wno-unused-parameter -Wno-gnu-statement-expression -Wno-gnu-statement-expression-from-macro-expansion -fdiagnostics-color=always -Wno-psabi -fprofile-instr-generate -fcoverage-mapping",
         "BASE_FLAGS_CXX": "$env{BASE_FLAGS} -Wno-c++20-designator"
       },
       "cacheVariables": {
@@ -57,7 +57,10 @@
       "name": "dev-host",
       "inherits": ["base", "clang", "debug-base"],
       "binaryDir": "${sourceDir}/build/host",
-      "cacheVariables": { "EMULATE": true }
+      "cacheVariables": {
+        "EMULATE": true,
+        "COVERAGE": true
+      }
     },
     {
       "name": "dev-tidy",

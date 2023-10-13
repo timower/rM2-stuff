@@ -125,6 +125,8 @@ public:
 
   typeID::type_id_t getWidgetTypeID() const { return mTypeID; }
 
+  virtual std::vector<RenderObject*> getChildren() = 0;
+
 protected:
   virtual Size doLayout(const Constraints& Constraints) = 0;
   virtual UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) = 0;
@@ -171,6 +173,9 @@ public:
   LeafRenderObject(const Widget& widget)
     : RenderObject(typeID::type_id<Widget>()), widget(&widget) {}
 
+  std::vector<RenderObject*> getChildren() final { return {}; }
+  const Widget& getWidget() { return *widget; }
+
 protected:
   const Widget* widget;
 };
@@ -191,8 +196,9 @@ public:
     , widget(&widget)
     , child(std::move(child)) {}
 
-  // SingleChildRenderObject(std::unique_ptr<RenderObject> child)
-  //   : SingleChildRenderObject(), child(std::move(child)) {}
+  // SingleChildRenderObject(std::unique_ptr<RenderObject> ro,
+  //                         typeID::type_id_t typeID)
+  //   : RenderObject(typeID), child(std::move(child)) {}
 
   void handleInput(const rmlib::input::Event& ev) override {
     child->handleInput(ev);
@@ -235,6 +241,9 @@ public:
     child->reset();
   }
 
+  std::vector<RenderObject*> getChildren() final { return { child.get() }; }
+  const Widget& getWidget() { return *widget; }
+
 protected:
   Size doLayout(const Constraints& constraints) override {
     return child->layout(constraints);
@@ -252,6 +261,7 @@ protected:
     return RenderObject::getNeedsLayout() || child->needsLayout();
   }
 
+  // TODO: fix widget lifetime
   const Widget* widget;
   std::unique_ptr<RenderObject> child;
 };
@@ -331,6 +341,16 @@ public:
     for (const auto& child : children) {
       child->reset();
     }
+  }
+
+  std::vector<RenderObject*> getChildren() final {
+    std::vector<RenderObject*> result;
+    result.reserve(children.size());
+    std::transform(children.begin(),
+                   children.end(),
+                   std::back_inserter(result),
+                   [](auto& child) { return child.get(); });
+    return result;
   }
 
 protected:

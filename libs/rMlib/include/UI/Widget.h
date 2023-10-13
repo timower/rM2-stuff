@@ -19,8 +19,9 @@ struct ArgType<R (Class::*)(Arg)> {
 
 template<typename RO>
 class Widget {
-
 public:
+  using RenderObjectType = RO;
+
   std::unique_ptr<RenderObject> createRenderObject() const {
     assert(false && "must implement");
     return nullptr;

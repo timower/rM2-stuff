@@ -42,49 +42,17 @@ stop(int signal) {
 template<typename AppWidget>
 OptError<>
 runApp(AppWidget widget) {
-  auto fb = TRY(rmlib::fb::FrameBuffer::open());
-
-  AppContext context(fb);
+  auto context = TRY(AppContext::makeContext());
   details::currentContext = &context;
 
-  TRY(context.getInputManager().openAll());
-
-  auto rootRO = widget.createRenderObject();
-
-  const auto fbSize = Size{ fb.canvas.width(), fb.canvas.height() };
-  const auto constraints = Constraints{ fbSize, fbSize };
+  // TODO: fix widget lifetime
+  context.setRootRenderObject(widget.createRenderObject());
 
   std::signal(SIGINT, details::stop);
   std::signal(SIGTERM, details::stop);
 
   while (!context.shouldStop()) {
-    rootRO->rebuild(context, nullptr);
-
-    const auto size = rootRO->layout(constraints);
-    const auto rect = rmlib::Rect{ { 0, 0 }, size.toPoint() };
-
-    auto updateRegion = rootRO->cleanup(fb.canvas);
-    updateRegion |= rootRO->draw(rect, fb.canvas);
-
-    if (!updateRegion.region.empty()) {
-      fb.doUpdate(
-        updateRegion.region, updateRegion.waveform, updateRegion.flags);
-    }
-
-    const auto duration = context.getNextDuration();
-    const auto evsOrError = context.waitForInput(duration);
-    context.checkTimers();
-    context.doAllLaters();
-
-    if (!evsOrError.has_value()) {
-      std::cerr << evsOrError.error().msg << std::endl;
-    } else {
-      for (const auto& ev : *evsOrError) {
-        rootRO->handleInput(ev);
-      }
-    }
-
-    rootRO->reset();
+    context.step();
   }
 
   std::signal(SIGINT, SIG_DFL);

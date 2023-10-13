@@ -16,16 +16,17 @@ public:
 
   std::unique_ptr<RenderObject> createRenderObject() const;
 
+  std::string_view getText() const { return text; }
+
 private:
   friend class TextRenderObject;
   std::string text;
   int fontSize;
 };
 
-class TextRenderObject : public RenderObject {
+class TextRenderObject : public LeafRenderObject<Text> {
 public:
-  TextRenderObject(const Text& widget)
-    : RenderObject(typeID::type_id<Text>()), widget(&widget) {}
+  TextRenderObject(const Text& widget) : LeafRenderObject(widget) {}
 
   void update(const Text& newWidget) {
     if (newWidget.fontSize != widget->fontSize ||
@@ -85,7 +86,6 @@ protected:
   }
 
 private:
-  const Text* widget;
 };
 
 inline std::unique_ptr<RenderObject>
