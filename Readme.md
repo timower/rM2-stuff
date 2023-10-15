@@ -1,5 +1,7 @@
 reMarkable Stuff
 ================
+[![Build](https://github.com/timower/rM2-stuff/actions/workflows/build.yml/badge.svg)](https://github.com/timower/rM2-stuff/actions/workflows/build.yml)
+[![codecov](https://codecov.io/github/timower/rM2-stuff/graph/badge.svg?token=SN0AG39539)](https://codecov.io/github/timower/rM2-stuff)
 
 Collection of reMarkable related apps, utilities and libraries.
 
