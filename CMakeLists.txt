@@ -1,8 +1,10 @@
 cmake_minimum_required(VERSION 3.19)
 
+project(rm2-stuff VERSION 0.0.1 LANGUAGES CXX)
+
 set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
-project(rm2-stuff VERSION 0.0.1 LANGUAGES CXX)
+include(BuildTypes)
 
 set(CMAKE_CXX_STANDARD "17")
 
@@ -17,7 +19,6 @@ if (${BUILD_TESTS})
   enable_testing()
   add_subdirectory(test)
 endif()
-
 
 set(CPACK_GENERATOR "DEB")
 set(CPACK_POST_BUILD_SCRIPTS "${PROJECT_SOURCE_DIR}/cmake/GenIPK.cmake")

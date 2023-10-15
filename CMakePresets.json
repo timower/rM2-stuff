@@ -41,14 +41,8 @@
     {
       "name": "debug-base",
       "hidden": true,
-      "environment": {
-        "BASE_FLAGS": "-Wall -Wextra -Wno-unused-parameter -Wno-gnu-statement-expression -Wno-gnu-statement-expression-from-macro-expansion -fdiagnostics-color=always -Wno-psabi -fprofile-instr-generate -fcoverage-mapping",
-        "BASE_FLAGS_CXX": "$env{BASE_FLAGS} -Wno-c++20-designator"
-      },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_C_FLAGS": "$env{BASE_FLAGS}",
-        "CMAKE_CXX_FLAGS": "$env{BASE_FLAGS_CXX}",
         "BUILD_TESTS": true
       }
     },
@@ -68,8 +62,8 @@
       "binaryDir": "${sourceDir}/build/tidy",
       "cacheVariables": {
         "CMAKE_CXX_CLANG_TIDY": "clang-tidy;-warnings-as-errors=*",
-        "CMAKE_C_FLAGS": "$env{BASE_FLAGS} -Werror",
-        "CMAKE_CXX_FLAGS": "$env{BASE_FLAGS_CXX} -Werror"
+        "CMAKE_C_FLAGS": "-Werror",
+        "CMAKE_CXX_FLAGS": "-Werror"
       }
     },
     {
