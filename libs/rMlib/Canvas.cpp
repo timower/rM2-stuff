@@ -55,10 +55,13 @@ getFont() {
     }
     const auto* data = fontBuffer.data();
 #else
-    const auto* data = noto_sans_mono_font;
+    const auto* data = NotoSansMono_Regular_ttf;
 #endif
 
-    stbtt_InitFont(&font, data, 0);
+    if (!stbtt_InitFont(&font, data, 0)) {
+      std::cerr << "Error initializing font!\n";
+      std::exit(EXIT_FAILURE);
+    }
 
 #ifndef EMULATE
     fclose(fp); // NOLINT

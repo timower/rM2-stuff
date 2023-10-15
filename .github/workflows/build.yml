@@ -8,9 +8,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
+        with:
+          lfs: 'true'
 
       - name: Install Deps
-        run: sudo apt-get install -y ninja-build libsdl2-dev
+        run: sudo apt-get install -y ninja-build libsdl2-dev xxd
 
       - name: Configure CMake
         run: cmake --preset dev-host
@@ -19,7 +21,7 @@ jobs:
         run: cmake --build build/host
 
       - name: Test
-        run: ctest --test-dir build/host
+        run: ctest --test-dir build/host --output-on-failure
 
   build:
     runs-on: ubuntu-latest
@@ -27,7 +29,12 @@ jobs:
       image: ghcr.io/toltec-dev/base:v2.3
 
     steps:
-      - uses: actions/checkout@v2
+      - name: Install Deps
+        run: apt-get update && apt-get install -y git git-lfs
+
+      - uses: actions/checkout@v3
+        with:
+          lfs: 'true'
 
       - name: Configure CMake
         run: cmake --preset release-toltec

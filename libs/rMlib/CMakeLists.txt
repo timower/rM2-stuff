@@ -50,7 +50,7 @@ endif()
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
 
 if (EMULATE)
-  target_link_libraries(${PROJECT_NAME} PRIVATE NotoFont)
+  target_link_libraries(${PROJECT_NAME} PRIVATE NotoFont::font)
 
   find_package(SDL2 REQUIRED)
   if (TARGET SDL2::SDL2)
