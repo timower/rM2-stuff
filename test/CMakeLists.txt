@@ -14,6 +14,13 @@ if (COVERAGE)
                --instr-profile merged.profdata
                -Xdemangler c++filt -Xdemangler -n
                "${CMAKE_BINARY_DIR}/test/unit/unit-tests"
+    COMMAND llvm-cov export
+               --format lcov
+               -ignore-filename-regex "'build/|stb_.*|test/unit/'"
+               --instr-profile merged.profdata
+               -Xdemangler c++filt -Xdemangler -n
+               "${CMAKE_BINARY_DIR}/test/unit/unit-tests" > "${CMAKE_BINARY_DIR}/report.lcov"
+
     DEPENDS unit-tests
   )
 endif()

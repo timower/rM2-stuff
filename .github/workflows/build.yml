@@ -12,7 +12,7 @@ jobs:
           lfs: 'true'
 
       - name: Install Deps
-        run: sudo apt-get install -y ninja-build libsdl2-dev xxd
+        run: sudo apt-get install -y ninja-build libsdl2-dev xxd llvm
 
       - name: Configure CMake
         run: cmake --preset dev-host
@@ -21,7 +21,14 @@ jobs:
         run: cmake --build build/host
 
       - name: Test
-        run: ctest --test-dir build/host --output-on-failure
+        run: cmake --build build/host --target make-coverage
+
+      - name: Upload Coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./build/host/report.lcov
+          fail_ci_if_error: true # optional (default = false)
+          verbose: true # optional (default = false)
 
   build:
     runs-on: ubuntu-latest

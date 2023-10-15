@@ -42,7 +42,11 @@ Address::fromHostPort(std::string_view host, int port) {
 
   addr->sin_port = htons(port);
 
-  if (inet_pton(AF_INET, host.data(), &addr->sin_addr) <= 0) {
+  int err = inet_pton(AF_INET, host.data(), &addr->sin_addr);
+  if (err == 0) {
+    return tl::unexpected(std::errc::invalid_argument);
+  }
+  if (err < 0) {
     return tl::unexpected(getErrno());
   }
 

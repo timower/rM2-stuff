@@ -15,18 +15,20 @@ namespace Catch {
 template<typename T>
 struct StringMaker<Result<T>> {
   static std::string convert(const Result<T>& value) {
-    return value.has_value() ? std::to_string(*value)
-                             : std::make_error_code(value.error()).message();
+    return value.has_value() ? std::to_string(*value) : toString(value.error());
   }
 };
 template<>
 struct StringMaker<Result<void>> {
   static std::string convert(const Result<void>& value) {
-    return value.has_value() ? "OK"
-                             : std::make_error_code(value.error()).message();
+    return value.has_value() ? "OK" : toString(value.error());
   }
 };
 } // namespace Catch
+
+TEST_CASE("error", "[unistdpp]") {
+  REQUIRE(toString(std::errc::invalid_argument) == "Invalid argument");
+}
 
 TEST_CASE("open", "[unistdpp]") {
   FD fd;
@@ -36,7 +38,9 @@ TEST_CASE("open", "[unistdpp]") {
     fd = std::move(*res);
 
     REQUIRE(fd.isValid());
+    REQUIRE(fd);
     REQUIRE_FALSE(res->isValid());
+    REQUIRE_FALSE(*res);
   }
 
   FD fd2 = std::move(fd);
@@ -80,13 +84,19 @@ TEST_CASE("pipe", "[unistdpp]") {
 
   auto [readFd, writeFd] = std::move(*pipe);
 
-  const char test[] = "testing";
+  REQUIRE_FALSE(readFd.writeAll(12));
 
-  REQUIRE(writeFd.writeAll(test, sizeof(test)).has_value());
+  struct Test {
+    int a;
+    float b;
+  };
 
-  char buf[512];
-  REQUIRE(readFd.readAll(buf, sizeof(test)).has_value());
-  REQUIRE(memcmp(buf, test, sizeof(test)) == 0);
+  REQUIRE(writeFd.writeAll(Test{ 55, 1.2f }).has_value());
+
+  auto res = readFd.readAll<Test>();
+  REQUIRE(res.has_value());
+  REQUIRE(res->a == 55);
+  REQUIRE(res->b == 1.2f);
 }
 
 TEST_CASE("poll", "[unistdpp]") {
@@ -107,6 +117,13 @@ TEST_CASE("poll", "[unistdpp]") {
   auto res = unistdpp::poll(pollfds, nowait);
   REQUIRE(res.has_value());
   REQUIRE(*res == 0);
+
+  pollfds.emplace_back(waitFor(write1, Wait::WRITE));
+  res = unistdpp::poll(pollfds, nowait);
+  REQUIRE(res);
+  REQUIRE(*res == 1);
+  REQUIRE(canWrite(pollfds.back()));
+  pollfds.pop_back();
 
   const char test[] = "test";
   REQUIRE(write1.writeAll(test, sizeof(test)).has_value());
@@ -152,9 +169,15 @@ TEST_CASE("TCP Socket", "[unistdpp]") {
   auto clientSock = unistdpp::socket(AF_INET, SOCK_STREAM, 0);
   REQUIRE(clientSock.has_value());
 
+  REQUIRE_FALSE(clientSock->readAll<char>().has_value());
+
   int yes = 1;
   REQUIRE(unistdpp::setsockopt(
     *serverSock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)));
+
+  auto failAddr = Address::fromHostPort("foo.blah", 4444);
+  REQUIRE_FALSE(failAddr.has_value());
+  REQUIRE(failAddr.error() == std::errc::invalid_argument);
 
   constexpr auto port = 43224;
   auto serverAddr = Address::fromHostPort(INADDR_ANY, port);
@@ -216,6 +239,8 @@ TEST_CASE("Unix Socket", "[unistdpp]") {
   REQUIRE(size);
   REQUIRE(*size == sizeof(testMsg));
   REQUIRE(memcmp(buf, testMsg, sizeof(testMsg)) == 0);
+
+  REQUIRE(recvAddr.type() == AF_UNIX);
 
   REQUIRE(
     unistdpp::sendto(*serverSock, testMsg, sizeof(testMsg), 0, &recvAddr));
