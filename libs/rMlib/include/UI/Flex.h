@@ -109,11 +109,12 @@ protected:
     // TODO: if totalFlex or remainingSpace changed, then we need to re-layout
 
     for (auto i = 0u; i < num_children; i++) {
-      if (this->widget->flexes[i] == 0) {
+      const auto flex = this->widget->flexes[i];
+      if (flex == 0) {
         continue;
       }
 
-      const auto sizeAllocation = int(remainingSpace / totalFlex);
+      const auto sizeAllocation = int(flex * remainingSpace / totalFlex);
       const auto childConstraints =
         isVertical()
           ? Constraints{ { constraints.min.width, sizeAllocation },

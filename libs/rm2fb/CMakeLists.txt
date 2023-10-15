@@ -1,3 +1,8 @@
+# rm2fb uses Linux APIs extensively
+if (NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
+  return()
+endif()
+
 project(rm2fb)
 
 set(COMMON_SRC

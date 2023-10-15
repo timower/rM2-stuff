@@ -4,6 +4,7 @@ option(EMULATE "Emulate a rM tablet using SDL" OFF)
 option(EMULATE_UINPUT "Emulate input devices using uinput" OFF)
 
 set(RMLIB_SOURCES
+  stb.c
   Device.cpp
   Canvas.cpp
   Gesture.cpp)
@@ -49,6 +50,8 @@ endif()
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
 
 if (EMULATE)
+  target_link_libraries(${PROJECT_NAME} PRIVATE NotoFont)
+
   find_package(SDL2 REQUIRED)
   if (TARGET SDL2::SDL2)
     target_link_libraries(${PROJECT_NAME} PUBLIC  SDL2::SDL2)
@@ -59,7 +62,7 @@ if (EMULATE)
   target_link_libraries(${PROJECT_NAME} PUBLIC  pthread)
 
   target_compile_definitions(${PROJECT_NAME} PUBLIC EMULATE)
-  target_compile_definitions(${PROJECT_NAME} PRIVATE EMULATE_SCALE=2)
+  target_compile_definitions(${PROJECT_NAME} PUBLIC EMULATE_SCALE=2)
 
   if (EMULATE_UINPUT)
     target_compile_definitions(${PROJECT_NAME} PRIVATE EMULATE_UINPUT)

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Error.h"
 #include "MathUtil.h"
 
 #include <cassert>
@@ -144,6 +145,14 @@ public:
   int lineSize() const { return mLineSize; }
   uint8_t* getMemory() const { return memory; }
 
+  Canvas subCanvas(Rect rect) {
+    return Canvas(getPtr(rect.topLeft.x, rect.topLeft.y),
+                  rect.width(),
+                  rect.height(),
+                  mLineSize,
+                  mComponents);
+  }
+
   bool operator==(const Canvas& other) const {
     if (mWidth != other.mWidth) {
       return false;
@@ -159,8 +168,9 @@ public:
 
     for (int y = 0; y < mHeight; y++) {
       auto* line = &memory[y * lineSize()];
-      auto* otherLine = &other.memory[y * lineSize()];
-      if (memcmp(line, otherLine, lineSize()) != 0) {
+      auto* otherLine = &other.memory[y * other.lineSize()];
+      if (memcmp(line, otherLine, width()) != 0) {
+        std::cout << "Diff at line " << y << "\n";
         return false;
       }
     }
@@ -191,6 +201,7 @@ private:
 };
 
 struct ImageCanvas {
+  static std::optional<ImageCanvas> loadRaw(const char* path);
   static std::optional<ImageCanvas> load(const char* path,
                                          int background = white);
   static std::optional<ImageCanvas> load(uint8_t* data,
@@ -269,5 +280,8 @@ transform(Canvas& dest,
     }
   }
 }
+
+OptError<>
+writeImage(const char* path, const Canvas& canvas);
 
 } // namespace rmlib

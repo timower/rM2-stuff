@@ -1,9 +1,7 @@
 #include "Canvas.h"
 
-#define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
-
-#define STB_TRUETYPE_IMPLEMENTATION
+#include "stb_image_write.h"
 #include "stb_truetype.h"
 
 #include <array>
@@ -26,12 +24,16 @@ toRGB565(uint8_t grey) {
   return (grey >> 3) | ((grey >> 2) << 5) | ((grey >> 3) << 11);
 }
 
+constexpr uint8_t
+fromRGB565(uint16_t rgb) {
+  uint8_t r = (rgb & 0x1f) << 3;
+  uint8_t g = ((rgb >> 5) & 0x3f) << 2;
+  uint8_t b = ((rgb >> 11) & 0x1f) << 3;
+  return g;
+};
+
 #ifdef EMULATE
-#ifdef __APPLE__
-constexpr auto font_path = "/System/Library/Fonts/SFNSMono.ttf";
-#else
-constexpr auto font_path = "/usr/share/fonts/TTF/DejaVuSansMono.ttf";
-#endif
+#include "noto-sans-mono.h"
 #else
 constexpr auto font_path = "/usr/share/fonts/ttf/noto/NotoMono-Regular.ttf";
 #endif
@@ -39,9 +41,10 @@ constexpr auto font_path = "/usr/share/fonts/ttf/noto/NotoMono-Regular.ttf";
 stbtt_fontinfo*
 getFont() {
   static auto* font = [] {
-    static std::array<uint8_t, 24 << 20> fontBuffer = { 0 };
     static stbtt_fontinfo font;
-
+#ifndef EMULATE
+    // TODO: unistdpp
+    static std::array<uint8_t, 24 << 20> fontBuffer = { 0 };
     auto* fp = fopen(font_path, "r"); // NOLINT
     if (fp == nullptr) {
       std::cerr << "Error opening font\n";
@@ -50,9 +53,16 @@ getFont() {
     if (len == static_cast<decltype(len)>(-1)) {
       std::cerr << "Error reading font\n";
     }
+    const auto* data = fontBuffer.data();
+#else
+    const auto* data = noto_sans_mono_font;
+#endif
 
-    stbtt_InitFont(&font, fontBuffer.data(), 0);
+    stbtt_InitFont(&font, data, 0);
+
+#ifndef EMULATE
     fclose(fp); // NOLINT
+#endif
     return &font;
   }();
 
@@ -296,7 +306,7 @@ greyAlphaToRGB565(uint8_t background, uint16_t pixel) {
 }
 
 std::optional<ImageCanvas>
-ImageCanvas::load(const char* path, int background) {
+ImageCanvas::loadRaw(const char* path) {
   int width;
   int height;
   int imgComponents;
@@ -305,11 +315,20 @@ ImageCanvas::load(const char* path, int background) {
     return std::nullopt;
   }
 
-  Canvas result(mem, width, height, 2);
-  result.transform([background](auto x, auto y, uint16_t pixel) {
+  return ImageCanvas{ Canvas(mem, width, height, 2) };
+}
+
+std::optional<ImageCanvas>
+ImageCanvas::load(const char* path, int background) {
+  auto result = loadRaw(path);
+  if (!result.has_value()) {
+    return {};
+  }
+
+  result->canvas.transform([background](auto x, auto y, uint16_t pixel) {
     return greyAlphaToRGB565(background, pixel);
   });
-  return ImageCanvas{ result };
+  return result;
 }
 
 std::optional<ImageCanvas>
@@ -350,6 +369,25 @@ MemoryCanvas::MemoryCanvas(const Canvas& other, Rect rect) {
 MemoryCanvas::MemoryCanvas(int width, int height, int components) {
   memory = std::make_unique<uint8_t[]>(width * height * components);
   canvas = Canvas(memory.get(), width, height, components);
+}
+
+OptError<>
+writeImage(const char* path, const Canvas& canvas) {
+  MemoryCanvas test(canvas.width(), canvas.height(), 1);
+
+  canvas.forEach([&](auto x, auto y, auto pixel) {
+    test.canvas.setPixel({ x, y }, fromRGB565(pixel));
+  });
+
+  if (!stbi_write_png(path,
+                      test.canvas.width(),
+                      test.canvas.height(),
+                      test.canvas.components(),
+                      test.canvas.getMemory(),
+                      test.canvas.lineSize())) {
+    return Error::make("Error writing image");
+  }
+  return {};
 }
 
 } // namespace rmlib

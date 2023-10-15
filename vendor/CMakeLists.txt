@@ -3,6 +3,7 @@ include(FetchContent)
 add_subdirectory(frida)
 add_subdirectory(linux)
 add_subdirectory(tomlplusplus)
+add_subdirectory(noto)
 
 FetchContent_Declare(
   expected

@@ -22,6 +22,7 @@ public:
     this->updateChildren(*widget, newWidget);
 
     if (needsDraw) {
+      this->markNeedsLayout();
       this->markNeedsDraw();
     }
 
@@ -52,6 +53,7 @@ protected:
       result.height = std::max(result.height, childSize.height);
     }
 
+    std::cout << "Stack layout result: " << result << "\n";
     return result;
   }
 

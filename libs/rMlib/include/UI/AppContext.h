@@ -166,8 +166,9 @@ protected:
     rootConstraints = Constraints{ fbSize, fbSize };
   }
 
-private:
   fb::FrameBuffer framebuffer;
+
+private:
   input::InputManager inputManager;
 
   TimerQueue timers;

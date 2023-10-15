@@ -16,6 +16,7 @@ private:
     RenderObject& getChild() { return *child; }
 
     void setChild(std::unique_ptr<RenderObject> ro, typeID::type_id_t typeID) {
+      markNeedsDraw(true);
       child = std::move(ro);
       this->mTypeID = typeID;
     }
@@ -120,6 +121,7 @@ public:
   void update(RenderObject& RO) const { mWidget->update(RO); }
 
 private:
+  // TODO: shared pointer? A widget should be copyable...
   std::unique_ptr<DynamicWidgetBase> mWidget;
 };
 

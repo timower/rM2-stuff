@@ -219,6 +219,8 @@ struct Rect {
     const auto start = topLeft + offset;
     return Rect{ start, start + size.toPoint() };
   }
+
+  constexpr Point center() const { return (topLeft + bottomRight) / 2; }
 };
 
 static_assert(Rect{}.width() == 0);
