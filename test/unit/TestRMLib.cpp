@@ -267,34 +267,31 @@ TEST_CASE("StateFull - Dynamic", "[rmlib][ui]") {
   auto counter = ctx.findByType<CounterTest>();
 
   {
-    auto incTxt = ctx.findByText("+1");
-    auto decTxt = ctx.findByText("-1");
-
     REQUIRE_THAT(ctx.findByText("0"), Catch::Matchers::SizeIs(1));
-    REQUIRE_THAT(incTxt, Catch::Matchers::SizeIs(1));
-    REQUIRE_THAT(decTxt, Catch::Matchers::SizeIs(1));
+    REQUIRE_THAT(ctx.findByText("+1"), Catch::Matchers::SizeIs(1));
+    REQUIRE_THAT(ctx.findByText("-1"), Catch::Matchers::SizeIs(1));
 
     REQUIRE_THAT(counter, ctx.matchesGolden("counter-init.png"));
 
-    ctx.tap(incTxt);
+    ctx.tap(ctx.findByText("+1"));
     ctx.pump();
     REQUIRE_THAT(ctx.findByText("1"), Catch::Matchers::SizeIs(1));
     REQUIRE_THAT(counter, ctx.matchesGolden("counter-1.png"));
 
-    ctx.tap(decTxt);
+    ctx.tap(ctx.findByText("-1"));
     ctx.pump();
     REQUIRE_THAT(ctx.findByText("0"), Catch::Matchers::SizeIs(1));
     REQUIRE_THAT(counter, ctx.matchesGolden("counter-init.png"));
 
     for (int i = 1; i < 5; i++) {
-      ctx.tap(incTxt);
+      ctx.tap(ctx.findByText("+1"));
       ctx.pump();
       REQUIRE_THAT(ctx.findByText(std::to_string(i)),
                    Catch::Matchers::SizeIs(1));
     }
     REQUIRE_THAT(counter, ctx.matchesGolden("counter-5.png"));
 
-    ctx.tap(incTxt);
+    ctx.tap(ctx.findByText("+1"));
     ctx.pump();
     REQUIRE_THAT(counter, ctx.matchesGolden("counter-reset.png"));
   }

@@ -4,6 +4,7 @@
 #include <catch2/matchers/catch_matchers_templated.hpp>
 
 #include <UI/AppContext.h>
+#include <UI/DynamicWidget.h>
 #include <UI/Text.h>
 
 #include <filesystem>
@@ -62,13 +63,18 @@ struct TestContext : rmlib::AppContext {
     return TestContext(std::move(*appCtx));
   }
 
-  TestContext(AppContext appCtx) : AppContext(std::move(appCtx)) {
+  TestContext(AppContext appCtx)
+    : AppContext(std::move(appCtx)), currentWidet(rmlib::Text("")) {
     framebuffer.clear();
   }
 
+  // TODO: Store widget inside render object, not requiring this...
+  rmlib::DynamicWidget currentWidet;
+
   template<typename Widget>
-  void pumpWidget(const Widget& widget) {
-    setRootRenderObject(widget.createRenderObject());
+  void pumpWidget(Widget widget) {
+    currentWidet = std::move(widget);
+    setRootRenderObject(currentWidet.createRenderObject());
     pump();
   }
 
