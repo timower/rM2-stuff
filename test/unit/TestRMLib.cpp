@@ -21,6 +21,7 @@
 
 using namespace rmlib;
 
+// TODO: move somewhere?
 extern bool rmlib_disable_window;
 
 const auto disable_window_on_start = [] {
@@ -171,6 +172,13 @@ TEST_CASE("Flex", "[rmlib][ui]") {
   }
 }
 
+TEST_CASE("Dynamic", "[rmlib][ui]") {
+  auto ctx = TestContext::make();
+  ctx.pumpWidget(Center(DynamicWidget(Text("12"))));
+
+  REQUIRE(ctx.findByType<Text>().size() == 1);
+}
+
 class LabledInt : public StatelessWidget<LabledInt> {
 public:
   LabledInt(std::string label, int n) : label(std::move(label)), integer(n) {}
@@ -259,11 +267,10 @@ TEST_CASE("StateFull - Dynamic", "[rmlib][ui]") {
   auto counter = ctx.findByType<CounterTest>();
 
   {
-    auto countTxt = ctx.findByText("0");
     auto incTxt = ctx.findByText("+1");
     auto decTxt = ctx.findByText("-1");
 
-    REQUIRE_THAT(countTxt, Catch::Matchers::SizeIs(1));
+    REQUIRE_THAT(ctx.findByText("0"), Catch::Matchers::SizeIs(1));
     REQUIRE_THAT(incTxt, Catch::Matchers::SizeIs(1));
     REQUIRE_THAT(decTxt, Catch::Matchers::SizeIs(1));
 
@@ -271,18 +278,19 @@ TEST_CASE("StateFull - Dynamic", "[rmlib][ui]") {
 
     ctx.tap(incTxt);
     ctx.pump();
-    REQUIRE(countTxt.front()->getWidget().getText() == "1");
+    REQUIRE_THAT(ctx.findByText("1"), Catch::Matchers::SizeIs(1));
     REQUIRE_THAT(counter, ctx.matchesGolden("counter-1.png"));
 
     ctx.tap(decTxt);
     ctx.pump();
-    REQUIRE(countTxt.front()->getWidget().getText() == "0");
+    REQUIRE_THAT(ctx.findByText("0"), Catch::Matchers::SizeIs(1));
     REQUIRE_THAT(counter, ctx.matchesGolden("counter-init.png"));
 
     for (int i = 1; i < 5; i++) {
       ctx.tap(incTxt);
       ctx.pump();
-      REQUIRE(countTxt.front()->getWidget().getText() == std::to_string(i));
+      REQUIRE_THAT(ctx.findByText(std::to_string(i)),
+                   Catch::Matchers::SizeIs(1));
     }
     REQUIRE_THAT(counter, ctx.matchesGolden("counter-5.png"));
 

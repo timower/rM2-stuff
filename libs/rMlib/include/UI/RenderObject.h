@@ -196,6 +196,12 @@ public:
     , widget(&widget)
     , child(std::move(child)) {}
 
+  SingleChildRenderObject(const Widget* widget,
+                          std::unique_ptr<RenderObject> child)
+    : RenderObject(typeID::type_id<Widget>())
+    , widget(widget)
+    , child(std::move(child)) {}
+
   // SingleChildRenderObject(std::unique_ptr<RenderObject> ro,
   //                         typeID::type_id_t typeID)
   //   : RenderObject(typeID), child(std::move(child)) {}
