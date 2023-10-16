@@ -11,6 +11,7 @@ template<typename T, typename E>
 constexpr auto
 getValue(tl::expected<T, E> v) {
   if constexpr (std::is_same_v<T, void>) {
+    (void)v; // to suppress unused variable warnings
     return;
   } else {
     return std::move(*v);

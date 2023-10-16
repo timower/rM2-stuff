@@ -7,6 +7,8 @@
 #include <Device.h>
 #include <UI.h>
 
+#include <unistdpp/file.h>
+
 using namespace rmlib;
 
 namespace {
@@ -336,9 +338,10 @@ private:
 
     if (res == 0) {
       // Get the reason
-      auto irq = rmlib::device::readFile("/sys/power/pm_wakeup_irq");
+      auto irq = unistdpp::readFile("/sys/power/pm_wakeup_irq");
       if (!irq.has_value()) {
-        std::cout << "Error getting reason: " << irq.error().msg << std::endl;
+        std::cout << "Error getting reason: " << unistdpp::toString(irq.error())
+                  << std::endl;
 
         // If there is no irq it must be the user which pressed the button:
         return true;

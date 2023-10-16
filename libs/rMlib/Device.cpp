@@ -1,5 +1,7 @@
 #include "Device.h"
 
+#include <unistdpp/file.h>
+
 #include <dirent.h>
 #include <fcntl.h>
 #include <fstream>
@@ -51,30 +53,6 @@ const InputPaths rm2_paths = {
 };
 } // namespace
 
-ErrorOr<std::string>
-readFile(std::string_view path) {
-  assert(path[path.length()] == '\0' && "path must be null terminated");
-  FILE* f = fopen(&path[0], "rb");
-  if (f == nullptr) {
-    return Error::errn();
-  }
-
-  fseek(f, 0, SEEK_END);
-  const unsigned long size = ftell(f);
-  fseek(f, 0, SEEK_SET);
-
-  std::string result(size + 1, '\0');
-  auto read = fread(result.data(), size, 1, f);
-  if (read != size && !(read == 0 && feof(f))) {
-    fclose(f);
-    return tl::unexpected(
-      Error{ "Only read: " + std::to_string(read) + " bytes?" });
-  }
-
-  fclose(f);
-  return result;
-}
-
 ErrorOr<DeviceType>
 getDeviceType() {
 #ifdef EMULATE
@@ -82,16 +60,7 @@ getDeviceType() {
 #else
   static const auto result = []() -> ErrorOr<DeviceType> {
     constexpr auto path = "/sys/devices/soc0/machine";
-    std::ifstream ifs(path);
-    if (!ifs.is_open()) {
-      return Error::make("Couldn't open device path");
-    }
-
-    std::string name;
-    name.reserve(16);
-    name.assign(std::istreambuf_iterator<char>(ifs),
-                std::istreambuf_iterator<char>());
-
+    auto name = TRY(unistdpp::readFile(path));
     if (name.find("2.0") == std::string::npos) {
       return DeviceType::reMarkable1;
     }
@@ -151,22 +120,16 @@ listDirectory(std::string_view path, bool onlyFiles) {
 
 bool
 IsPogoConnected() {
-  int fd = open(
 #ifndef EMULATE
-    "/sys/pogo/status/pogo_connected"
+  constexpr auto path = "/sys/pogo/status/pogo_connected";
 #else
-    "/tmp/pogo"
+  constexpr auto path = "/tmp/pogo";
 #endif
-    ,
-    O_RDWR);
-  if (fd == -1) {
-    return false;
-  }
 
-  char buf = '\0';
-  read(fd, &buf, 1);
-  close(fd);
-
-  return buf == '1';
+  return unistdpp::open(path, O_RDWR)
+    .and_then([](unistdpp::FD fd) {
+      return fd.readAll<char>().transform([&](char buf) { return buf == '1'; });
+    })
+    .value_or(false);
 }
 } // namespace rmlib::device

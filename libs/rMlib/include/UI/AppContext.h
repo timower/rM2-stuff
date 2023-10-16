@@ -83,34 +83,35 @@ public:
   ErrorOr<std::vector<input::Event>> waitForInput(
     std::optional<std::chrono::microseconds> durantion) {
 
+    const auto milliDuration =
+      [durantion]() -> std::optional<std::chrono::milliseconds> {
+      if (!durantion.has_value()) {
+        return {};
+      }
+      return std::chrono::duration_cast<std::chrono::milliseconds>(*durantion);
+    }();
+
     std::size_t startDevices = inputManager.devices.size();
     std::vector<input::Event> result;
 
     if (!extraFds.empty()) {
-      int maxFd = std::max_element(extraFds.begin(),
-                                   extraFds.end(),
-                                   [](const auto& a, const auto& b) {
-                                     return a.first < b.first;
-                                   })
-                    ->first;
-
-      fd_set set;
-      FD_ZERO(&set);
+      std::vector<pollfd> pollFds;
       for (const auto& [fd, _] : extraFds) {
-        FD_SET(fd, &set);
+        pollFds.emplace_back(
+          pollfd{ .fd = fd, .events = POLLIN, .revents = 0 });
       }
 
-      auto evs = TRY(inputManager.waitForInput(set, maxFd, durantion));
+      auto evs = TRY(inputManager.waitForInput(pollFds, milliDuration));
 
-      for (const auto& [fd, cb] : extraFds) {
-        if (FD_ISSET(fd, &set)) {
-          cb();
+      for (const auto& poll : pollFds) {
+        if (unistdpp::canRead(poll)) {
+          extraFds[poll.fd]();
         }
       }
 
       result = std::move(evs);
     } else {
-      auto evs = TRY(inputManager.waitForInput(durantion));
+      auto evs = TRY(inputManager.waitForInput(milliDuration));
       result = std::move(evs);
     }
 

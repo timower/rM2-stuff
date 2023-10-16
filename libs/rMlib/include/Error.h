@@ -17,8 +17,8 @@ struct Error {
     return tl::unexpected(Error{ std::move(msg) });
   }
 
-  static Error fromErrno() { return Error{ strerror(errno) }; }
-  static tl::unexpected<Error> errn() { return tl::unexpected(fromErrno()); }
+  Error(std::errc err) : msg(std::make_error_code(err).message()) {}
+  Error(std::string msg) : msg(std::move(msg)) {}
 };
 
 template<typename T, typename E = Error>

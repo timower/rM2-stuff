@@ -1,5 +1,7 @@
 #include "Input.h"
 
+#include <unistdpp/pipe.h>
+
 #include <atomic>
 #include <iostream>
 #include <thread>
@@ -21,17 +23,18 @@ InputDeviceBase::~InputDeviceBase() {}
 
 namespace {
 struct FakeInputDevice : public InputDeviceBase {
-  int pipes[2];
+  unistdpp::Pipe pipes;
   unsigned int sdlUserEvent;
 
-  FakeInputDevice() : InputDeviceBase(0, nullptr, "test") {
+  FakeInputDevice() : InputDeviceBase(unistdpp::FD(), nullptr, "test") {
     sdlUserEvent = SDL_RegisterEvents(1);
 
-    int res = pipe(pipes);
-    if (res != 0) {
-      perror("Error creating input notify pipes");
-    }
-    std::cout << "Got pipes: " << pipes[0] << ", " << pipes[1] << "\n";
+    pipes = unistdpp::pipe()
+              .or_else([](auto err) {
+                std::cerr << unistdpp::toString(err) << "\n";
+                std::exit(EXIT_FAILURE);
+              })
+              .value();
   }
 
   void flood() final {}
@@ -59,43 +62,22 @@ InputManager::openAll(bool monitor) {
 }
 
 ErrorOr<std::vector<Event>>
-InputManager::waitForInput(fd_set& fdSet,
-                           int maxFd,
-                           std::optional<std::chrono::microseconds> timeout) {
+InputManager::waitForInput(std::vector<pollfd>& extraFds,
+                           std::optional<std::chrono::milliseconds> timeout) {
   static bool down = false;
 
   FakeInputDevice& dev = static_cast<FakeInputDevice&>(getBaseDevices()->key);
 
-  std::thread selectThread([maxFd,
-                            readPipe = dev.pipes[0],
-                            &fdSet,
+  std::thread selectThread([&readPipe = dev.pipes.readPipe,
+                            &extraFds,
                             &timeout,
                             userEv = dev.sdlUserEvent]() {
-    if (maxFd == 0 && !FD_ISSET(0, &fdSet)) {
-      return;
-    }
-
     // Also listen to the notify pipe
-    int maxFd2 = std::max(maxFd, readPipe);
-    FD_SET(readPipe, &fdSet);
+    extraFds.push_back(unistdpp::waitFor(readPipe, unistdpp::Wait::READ));
 
-    auto tv = timeval{ 0, 0 };
-    if (timeout.has_value()) {
-      constexpr auto second_in_usec =
-        std::chrono::microseconds(std::chrono::seconds(1)).count();
-      tv.tv_sec =
-        std::chrono::duration_cast<std::chrono::seconds>(*timeout).count();
-      tv.tv_usec = timeout->count() - (tv.tv_sec * second_in_usec);
-    }
-
-    auto ret = select(maxFd2 + 1,
-                      &fdSet,
-                      nullptr,
-                      nullptr,
-                      timeout.has_value() ? &tv : nullptr);
-
-    if (ret < 0) {
-      perror("Select on input failed");
+    auto ret = unistdpp::poll(extraFds, timeout);
+    if (!ret) {
+      std::cerr << "Poll failure: " << unistdpp::toString(ret.error()) << "\n";
       return;
     }
 
@@ -104,9 +86,8 @@ InputManager::waitForInput(fd_set& fdSet,
     }
 
     // Read the single notify byte.
-    if (FD_ISSET(readPipe, &fdSet)) {
-      char buf;
-      read(readPipe, &buf, 1);
+    if (unistdpp::canRead(extraFds.back())) {
+      (void)readPipe.readAll<char>();
       return;
     }
 
@@ -129,7 +110,7 @@ InputManager::waitForInput(fd_set& fdSet,
   }
 
   if (event.type != dev.sdlUserEvent) {
-    write(dev.pipes[1], "1", 1);
+    (void)dev.pipes.writePipe.writeAll('1');
   }
 
   selectThread.join();

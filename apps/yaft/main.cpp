@@ -188,7 +188,8 @@ fork_and_exec(int* master,
   return true;
 }
 
-constexpr auto select_timeout = std::chrono::microseconds(SELECT_TIMEOUT);
+constexpr auto select_timeout =
+  std::chrono::milliseconds(SELECT_TIMEOUT / 1000);
 
 int
 main(int argc, const char* argv[]) {

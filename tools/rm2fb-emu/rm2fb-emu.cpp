@@ -60,8 +60,7 @@ main(int argc, char* argv[]) {
   fb->clear();
 
   while (running) {
-    // TODO: use poll
-    auto fdsOrErr = input.waitForInput(std::nullopt, sock->fd);
+    auto fdsOrErr = input.waitForInput(std::nullopt, *sock);
     if (!fdsOrErr.has_value()) {
       std::cerr << "Error input: " << fdsOrErr.error().msg;
       break;

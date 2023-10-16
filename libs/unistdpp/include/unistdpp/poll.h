@@ -18,7 +18,9 @@ enum class Wait {
 
 inline pollfd
 waitFor(const FD& fd, Wait wait) {
-  return pollfd{ .fd = fd.fd, .events = static_cast<short>(wait) };
+  return pollfd{ .fd = fd.fd,
+                 .events = static_cast<short>(wait),
+                 .revents = 0 };
 }
 
 inline bool

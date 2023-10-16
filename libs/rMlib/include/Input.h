@@ -13,6 +13,9 @@
 #include <variant>
 #include <vector>
 
+#include <unistdpp/poll.h>
+#include <unistdpp/unistdpp.h>
+
 struct libevdev;
 struct udev;
 struct udev_monitor;
@@ -81,7 +84,7 @@ using Gesture = std::variant<SwipeGesture, PinchGesture, TapGesture>;
 using Event = std::variant<TouchEvent, PenEvent, KeyEvent>;
 
 struct InputDeviceBase {
-  int fd;
+  unistdpp::FD fd;
   libevdev* evdev;
   std::string path;
 
@@ -94,8 +97,8 @@ struct InputDeviceBase {
   virtual OptError<> readEvents(std::vector<Event>& out) = 0;
 
 protected:
-  InputDeviceBase(int fd, libevdev* evdev, std::string path)
-    : fd(fd), evdev(evdev), path(std::move(path)) {}
+  InputDeviceBase(unistdpp::FD fd, libevdev* evdev, std::string path)
+    : fd(std::move(fd)), evdev(evdev), path(std::move(path)) {}
 };
 
 struct BaseDevices {
@@ -124,12 +127,11 @@ struct InputManager {
     , baseDevices(other.baseDevices)
     , udevHandle(other.udevHandle)
     , udevMonitor(other.udevMonitor)
-    , udevMonitorFd(other.udevMonitorFd) {
+    , udevMonitorFd(std::move(other.udevMonitorFd)) {
     other.devices.clear();
     other.baseDevices = std::nullopt;
     other.udevHandle = nullptr;
     other.udevMonitor = nullptr;
-    other.udevMonitorFd = -1;
   }
 
   InputManager& operator=(InputManager&& other) {
@@ -137,7 +139,7 @@ struct InputManager {
     baseDevices = std::nullopt;
     udevHandle = nullptr;
     udevMonitor = nullptr;
-    udevMonitorFd = -1;
+    udevMonitorFd.close();
 
     std::swap(other, *this);
     return *this;
@@ -147,39 +149,42 @@ struct InputManager {
   InputManager& operator=(const InputManager&) = delete;
 
   ErrorOr<std::vector<Event>> waitForInput(
-    fd_set& fdSet,
-    int maxFd,
-    std::optional<std::chrono::microseconds> timeout = std::nullopt);
+    std::vector<pollfd>& extraFds,
+    std::optional<std::chrono::milliseconds> timeout = std::nullopt);
 
   template<typename... ExtraFds>
-  auto waitForInput(std::optional<std::chrono::microseconds> timeout,
-                    ExtraFds... extraFds)
+  auto waitForInput(std::optional<std::chrono::milliseconds> timeout,
+                    const ExtraFds&... extraFds)
     -> ErrorOr<std::conditional_t<
       sizeof...(ExtraFds) == 0,
       std::vector<Event>,
       std::pair<std::vector<Event>, std::array<bool, sizeof...(ExtraFds)>>>> {
-    static_assert((std::is_same_v<ExtraFds, int> && ...));
 
-    fd_set fds;
-    FD_ZERO(&fds);
+    static_assert(((std::is_same_v<ExtraFds, unistdpp::FD> ||
+                    std::is_same_v<ExtraFds, int>)&&...));
+
+    std::vector<pollfd> fds;
+
     if constexpr (sizeof...(ExtraFds) > 0) {
-      constexpr auto fd_set = [](auto fd, auto& fds) { FD_SET(fd, &fds); };
+      fds.reserve(sizeof...(ExtraFds));
+      constexpr auto fd_set = [](const auto& fd, auto& fds) {
+        if constexpr (std::is_same_v<decltype(fd), const int&>) {
+          fds.emplace_back(pollfd{ .fd = fd, .events = POLLIN, .revents = 0 });
+        } else {
+          fds.emplace_back(unistdpp::waitFor(fd, unistdpp::Wait::READ));
+        }
+      };
       (fd_set(extraFds, fds), ...);
     }
 
-    auto maxFd = std::max({ 0, extraFds... });
-
-    auto res = TRY(waitForInput(fds, maxFd, timeout));
+    auto res = TRY(waitForInput(fds, timeout));
     if constexpr (sizeof...(ExtraFds) == 0) {
       return res;
     } else {
       std::array<bool, sizeof...(extraFds)> extraResult;
-      int i = 0;
-
-      constexpr auto fd_isset = [](auto fd, auto& fds) {
-        return FD_ISSET(fd, &fds);
-      };
-      ((extraResult[i++] = fd_isset(extraFds, fds)), ...);
+      for (std::size_t i = 0; i < sizeof...(extraFds); i++) {
+        extraResult[i] = unistdpp::canRead(fds[i]);
+      }
 
       return std::pair{ res, extraResult };
     }
@@ -195,7 +200,7 @@ private:
   std::optional<BaseDevices> baseDevices;
   udev* udevHandle = nullptr;
   udev_monitor* udevMonitor = nullptr;
-  int udevMonitorFd = -1;
+  unistdpp::FD udevMonitorFd;
 };
 
 struct GestureController {
