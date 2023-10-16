@@ -17,6 +17,15 @@ ScreenRenderObject::ScreenRenderObject(const Screen& widget)
   }
 }
 
+ScreenRenderObject::~ScreenRenderObject() {
+  if (timerID != -1) {
+    tilem_z80_remove_timer(widget->calc, timerID);
+  }
+
+  tilem_lcd_buffer_free(lcd);
+  tilem_lcd_buffer_free(oldLcd);
+}
+
 void
 ScreenRenderObject::stateFrameCallback(TilemCalc* calc, void* selfPtr) {
   auto* self = reinterpret_cast<ScreenRenderObject*>(selfPtr);
@@ -25,17 +34,21 @@ ScreenRenderObject::stateFrameCallback(TilemCalc* calc, void* selfPtr) {
 
 void
 ScreenRenderObject::addTimer(TilemCalc* calc) {
-  tilem_z80_add_timer(calc,
-                      std::chrono::microseconds(frame_time).count(),
-                      std::chrono::microseconds(frame_time).count(),
-                      /* real time */ 1,
-                      &stateFrameCallback,
-                      this);
+  timerID = tilem_z80_add_timer(calc,
+                                std::chrono::microseconds(frame_time).count(),
+                                std::chrono::microseconds(frame_time).count(),
+                                /* real time */ 1,
+                                &stateFrameCallback,
+                                this);
 }
 
 void
 ScreenRenderObject::update(const Screen& newWidget) {
   if (newWidget.calc != widget->calc && newWidget.calc != nullptr) {
+    if (timerID != -1) {
+      tilem_z80_remove_timer(widget->calc, timerID);
+    }
+
     addTimer(newWidget.calc);
   }
   widget = &newWidget;

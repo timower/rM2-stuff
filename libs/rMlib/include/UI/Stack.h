@@ -53,7 +53,6 @@ protected:
       result.height = std::max(result.height, childSize.height);
     }
 
-    std::cout << "Stack layout result: " << result << "\n";
     return result;
   }
 

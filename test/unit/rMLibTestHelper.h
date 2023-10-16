@@ -18,6 +18,11 @@ using Finder = std::function<bool(const rmlib::RenderObject*)>;
 template<typename RO = rmlib::RenderObject>
 using FindResult = std::vector<RO*>;
 
+struct Offset {
+  float x = 0.5f;
+  float y = 0.5f;
+};
+
 struct TestContext : rmlib::AppContext {
   struct GoldenImageMatcher : Catch::Matchers::MatcherGenericBase {
     static inline const bool update_golden_files = [] {
@@ -152,12 +157,14 @@ struct TestContext : rmlib::AppContext {
   }
 
   template<typename RO>
-  void press(const FindResult<RO>& ros) {
+  void sendInput(bool press, const FindResult<RO>& ros, Offset offset) {
     REQUIRE(ros.size() == 1);
-    auto pos = ros.front()->getRect().center();
+    rmlib::Rect rect = ros.front()->getRect();
+    auto pos = rect.topLeft + rmlib::Point{ int(offset.x * rect.width()),
+                                            int(offset.y * rect.height()) };
 
     SDL_Event ev;
-    ev.type = SDL_MOUSEBUTTONDOWN;
+    ev.type = press ? SDL_MOUSEBUTTONDOWN : SDL_MOUSEBUTTONUP;
     ev.motion.x = pos.x / EMULATE_SCALE;
     ev.motion.y = pos.y / EMULATE_SCALE;
     ev.button.button = SDL_BUTTON_LEFT;
@@ -165,21 +172,18 @@ struct TestContext : rmlib::AppContext {
   }
 
   template<typename RO>
-  void release(const FindResult<RO>& ros) {
-    REQUIRE(ros.size() == 1);
-    auto pos = ros.front()->getRect().center();
-
-    SDL_Event ev;
-    ev.type = SDL_MOUSEBUTTONUP;
-    ev.motion.x = pos.x / EMULATE_SCALE;
-    ev.motion.y = pos.y / EMULATE_SCALE;
-    ev.button.button = SDL_BUTTON_LEFT;
-    sendEv(ev);
+  void press(const FindResult<RO>& ros, Offset offset = {}) {
+    sendInput(true, ros, offset);
   }
 
   template<typename RO>
-  void tap(const FindResult<RO>& ros) {
-    press(ros);
-    release(ros);
+  void release(const FindResult<RO>& ros, Offset offset = {}) {
+    sendInput(false, ros, offset);
+  }
+
+  template<typename RO>
+  void tap(const FindResult<RO>& ros, Offset offset = {}) {
+    press(ros, offset);
+    release(ros, offset);
   }
 };

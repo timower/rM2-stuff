@@ -219,6 +219,7 @@ KeypadRenderObject::handleInput(const Event& ev) {
             return;
           }
 
+          std::cout << "Releasing: " << it->second->scancode << "\n";
           tilem_keypad_release_key(widget->calc, it->second->scancode);
           keyPointers.erase(it);
           return;
@@ -227,6 +228,7 @@ KeypadRenderObject::handleInput(const Event& ev) {
         if (ev.isDown()) {
           for (const auto& [rect, keyPtr] : keyLocations) {
             if (rect.contains(ev.location)) {
+              std::cout << "Pressing: " << keyPtr->scancode << "\n";
               tilem_keypad_press_key(widget->calc, keyPtr->scancode);
               keyPointers.emplace(ev.id, keyPtr);
               break;

@@ -20,6 +20,7 @@ private:
 class ScreenRenderObject : public rmlib::LeafRenderObject<Screen> {
 public:
   ScreenRenderObject(const Screen& widget);
+  ~ScreenRenderObject();
 
   static void stateFrameCallback(TilemCalc* calc, void* selfPtr);
 
@@ -35,4 +36,5 @@ protected:
 private:
   TilemLCDBuffer* lcd = nullptr;
   TilemLCDBuffer* oldLcd = nullptr;
+  int timerID = -1;
 };

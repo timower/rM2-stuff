@@ -37,7 +37,7 @@ public:
     using namespace rmlib;
     return Center((Border(
       Cleared(Column(
-        Text("Loading ROMjk'" + romPath + "' failed"),
+        Text("Loading ROM '" + romPath + "' failed"),
         Row(Padding(Button("Download", [&ctx] { Navigator::of(ctx).pop(); }),
                     Insets::all(10)),
             Padding(Button("Exit", [&appCtx] { appCtx.stop(); }),

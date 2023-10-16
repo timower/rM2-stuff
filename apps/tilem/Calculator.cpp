@@ -64,6 +64,8 @@ CalcState::~CalcState() {
     tilem_calc_save_state(mCalc, nullptr, save);
     fclose(save);
   }
+
+  tilem_calc_free(mCalc);
 }
 
 TilemCalc*
