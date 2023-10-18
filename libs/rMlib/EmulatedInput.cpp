@@ -85,8 +85,12 @@ InputManager::waitForInput(std::vector<pollfd>& extraFds,
       return;
     }
 
+    // Remove the added Fd
+    auto addedFd = extraFds.back();
+    extraFds.pop_back();
+
     // Read the single notify byte.
-    if (unistdpp::canRead(extraFds.back())) {
+    if (unistdpp::canRead(addedFd)) {
       (void)readPipe.readAll<char>();
       return;
     }

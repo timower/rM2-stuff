@@ -257,6 +257,8 @@ struct terminal_t {
   int marginTop;
   int marginLeft;
   bool shouldClear;
+
+  int maxLines;
 };
 
 struct parm_t { /* for parse_arg() */

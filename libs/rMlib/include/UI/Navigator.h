@@ -13,6 +13,7 @@ namespace details {
 class UniqueAny {
   struct AnyBase {
     AnyBase(typeID::type_id_t id) : currentType(id) {}
+    virtual ~AnyBase() = default;
 
     typeID::type_id_t currentType;
   };
