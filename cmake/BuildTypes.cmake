@@ -1,6 +1,9 @@
 option(COVERAGE "Generate coverage data in debug builds" OFF)
 option(SANITIZE "Use asan in debug builds" OFF)
 
+# Set fPIC, even for shared libraries..
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 if (NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug)
 endif()
@@ -24,7 +27,8 @@ endif()
 
 set(ASAN_OPTS
   -fsanitize=address
-  -fno-omit-frame-pointer)
+  -fno-omit-frame-pointer
+  -fsanitize=undefined)
 
 if (SANITIZE)
   list(APPEND BASE_OPTS ${ASAN_OPTS})
