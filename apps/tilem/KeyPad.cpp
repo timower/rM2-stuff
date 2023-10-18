@@ -5,6 +5,7 @@
 using namespace rmlib;
 using namespace rmlib::input;
 
+namespace tilem {
 struct Key {
   int scancode;
   std::string_view front;
@@ -138,8 +139,12 @@ KeypadRenderObject::drawKey(rmlib::Canvas& canvas,
   }
 
   // Draw alpha and 2nd label.
-  {
+  [&] {
     const auto upperLength = key.alpha.size() + key.shift.size();
+    if (upperLength == 0) {
+      return;
+    }
+
     const auto fontSize =
       std::min(upperLabelHeight, int(1.6 * keyWidth / upperLength));
 
@@ -163,7 +168,7 @@ KeypadRenderObject::drawKey(rmlib::Canvas& canvas,
       const auto positonA = pos + Point{ xOffset + spacing.x, yOffset };
       canvas.drawText(key.alpha, positonA, fontSize, 0xaa);
     }
-  }
+  }();
 
   canvas.drawRectangle(pos, pos + Point{ keyWidth - 1, keyHeight - 1 }, black);
 }
@@ -239,3 +244,4 @@ KeypadRenderObject::handleInput(const Event& ev) {
     },
     ev);
 }
+} // namespace tilem

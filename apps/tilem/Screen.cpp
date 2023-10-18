@@ -1,6 +1,7 @@
 #include "Screen.h"
 
 using namespace rmlib;
+namespace tilem {
 
 namespace {
 constexpr auto frame_time = std::chrono::milliseconds(50); // 50 ms ->  20 fps
@@ -112,3 +113,4 @@ std::unique_ptr<RenderObject>
 Screen::createRenderObject() const {
   return std::make_unique<ScreenRenderObject>(*this);
 }
+} // namespace tilem

@@ -5,6 +5,8 @@
 
 #include "tilem.h"
 
+namespace tilem {
+
 struct Key;
 class KeypadRenderObject;
 
@@ -49,3 +51,4 @@ private:
   int keyHeight;
   int padding;
 };
+} // namespace tilem

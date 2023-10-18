@@ -6,6 +6,8 @@
 
 using namespace rmlib;
 
+namespace tilem {
+
 namespace {
 
 constexpr auto calc_save_extension = ".sav";
@@ -123,3 +125,4 @@ CalcState::updateCalcState() {
 
   lastUpdateTime = time;
 }
+} // namespace tilem
