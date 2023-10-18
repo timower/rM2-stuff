@@ -9,6 +9,7 @@
 #include <cstdlib>
 
 using namespace rmlib;
+using namespace tilem;
 
 class TemporaryDirectory {
 public:
@@ -47,7 +48,7 @@ TEST_CASE("Tilem", "[tilem][ui]") {
     REQUIRE(ctx.shouldStop());
   }
 
-  SECTION("Download & Run") {
+  SECTION("Download") {
 
     ctx.tap(ctx.findByText("Download"));
 

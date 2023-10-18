@@ -4,6 +4,8 @@
 
 #include <tilem.h>
 
+namespace tilem {
+
 class ScreenRenderObject;
 
 class Screen : public rmlib::Widget<ScreenRenderObject> {
@@ -38,3 +40,5 @@ private:
   TilemLCDBuffer* oldLcd = nullptr;
   int timerID = -1;
 };
+
+} // namespace tilem

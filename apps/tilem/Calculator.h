@@ -7,6 +7,7 @@
 
 #include <tilem.h>
 
+namespace tilem {
 class CalcState;
 
 class Calculator : public rmlib::StatefulWidget<Calculator> {
@@ -76,3 +77,4 @@ private:
 
   std::chrono::steady_clock::time_point lastUpdateTime;
 };
+} // namespace tilem
