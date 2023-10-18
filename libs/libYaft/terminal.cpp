@@ -372,7 +372,7 @@ term_die(struct terminal_t* term) {
   free(term->esc.buf);
   free(term->sixel.pixmap);
 
-  for (int i = 0; i < term->lines; i++)
+  for (int i = 0; i < term->maxLines; i++)
     free(term->cells[i]);
   free(term->cells);
 }
@@ -394,6 +394,7 @@ term_init(struct terminal_t* term, int width, int height) {
   term->esc.buf = (char*)ecalloc(1, term->esc.size);
   term->sixel.pixmap = (uint8_t*)ecalloc(width * height, BYTES_PER_PIXEL);
 
+  term->maxLines = term->lines;
   term->cells = (struct cell_t**)ecalloc(term->lines, sizeof(struct cell_t*));
   for (int i = 0; i < term->lines; i++)
     term->cells[i] = (struct cell_t*)ecalloc(term->cols, sizeof(struct cell_t));

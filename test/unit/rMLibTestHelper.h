@@ -68,7 +68,7 @@ struct TestContext : rmlib::AppContext {
     return TestContext(std::move(*appCtx));
   }
 
-  TestContext(AppContext appCtx)
+  explicit TestContext(AppContext appCtx)
     : AppContext(std::move(appCtx)), currentWidet(rmlib::Text("")) {
     framebuffer.clear();
   }
@@ -160,8 +160,9 @@ struct TestContext : rmlib::AppContext {
   void sendInput(bool press, const FindResult<RO>& ros, Offset offset) {
     REQUIRE(ros.size() == 1);
     rmlib::Rect rect = ros.front()->getRect();
-    auto pos = rect.topLeft + rmlib::Point{ int(offset.x * rect.width()),
-                                            int(offset.y * rect.height()) };
+    auto diff = rmlib::Point{ int(offset.x * rect.width()),
+                              int(offset.y * rect.height()) };
+    auto pos = rect.topLeft + diff;
 
     SDL_Event ev;
     ev.type = press ? SDL_MOUSEBUTTONDOWN : SDL_MOUSEBUTTONUP;
