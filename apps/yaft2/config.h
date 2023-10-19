@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Error.h"
+
+#include <optional>
 #include <string>
 
 #include "keymap.h"
@@ -29,9 +31,22 @@ struct YaftConfigError {
   std::string msg;
 };
 
+struct YaftConfigAndError {
+  YaftConfig config;
+
+  std::optional<YaftConfigError> err;
+};
+
 /// Load the config from the `~/.config/yaft/config.toml` location.
 ErrorOr<YaftConfig, YaftConfigError>
 loadConfig();
 
 OptError<>
 saveDefaultConfig();
+
+/// Always returns a config, either the default one or the one on the file
+/// system. Will also make a new config file if it didn't exist.
+///
+/// If any error occured during the loading of the config, it's also returned.
+YaftConfigAndError
+loadConfigOrMakeDefault();

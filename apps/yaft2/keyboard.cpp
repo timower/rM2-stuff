@@ -8,9 +8,6 @@ using namespace rmlib;
 
 namespace {
 
-constexpr auto repeat_delay = std::chrono::seconds(1);
-constexpr auto repeat_time = std::chrono::milliseconds(100);
-
 constexpr auto pen_slot = 0x1000;
 constexpr char esc_char = '\x1b';
 
@@ -154,7 +151,7 @@ KeyboardRenderObject::KeyboardRenderObject(const Keyboard& keyboard)
 
 void
 KeyboardRenderObject::update(const Keyboard& keyboard) {
-  bool needsReLayout = &keyboard.layout != &widget->layout;
+  bool needsReLayout = &keyboard.params.layout != &widget->params.layout;
   widget = &keyboard;
 
   if (needsReLayout) {
@@ -166,20 +163,21 @@ KeyboardRenderObject::update(const Keyboard& keyboard) {
 void
 KeyboardRenderObject::doRebuild(rmlib::AppContext& ctx,
                                 const rmlib::BuildContext&) {
-  const auto duration = repeat_time / 10;
-  std::cout << "Rebuild\n";
+  const auto duration = getWidget().params.repeatTime / 10;
   repeatTimer = ctx.addTimer(
     duration, [this]() { updateRepeat(); }, duration);
 }
 
 rmlib::Size
 KeyboardRenderObject::doLayout(const rmlib::Constraints& constraints) {
-  if (constraints.isBounded()) {
+  const auto numRows = widget->params.layout.numRows();
+  const auto numCols = widget->params.layout.numCols();
+
+  if (constraints.isBounded() && numRows != 0 && numCols != 0) {
+    keyHeight = float(constraints.max.height) / numRows;
+    keyWidth = float(constraints.max.width) / numCols;
     return constraints.max;
   }
-
-  const auto numRows = widget->layout.numRows();
-  const auto numCols = widget->layout.numCols();
 
   if (constraints.hasBoundedHeight() && numRows != 0) {
     keyHeight = float(constraints.max.height) / numRows;
@@ -193,6 +191,8 @@ KeyboardRenderObject::doLayout(const rmlib::Constraints& constraints) {
     return Size{ int(keyWidth * numCols), int(keyHeight * numRows) };
   }
 
+  keyHeight = Keyboard::key_height;
+  keyWidth = Keyboard::key_width;
   return constraints.min;
 }
 
@@ -201,7 +201,7 @@ KeyboardRenderObject::doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) {
   Point pos = rect.topLeft;
 
   UpdateRegion result;
-  for (const auto& row : widget->layout.rows) {
+  for (const auto& row : widget->params.layout.rows) {
     pos.x = rect.topLeft.x;
 
     for (const auto& key : row) {
@@ -239,6 +239,7 @@ KeyboardRenderObject::handleInput(const rmlib::input::Event& ev) {
 void
 KeyboardRenderObject::updateRepeat() {
   const auto time = time_source::now();
+  const auto repeatTime = getWidget().params.repeatTime;
 
   for (auto& [key, state] : keyState) {
     if (state.slot == -1) {
@@ -257,7 +258,7 @@ KeyboardRenderObject::updateRepeat() {
 
       // Don't continue to repeat keys with special actions on longpress
       if (key->longPressCode == 0) {
-        state.nextRepeat += repeat_time;
+        state.nextRepeat += repeatTime;
       } else {
         state.nextRepeat += std::chrono::hours(5);
       }
@@ -274,7 +275,7 @@ KeyboardRenderObject::updateRepeat() {
         sendKeyDown(*key, /* repeat */ true);
       }
 
-      state.nextRepeat += repeat_time;
+      state.nextRepeat += repeatTime;
     }
   }
 }
@@ -288,7 +289,7 @@ KeyboardRenderObject::updateLayout() {
   ctrlKey = nullptr;
   shiftKey = nullptr;
 
-  for (const auto& row : widget->layout.rows) {
+  for (const auto& row : widget->params.layout.rows) {
     for (const auto& key : row) {
       if (key.code == ModifierKeys::Alt) {
         assert(altKey == nullptr);
@@ -309,8 +310,6 @@ KeyboardRenderObject::sendKeyDown(int scancode,
                                   bool shift,
                                   bool alt,
                                   bool ctrl) {
-  bool appCursor = (widget->term->mode & MODE_APP_CURSOR) != 0;
-
   if (isCallback(scancode)) {
     if (widget->callback) {
       widget->callback(getCallback(scancode));
@@ -318,6 +317,7 @@ KeyboardRenderObject::sendKeyDown(int scancode,
     return;
   }
 
+  bool appCursor = (widget->term->mode & MODE_APP_CURSOR) != 0;
   const auto* code = getKeyCodeStr(scancode, shift, alt, ctrl, appCursor);
   if (code != nullptr) {
     write(widget->term->fd, code, strlen(code));
@@ -390,7 +390,7 @@ KeyboardRenderObject::getKey(const rmlib::Point& point) {
 
   const auto rowIdx = int((point.y - getRect().topLeft.y) / keyHeight);
   const auto columnIdx = int((point.x - getRect().topLeft.x) / keyWidth);
-  const auto& row = widget->layout.rows[rowIdx];
+  const auto& row = widget->params.layout.rows[rowIdx];
 
   int keyCounter = 0;
   for (auto& key : row) {
@@ -412,7 +412,7 @@ KeyboardRenderObject::clearSticky() {
     auto& state = keyState[key];
 
     // Prevent key being held when multi touch typing.
-    state.nextRepeat = time_source::now() + repeat_delay;
+    state.nextRepeat = time_source::now() + getWidget().params.repeatDelay;
 
     if (state.stuck) {
       state.stuck = false;
@@ -435,7 +435,7 @@ KeyboardRenderObject::handleTouchEvent(const Ev& ev) {
     auto& state = keyState[key];
     state.dirty = true;
     state.slot = getSlot(ev);
-    state.nextRepeat = time_source::now() + repeat_delay;
+    state.nextRepeat = time_source::now() + getWidget().params.repeatDelay;
 
     if (isModifier(key->code)) {
       if (!state.held) {
@@ -464,7 +464,7 @@ KeyboardRenderObject::handleTouchEvent(const Ev& ev) {
 
 void
 KeyboardRenderObject::handleKeyEvent(const rmlib::input::KeyEvent& ev) {
-  const auto& keymap = widget->keymap;
+  const auto& keymap = widget->params.keymap;
 
   auto it = keymap.find(ev.keyCode);
   if (it == keymap.end()) {
@@ -476,7 +476,7 @@ KeyboardRenderObject::handleKeyEvent(const rmlib::input::KeyEvent& ev) {
 
   if (ev.type == input::KeyEvent::Press) {
     state.down = true;
-    state.nextRepeat = time_source::now() + repeat_delay;
+    state.nextRepeat = time_source::now() + getWidget().params.repeatDelay;
     sendKeyDown(key);
   } else if (ev.type == input::KeyEvent::Release) {
     state.down = false;

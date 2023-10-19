@@ -26,11 +26,21 @@ auto-refresh = 1024
 
 std::filesystem::path
 getConfigPath() {
-  const auto* home = getenv("HOME");
-  if (home == nullptr || home[0] == 0) {
-    home = "/home/root";
-  }
-  return std::filesystem::path(home) / ".config" / "yaft" / "config.toml";
+  const auto configDir = [] {
+    if (const auto* xdgCfg = getenv("XDG_CONFIG_HOME");
+        xdgCfg != nullptr && xdgCfg[0] != 0) {
+      return std::filesystem::path(xdgCfg);
+    }
+
+    const auto* home = getenv("HOME");
+    if (home == nullptr || home[0] == 0) {
+      home = "/home/root";
+    }
+
+    return std::filesystem::path(home) / ".config" / "yaft";
+  }();
+
+  return configDir / "config.toml";
 }
 
 template<typename Value>
@@ -84,7 +94,7 @@ getConfig(const toml::table& tbl) {
 YaftConfig
 YaftConfig::getDefault() {
   auto tbl = toml::parse(default_config);
-  return *getConfig(tbl);
+  return getConfig(tbl).value();
 }
 
 ErrorOr<YaftConfig, YaftConfigError>
@@ -122,4 +132,28 @@ saveDefaultConfig() {
   ofs << default_config;
 
   return {};
+}
+
+YaftConfigAndError
+loadConfigOrMakeDefault() {
+  auto cfgOrErr = loadConfig().transform([](auto val) {
+    return YaftConfigAndError{ std::move(val), {} };
+  });
+  if (cfgOrErr.has_value()) {
+    return *cfgOrErr;
+  }
+
+  auto err = cfgOrErr.error();
+  if (err.type == YaftConfigError::Missing) {
+    err.msg = "No config, creating new one\r\n";
+    if (const auto optErr = saveDefaultConfig(); !optErr.has_value()) {
+      err.msg += optErr.error().msg + "\r\n";
+    }
+  } else {
+    std::stringstream ss;
+    ss << "Config syntax error: " << err.msg << "\r\n";
+    err.msg = ss.str();
+  }
+
+  return { YaftConfig::getDefault(), std::move(err) };
 }

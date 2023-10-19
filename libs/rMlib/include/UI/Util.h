@@ -45,7 +45,7 @@ struct Constraints {
   constexpr bool hasBoundedWidth() const { return max.width != unbound; }
   constexpr bool hasBoundedHeight() const { return max.height != unbound; }
   constexpr bool isBounded() const {
-    return hasBoundedHeight() && hasFiniteWidth();
+    return hasBoundedHeight() && hasBoundedWidth();
   }
 
   constexpr bool hasFiniteWidth() const { return min.width != unbound; }

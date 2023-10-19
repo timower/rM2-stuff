@@ -14,6 +14,14 @@ class KeyboardRenderObject;
 
 using KeyboardCallback = std::function<void(int)>;
 
+struct KeyboardParams {
+  const Layout& layout;
+  const KeyMap& keymap;
+
+  std::chrono::milliseconds repeatDelay = std::chrono::seconds(1);
+  std::chrono::milliseconds repeatTime = std::chrono::milliseconds(100);
+};
+
 /// Keyboard widget, displays a virtual keyboard of the given layout.
 /// Also interprets physical key presses.
 class Keyboard : public rmlib::Widget<KeyboardRenderObject> {
@@ -22,11 +30,8 @@ public:
   constexpr static int key_height = 64;
   constexpr static int key_width = 128;
 
-  Keyboard(struct terminal_t* term,
-           const Layout& layout,
-           const KeyMap& keymap,
-           KeyboardCallback cb)
-    : term(term), layout(layout), keymap(keymap), callback(std::move(cb)) {}
+  Keyboard(struct terminal_t* term, KeyboardParams params, KeyboardCallback cb)
+    : term(term), params(params), callback(std::move(cb)) {}
 
   std::unique_ptr<rmlib::RenderObject> createRenderObject() const;
 
@@ -34,8 +39,7 @@ private:
   friend class KeyboardRenderObject;
 
   struct terminal_t* term;
-  const Layout& layout;
-  const KeyMap& keymap;
+  KeyboardParams params;
   KeyboardCallback callback;
 };
 
