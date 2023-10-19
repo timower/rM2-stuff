@@ -119,6 +119,8 @@ InputManager::waitForInput(std::vector<pollfd>& extraFds,
 
   selectThread.join();
 
+  KeyEvent keyEv;
+
   TouchEvent ev;
   ev.id = 1;
   ev.pressure = 1;
@@ -142,8 +144,8 @@ InputManager::waitForInput(std::vector<pollfd>& extraFds,
       break;
     case SDL_MOUSEBUTTONDOWN:
       if (event.button.button == SDL_BUTTON_LEFT) {
-        auto x = event.motion.x * EMULATE_SCALE;
-        auto y = event.motion.y * EMULATE_SCALE;
+        auto x = event.button.x * EMULATE_SCALE;
+        auto y = event.button.y * EMULATE_SCALE;
         down = true;
         ev.type = TouchEvent::Down;
         ev.location = { x, y };
@@ -152,13 +154,24 @@ InputManager::waitForInput(std::vector<pollfd>& extraFds,
       break;
     case SDL_MOUSEBUTTONUP:
       if (event.button.button == SDL_BUTTON_LEFT) {
-        auto x = event.motion.x * EMULATE_SCALE;
-        auto y = event.motion.y * EMULATE_SCALE;
+        auto x = event.button.x * EMULATE_SCALE;
+        auto y = event.button.y * EMULATE_SCALE;
         down = false;
         ev.type = TouchEvent::Up;
         ev.location = { x, y };
         result.push_back(ev);
       }
+      break;
+
+    case SDL_KEYDOWN:
+      keyEv.keyCode = event.key.keysym.scancode;
+      keyEv.type = KeyEvent::Press;
+      result.push_back(keyEv);
+      break;
+    case SDL_KEYUP:
+      keyEv.keyCode = event.key.keysym.scancode;
+      keyEv.type = KeyEvent::Release;
+      result.push_back(keyEv);
       break;
   }
   return result;

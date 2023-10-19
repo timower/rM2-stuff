@@ -1,11 +1,7 @@
 #include "keymap.h"
 #include "layout.h"
 
-#ifdef __APPLE__
-#include "event-codes.h"
-#else
-#include <linux/input-event-codes.h>
-#endif
+#include <Input.h>
 
 const KeyMap qwerty_keymap = {
   { KEY_ESC, { Escape } },
@@ -132,6 +128,7 @@ const KeyMap qwerty_keymap = {
 };
 
 const KeyMap rm_qwerty_keymap = {
+  { KEY_ESC, { Escape } },
   { KEY_1, { '1', '!' } },
   { KEY_2, { '2', '@' } },
   { KEY_3, { '3', '#' } },

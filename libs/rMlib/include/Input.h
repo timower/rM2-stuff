@@ -16,6 +16,12 @@
 #include <unistdpp/poll.h>
 #include <unistdpp/unistdpp.h>
 
+#if defined(EMULATE) && !defined(EMULATE_UINPUT)
+#include "../EmulatedKeyCodes.h"
+#else
+#include <linux/input-event-codes.h>
+#endif
+
 struct libevdev;
 struct udev;
 struct udev_monitor;
