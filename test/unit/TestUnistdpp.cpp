@@ -7,6 +7,8 @@
 #include <unistdpp/socket.h>
 #include <unistdpp/unistdpp.h>
 
+#include <iostream>
+
 using namespace unistdpp;
 
 const std::filesystem::path assets_path = ASSETS_PATH;
@@ -15,13 +17,14 @@ namespace Catch {
 template<typename T>
 struct StringMaker<Result<T>> {
   static std::string convert(const Result<T>& value) {
-    return value.has_value() ? std::to_string(*value) : toString(value.error());
+    return value.has_value() ? StringMaker<T>::convert(*value)
+                             : "Error: " + toString(value.error());
   }
 };
 template<>
 struct StringMaker<Result<void>> {
   static std::string convert(const Result<void>& value) {
-    return value.has_value() ? "OK" : toString(value.error());
+    return value.has_value() ? "OK" : "Error: " + toString(value.error());
   }
 };
 } // namespace Catch
@@ -75,6 +78,13 @@ TEST_CASE("readFile", "[unistdpp]") {
     auto emptyRes = unistdpp::readFile(assets_path / "empty.txt");
     REQUIRE(emptyRes.has_value());
     REQUIRE(emptyRes->empty());
+  }
+
+  SECTION("sysfs") {
+    auto res = readFile("/sys/devices/system/cpu/present");
+    REQUIRE(res);
+    REQUIRE((*res)[0] == '0');
+    REQUIRE(res->size() < 100);
   }
 }
 

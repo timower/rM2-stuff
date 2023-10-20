@@ -2,7 +2,7 @@
 
 namespace unistdpp {
 
-Result<void>
+Result<int>
 FD::readAll(void* buf, std::size_t size) const {
   std::size_t read = 0;
   while (read < size) {
@@ -12,13 +12,13 @@ FD::readAll(void* buf, std::size_t size) const {
     }
 
     if (res == 0) {
-      return tl::unexpected(eof_error);
+      break;
     }
 
     read += res;
   }
 
-  return {};
+  return read;
 }
 
 Result<void>

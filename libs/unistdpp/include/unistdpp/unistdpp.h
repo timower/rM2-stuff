@@ -43,15 +43,19 @@ struct FD {
 
   explicit operator bool() const noexcept { return isValid(); }
 
-  [[nodiscard]] Result<void> readAll(void* buf, std::size_t size) const;
+  [[nodiscard]] Result<int> readAll(void* buf, std::size_t size) const;
 
   template<typename T,
            typename = std::enable_if_t<std::is_trivially_copyable_v<T>>>
   [[nodiscard]] Result<T> readAll() const {
     T result;
-    return readAll(&result, sizeof(T)).map([&result] {
-      return std::move(result);
-    });
+    return readAll(&result, sizeof(T))
+      .and_then([&result](auto size) -> Result<T> {
+        if (size != sizeof(T)) {
+          return tl::unexpected(eof_error);
+        }
+        return std::move(result);
+      });
   }
 
   [[nodiscard]] Result<void> writeAll(const void* buf, std::size_t) const;

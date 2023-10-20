@@ -4,16 +4,16 @@ namespace unistdpp {
 
 Result<std::string>
 readFile(const std::filesystem::path& path) {
-  return open(path.c_str(), O_RDONLY).and_then([](auto fd) {
-    std::string buf;
-    return lseek(fd, 0, SEEK_END)
-      .and_then([&](auto offset) {
-        buf.resize(offset);
-        return lseek(fd, 0, SEEK_SET);
-      })
-      .and_then([&](auto) { return fd.readAll(buf.data(), buf.size()); })
-      .map([&buf]() { return std::move(buf); });
-  });
+  auto fd = TRY(open(path.c_str(), O_RDONLY));
+
+  std::string buf;
+  auto offset = TRY(lseek(fd, 0, SEEK_END));
+  buf.resize(offset);
+  TRY(lseek(fd, 0, SEEK_SET));
+
+  auto readSize = TRY(fd.readAll(buf.data(), buf.size()));
+  buf.resize(readSize);
+  return buf;
 }
 
 } // namespace unistdpp
