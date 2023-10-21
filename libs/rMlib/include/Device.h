@@ -17,21 +17,14 @@ enum class DeviceType { reMarkable1, reMarkable2 };
 ErrorOr<DeviceType>
 getDeviceType();
 
-struct InputPaths {
-  std::string_view touchPath;
-  Transform touchTransform;
-
-  std::string_view penPath;
-  Transform penTransform;
-
-  std::string_view buttonPath;
+enum class InputType { MultiTouch, Pen, Key };
+struct BaseDevice {
+  InputType type;
+  Transform transform;
 };
 
-const InputPaths&
-getInputPaths(DeviceType type);
-
-std::optional<Transform>
-getInputTransform(std::string_view path);
+std::optional<BaseDevice>
+getBaseDevice(std::string_view name);
 
 // TODO: battery paths
 

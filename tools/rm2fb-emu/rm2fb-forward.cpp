@@ -93,7 +93,7 @@ struct libevdev_uinput*
 makeDevice() {
   auto* dev = libevdev_new();
 
-  libevdev_set_name(dev, "Fake-stylus");
+  libevdev_set_name(dev, "Wacom I2C Digitizer");
   libevdev_enable_event_type(dev, EV_SYN);
 
   libevdev_enable_event_type(dev, EV_KEY);

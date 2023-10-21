@@ -24,33 +24,50 @@ constexpr auto wacom_transform =
                { -float(screen_height) / wacom_height, 0 } },
              { 0, screen_height } };
 
-const InputPaths rm1_paths = {
-  // touch
-  "/dev/input/event1",
-  Transform{ { { -float(screen_width) / rm1_touch_width, 0 },
-               { 0, -float(screen_height) / rm1_touch_height } },
-             { screen_width, screen_height } },
-
-  // pen
-  "/dev/input/event0",
-  wacom_transform,
-
-  // keys
-  "/dev/input/event2"
+struct BaseDeviceName : BaseDevice {
+  std::string_view name;
 };
 
-const InputPaths rm2_paths = {
+using BaseDevices = std::array<BaseDeviceName, 3>;
+
+const BaseDevices rm1_paths = { {
   // touch
-  "/dev/input/event2",
-  Transform{ { { 1, 0 }, { 0, -1 } }, { 0, screen_height } },
+  { { InputType::MultiTouch,
+      Transform{ { { -float(screen_width) / rm1_touch_width, 0 },
+                   { 0, -float(screen_height) / rm1_touch_height } },
+                 { screen_width, screen_height } } },
+    "cyttsp5_mt" },
 
   // pen
-  "/dev/input/event1",
-  wacom_transform,
+  { { InputType::Pen, wacom_transform }, "Wacom I2C Digitizer" },
 
   // keys
-  "/dev/input/event0"
-};
+  { { InputType::Key, {} }, "gpio-keys" },
+} };
+
+const BaseDevices rm2_paths = { {
+  // touch
+  { { InputType::MultiTouch,
+      Transform{ { { 1, 0 }, { 0, -1 } }, { 0, screen_height } } },
+    "pt_mt" },
+
+  // pen
+  { { InputType::Pen, wacom_transform }, "Wacom I2C Digitizer" },
+
+  // keys
+  { { InputType::Key, {} }, "snvs-powerkey" },
+} };
+
+const BaseDevices&
+getInputNames(DeviceType type) {
+  switch (type) {
+    case DeviceType::reMarkable1:
+      return rm1_paths;
+    default:
+    case DeviceType::reMarkable2:
+      return rm2_paths;
+  }
+}
 } // namespace
 
 ErrorOr<DeviceType>
@@ -71,27 +88,14 @@ getDeviceType() {
 #endif
 }
 
-const InputPaths&
-getInputPaths(DeviceType type) {
-  switch (type) {
-    case DeviceType::reMarkable1:
-      return rm1_paths;
-    default:
-    case DeviceType::reMarkable2:
-      return rm2_paths;
-  }
-}
-
-std::optional<Transform>
-getInputTransform(std::string_view path) {
+std::optional<BaseDevice>
+getBaseDevice(std::string_view name) {
   return getDeviceType()
-    .transform([&](auto devType) -> std::optional<Transform> {
-      auto paths = getInputPaths(devType);
-      if (path == paths.touchPath) {
-        return paths.touchTransform;
-      }
-      if (path == paths.penPath) {
-        return paths.penTransform;
+    .transform([&](auto devType) -> std::optional<BaseDevice> {
+      for (const auto& device : getInputNames(devType)) {
+        if (name.find(device.name) != std::string_view::npos) {
+          return device;
+        }
       }
       return std::nullopt;
     })

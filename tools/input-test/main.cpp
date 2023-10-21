@@ -156,7 +156,7 @@ main() {
   }
 
   enumerate_devices(udev);
-  monitor_devices(udev);
+  // monitor_devices(udev);
 
   udev_unref(udev);
 
@@ -170,6 +170,10 @@ main() {
   auto err = input.openAll();
   if (!err.has_value()) {
     std::cerr << err.error().msg << std::endl;
+  }
+
+  for (const auto& [_, dev] : input.devices) {
+    std::cout << "device @ " << dev->path << " '" << dev->getName() << "'\n";
   }
 
   while (true) {
