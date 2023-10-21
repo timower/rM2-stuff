@@ -25,3 +25,5 @@ target_link_libraries(${PROJECT_NAME}
 
 install(TARGETS ${PROJECT_NAME} DESTINATION opt/bin)
 install(FILES draft/yaft2.draft DESTINATION opt/etc/draft)
+
+add_deploy(${PROJECT_NAME})

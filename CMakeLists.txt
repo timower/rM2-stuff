@@ -5,6 +5,7 @@ project(rm2-stuff VERSION 0.0.1 LANGUAGES CXX)
 set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
 include(BuildTypes)
+include(Deploy)
 
 set(CMAKE_CXX_STANDARD "17")
 
