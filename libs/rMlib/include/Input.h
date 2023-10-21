@@ -93,7 +93,10 @@ using Event = std::variant<TouchEvent, PenEvent, KeyEvent>;
 struct InputDeviceBase {
   unistdpp::FD fd;
   libevdev* evdev;
+
   std::string path;
+
+  const char* getName();
 
   void grab();
   void ungrab();
@@ -115,9 +118,6 @@ struct BaseDevices {
 };
 
 struct InputManager {
-  ErrorOr<InputDeviceBase*> open(std::string_view input,
-                                 Transform inputTransform);
-
   ErrorOr<InputDeviceBase*> open(std::string_view input);
 
   /// Opens all devices for the current device type.
@@ -176,14 +176,14 @@ struct InputManager {
     }
   }
 
-  std::optional<BaseDevices> getBaseDevices() const { return baseDevices; }
+  BaseDevices getBaseDevices() const { return baseDevices; }
 
   /// members
   std::unordered_map<std::string_view, std::unique_ptr<InputDeviceBase>>
     devices;
 
 private:
-  std::optional<BaseDevices> baseDevices;
+  BaseDevices baseDevices;
   unistdpp::FD udevMonitorFd;
 
   template<typename T>

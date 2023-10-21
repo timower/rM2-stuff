@@ -206,13 +206,13 @@ public:
   }
 
   void init(AppContext& context, const BuildContext&) {
-    if (auto* key = context.getInputManager().getBaseDevices()->key;
+    if (auto* key = context.getInputManager().getBaseDevices().key;
         key != nullptr) {
       key->grab();
     }
 
     fbCanvas = &context.getFbCanvas();
-    touchDevice = context.getInputManager().getBaseDevices()->touch;
+    touchDevice = context.getInputManager().getBaseDevices().touch;
 
     readApps(); // TODO: do this on turning visible
 

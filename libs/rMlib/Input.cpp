@@ -301,6 +301,11 @@ InputManager::UdevDeleter<udev_monitor>::operator()(udev_monitor* ptr) {
   udev_monitor_unref(ptr);
 }
 
+const char*
+InputDeviceBase::getName() {
+  return libevdev_get_name(evdev);
+}
+
 void
 InputDeviceBase::grab() {
   libevdev_grab(evdev, LIBEVDEV_GRAB);
@@ -318,7 +323,7 @@ InputDeviceBase::~InputDeviceBase() {
 }
 
 ErrorOr<InputDeviceBase*>
-InputManager::open(std::string_view input, Transform inputTransform) {
+InputManager::open(std::string_view input) {
   if (auto it = devices.find(input); it != devices.end()) {
     return &*it->second;
   }
@@ -331,17 +336,19 @@ InputManager::open(std::string_view input, Transform inputTransform) {
                        "'");
   }
 
+  auto baseTransform = [&]() -> Transform {
+    auto base = device::getBaseDevice(libevdev_get_name(dev));
+    if (!base) {
+      return {};
+    }
+    return base->transform;
+  }();
+
   auto device =
-    makeDevice(std::move(fd), dev, std::string(input), inputTransform);
+    makeDevice(std::move(fd), dev, std::string(input), baseTransform);
   auto* devicePtr = device.get();
   devices.emplace(devicePtr->path, std::move(device));
   return devicePtr;
-}
-
-ErrorOr<InputDeviceBase*>
-InputManager::open(std::string_view input) {
-  const auto optTransform = device::getInputTransform(input);
-  return open(input, optTransform.has_value() ? *optTransform : Transform{});
 }
 
 ErrorOr<BaseDevices>
@@ -384,18 +391,25 @@ InputManager::openAll(bool monitor) {
     this->udevMonitorFd = unistdpp::FD{};
   }
 
-  auto type = TRY(device::getDeviceType());
-  auto paths = device::getInputPaths(type);
+  for (const auto& [_, dev] : devices) {
+    auto baseDev = device::getBaseDevice(dev->getName());
+    if (!baseDev) {
+      continue;
+    }
+    switch (baseDev->type) {
+      case device::InputType::Key:
+        baseDevices.key = dev.get();
+        break;
+      case device::InputType::Pen:
+        baseDevices.pen = dev.get();
+        break;
+      case device::InputType::MultiTouch:
+        baseDevices.touch = dev.get();
+        break;
+    }
+  }
 
-  auto touch = devices.find(paths.touchPath);
-  auto pen = devices.find(paths.penPath);
-  auto key = devices.find(paths.buttonPath);
-
-  baseDevices.emplace(
-    BaseDevices{ pen != devices.end() ? pen->second.get() : nullptr,
-                 touch != devices.end() ? touch->second.get() : nullptr,
-                 key != devices.end() ? key->second.get() : nullptr });
-  return *baseDevices;
+  return baseDevices;
 }
 
 ErrorOr<std::vector<Event>>
