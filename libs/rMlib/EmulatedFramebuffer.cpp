@@ -72,6 +72,7 @@ makeEmulatedCanvas() {
       return Error::make(std::string("could not initialize sdl2:") +
                          SDL_GetError());
     }
+
     window = SDL_CreateWindow("rM emulator",
                               SDL_WINDOWPOS_UNDEFINED,
                               SDL_WINDOWPOS_UNDEFINED,
@@ -82,9 +83,9 @@ makeEmulatedCanvas() {
       return Error::make(std::string("could not create window:") +
                          SDL_GetError());
     }
+
     auto* screenSurface = SDL_GetWindowSurface(window);
     SDL_FillRect(
-
       screenSurface,
       NULL,
       SDL_MapRGB(screenSurface->format, 0x1F << 3, 0x1F << 3, 0x1F << 3));

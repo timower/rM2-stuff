@@ -42,9 +42,13 @@ struct FakeInputDevice : public InputDeviceBase {
 };
 } // namespace
 
-InputManager::InputManager() {}
+template<>
+void
+InputManager::UdevDeleter<udev>::operator()(udev* ptr) {}
 
-InputManager::~InputManager() {}
+template<>
+void
+InputManager::UdevDeleter<udev_monitor>::operator()(udev_monitor* ptr) {}
 
 ErrorOr<BaseDevices>
 InputManager::openAll(bool monitor) {
@@ -54,7 +58,7 @@ InputManager::openAll(bool monitor) {
   }
 
   auto fakeDev = std::make_unique<FakeInputDevice>();
-  auto& fakeDevRef = *fakeDev;
+  auto* fakeDevRef = fakeDev.get();
   devices.emplace("Test", std::move(fakeDev));
 
   baseDevices.emplace(BaseDevices{ fakeDevRef, fakeDevRef, fakeDevRef });
@@ -66,7 +70,7 @@ InputManager::waitForInput(std::vector<pollfd>& extraFds,
                            std::optional<std::chrono::milliseconds> timeout) {
   static bool down = false;
 
-  FakeInputDevice& dev = static_cast<FakeInputDevice&>(getBaseDevices()->key);
+  FakeInputDevice& dev = *static_cast<FakeInputDevice*>(getBaseDevices()->key);
 
   std::thread selectThread([&readPipe = dev.pipes.readPipe,
                             &extraFds,

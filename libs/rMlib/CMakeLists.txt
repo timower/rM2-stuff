@@ -6,8 +6,7 @@ option(EMULATE_UINPUT "Emulate input devices using uinput" OFF)
 set(RMLIB_SOURCES
   stb.c
   Device.cpp
-  Canvas.cpp
-  Gesture.cpp)
+  Canvas.cpp)
 
 if (EMULATE)
   list(APPEND RMLIB_SOURCES EmulatedFramebuffer.cpp)
