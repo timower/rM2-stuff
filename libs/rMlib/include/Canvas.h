@@ -118,7 +118,8 @@ public:
                 int bg = white,
                 std::optional<Rect> clipRect = std::nullopt);
 
-  void drawLine(Point start, Point end, int val);
+  void drawLine(Point start, Point end, int val, int thickness = 1);
+  void drawDisk(Point center, int radius, int val);
 
   void drawRectangle(Point topLeft, Point bottomRight, int val) {
     drawLine(topLeft, Point{ bottomRight.x, topLeft.y }, val);

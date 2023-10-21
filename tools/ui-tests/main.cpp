@@ -207,11 +207,100 @@ navTest() {
   return Navigator(NavTest());
 }
 
+class DrawRenderObject;
+
+class Drawer : public rmlib::Widget<DrawRenderObject> {
+public:
+  Drawer() {}
+
+  std::unique_ptr<rmlib::RenderObject> createRenderObject() const;
+};
+
+class DrawRenderObject : public LeafRenderObject<Drawer> {
+public:
+  static constexpr int thickness = 20;
+
+  using LeafRenderObject::LeafRenderObject;
+  ~DrawRenderObject() override {}
+
+  void update(const Drawer& newWidget) {}
+
+protected:
+  rmlib::Size doLayout(const rmlib::Constraints& constraints) final {
+    return constraints.max;
+  }
+
+  rmlib::UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) final {
+    if (points.size() < 2) {
+      return {};
+    }
+
+    UpdateRegion result;
+    result.waveform = rmlib::fb::Waveform::DU;
+    result.flags = fb::UpdateFlags::Priority;
+
+    auto lastPoint = points.front();
+    result.region |= Rect{ lastPoint, lastPoint };
+    for (const auto& point : points) {
+      if (point == lastPoint) {
+        continue;
+      }
+
+      canvas.drawLine(lastPoint, point, black, thickness);
+      canvas.drawDisk(point, thickness, black);
+
+      lastPoint = point;
+      result.region |= Rect{ lastPoint, lastPoint };
+    }
+
+    points.clear();
+    if (down) {
+      points.push_back(lastPoint);
+    }
+
+    result.region = Insets::all(-thickness).shrink(result.region);
+    return result;
+  }
+
+  void handleInput(const rmlib::input::Event& ev) final {
+    if (!std::holds_alternative<rmlib::input::PenEvent>(ev)) {
+      return;
+    }
+
+    const auto& penEv = std::get<input::PenEvent>(ev);
+    if (!getRect().contains(penEv.location)) {
+      return;
+    }
+
+    if (penEv.isDown()) {
+      down = true;
+    }
+
+    if (down && (points.empty() || points.back() != penEv.location)) {
+      points.emplace_back(penEv.location);
+      markNeedsDraw(false);
+    }
+
+    if (penEv.isUp()) {
+      down = false;
+      points.clear();
+    }
+  }
+
+private:
+  bool down = false;
+  std::vector<Point> points;
+};
+
+std::unique_ptr<rmlib::RenderObject>
+Drawer::createRenderObject() const {
+  return std::make_unique<DrawRenderObject>(*this);
+}
+
 int
 main() {
   // auto optErr = runApp(Center(Row(Text("Test:"), CounterTest())));
-  auto optErr =
-    runApp(Center(Button("TestButton", [] { std::cout << "Click\n"; })));
+  auto optErr = runApp(Cleared(Drawer()));
 
   if (!optErr.has_value()) {
     std::cerr << optErr.error().msg << "\n";

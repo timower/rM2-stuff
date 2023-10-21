@@ -32,6 +32,8 @@ struct Point {
     y /= val;
     return *this;
   }
+
+  constexpr int lengthSqrt() const { return x * x + y * y; }
 };
 
 constexpr bool
