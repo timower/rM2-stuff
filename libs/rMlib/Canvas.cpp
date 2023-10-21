@@ -10,6 +10,8 @@
 #include <locale>
 #include <vector>
 
+#include "thick.cpp"
+
 namespace rmlib {
 
 namespace {
@@ -214,7 +216,12 @@ Canvas::drawText(std::string_view text,
 }
 
 void
-Canvas::drawLine(Point start, Point end, int val) {
+Canvas::drawLine(Point start, Point end, int val, int thickness) {
+  if (thickness != 1) {
+    return draw_thick_line(
+      *this, val, start.x, start.y, end.x, end.y, thickness);
+  }
+
   int dx = abs(end.x - start.x);
   int sx = start.x < end.x ? 1 : -1;
 
@@ -237,6 +244,17 @@ Canvas::drawLine(Point start, Point end, int val) {
     if (e2 < dy) {
       err += dx;
       start.y += sy;
+    }
+  }
+}
+
+void
+Canvas::drawDisk(Point center, int radius, int val) {
+  for (int dy = -radius; dy < radius; dy++) {
+    for (int dx = -radius; dx < radius; dx++) {
+      if (dx * dx + dy * dy < radius * radius) {
+        setPixel(center + Point{ dx, dy }, val);
+      }
     }
   }
 }
