@@ -26,9 +26,11 @@ toRGB565(uint8_t grey) {
 
 constexpr uint8_t
 fromRGB565(uint16_t rgb) {
-  uint8_t r = (rgb & 0x1f) << 3;
+  // uint8_t r = (rgb & 0x1f) << 3;
   uint8_t g = ((rgb >> 5) & 0x3f) << 2;
-  uint8_t b = ((rgb >> 11) & 0x1f) << 3;
+  // uint8_t b = ((rgb >> 11) & 0x1f) << 3;
+
+  // Only use g for now, as it has the most bit depth.
   return g;
 };
 
@@ -72,65 +74,6 @@ getFont() {
   return font;
 }
 } // namespace
-
-bool
-getGlyph(uint32_t code, uint8_t* bytemap, int height, int* width) {
-  static std::vector<uint8_t> tmpBuf;
-
-  const auto* font = getFont();
-  auto scale = stbtt_ScaleForPixelHeight(font, float(height));
-
-  int ascent = 0;
-  stbtt_GetFontVMetrics(font, &ascent, nullptr, nullptr);
-  auto baseline = static_cast<int>(float(ascent) * scale);
-
-  int advance = 0;
-  int lsb = 0;
-  stbtt_GetCodepointHMetrics(font, code, &advance, &lsb);
-  *width = float(advance) * scale;
-
-  int x0 = 0;
-  int x1 = 0;
-  int y0 = 0;
-  int y1 = 0;
-  stbtt_GetCodepointBitmapBox(font, code, scale, scale, &x0, &y0, &x1, &y1);
-
-  int w = x1 - x0;
-  int h = y1 - y0;
-  int size = w * h;
-  if (size_t(size) > tmpBuf.size()) {
-    tmpBuf.resize(size);
-  }
-
-  stbtt_MakeCodepointBitmap(font, tmpBuf.data(), w, h, w, scale, scale, code);
-
-  // Draw the bitmap to canvas.
-  for (int y = 0; y < h; y++) {
-    for (int x = 0; x < w; x++) {
-      auto pixel = tmpBuf[y * w + x];
-
-      auto memY = baseline + y0 + y;
-      auto memX = x0 + x;
-
-      if (memX < 0 || memX > 32) {
-        std::cerr << "Error memx: " << code << " memX: " << memX
-                  << " x0: " << x0 << " x: " << x << " width: " << *width
-                  << " w: " << w << std::endl;
-        continue;
-      }
-
-      assert(0 <= memX && memX < 32);
-      assert(0 <= memY && memY < 32);
-
-      bytemap[memY * 32 + memX] = pixel;
-      // if (pixel / 16 == 0xf) {
-      //   bitmap[memY] |= (1 << memX);
-      // }
-    }
-  }
-
-  return true;
-}
 
 Point
 Canvas::getTextSize(std::string_view text, int size) {
