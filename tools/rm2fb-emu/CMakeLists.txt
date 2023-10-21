@@ -15,5 +15,6 @@ if(LIBEVDEV_FOUND)
     PRIVATE unistdpp rm2fb_lib ${LIBEVDEV_LIBRARIES})
   target_include_directories(${PROJECT_NAME}
     PRIVATE ${LIBEVDEV_INCLUDE_DIRS})
+  add_deploy(rm2fb-forward)
 endif()
 

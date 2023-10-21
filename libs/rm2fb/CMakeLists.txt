@@ -35,3 +35,5 @@ add_custom_target(rm2fb DEPENDS rm2fb_client rm2fb_server)
 
 install(TARGETS rm2fb_client rm2fb_server DESTINATION opt/lib)
 install(FILES rm2fb.service DESTINATION lib/systemd/system)
+
+add_deploy(rm2fb_client)
