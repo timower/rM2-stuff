@@ -27,6 +27,7 @@ struct udev;
 struct udev_monitor;
 
 namespace rmlib::input {
+
 constexpr static auto max_num_slots = 32;
 
 struct TouchEvent {
@@ -108,9 +109,9 @@ protected:
 };
 
 struct BaseDevices {
-  InputDeviceBase& pen;
-  InputDeviceBase& touch;
-  InputDeviceBase& key;
+  InputDeviceBase* pen = nullptr;
+  InputDeviceBase* touch = nullptr;
+  InputDeviceBase* key = nullptr;
 };
 
 struct InputManager {
@@ -124,32 +125,11 @@ struct InputManager {
   ///                Will also remove devices when unplugged.
   ErrorOr<BaseDevices> openAll(bool monitor = true);
 
-  InputManager();
-  ~InputManager();
+  InputManager() = default;
+  ~InputManager() = default;
 
-  // TODO: rule of 0 this
-  InputManager(InputManager&& other)
-    : devices(std::move(other.devices))
-    , baseDevices(other.baseDevices)
-    , udevHandle(other.udevHandle)
-    , udevMonitor(other.udevMonitor)
-    , udevMonitorFd(std::move(other.udevMonitorFd)) {
-    other.devices.clear();
-    other.baseDevices = std::nullopt;
-    other.udevHandle = nullptr;
-    other.udevMonitor = nullptr;
-  }
-
-  InputManager& operator=(InputManager&& other) {
-    devices.clear();
-    baseDevices = std::nullopt;
-    udevHandle = nullptr;
-    udevMonitor = nullptr;
-    udevMonitorFd.close();
-
-    std::swap(other, *this);
-    return *this;
-  }
+  InputManager(InputManager&& other) = default;
+  InputManager& operator=(InputManager&& other) = default;
 
   InputManager(const InputManager&) = delete;
   InputManager& operator=(const InputManager&) = delete;
@@ -204,50 +184,18 @@ struct InputManager {
 
 private:
   std::optional<BaseDevices> baseDevices;
-  udev* udevHandle = nullptr;
-  udev_monitor* udevMonitor = nullptr;
   unistdpp::FD udevMonitorFd;
-};
 
-struct GestureController {
-  // pixels to move before detecting swipe or pinch
-  constexpr static int start_threshold = 50;
-  constexpr static auto tap_time = std::chrono::milliseconds(150);
-
-  struct SlotState {
-    bool active = false;
-    Point currentPos;
-    Point startPos;
-    std::chrono::steady_clock::time_point time;
+  template<typename T>
+  struct UdevDeleter {
+    void operator()(T* t);
   };
 
-  Gesture getGesture(Point currentDelta);
-  void handleTouchDown(const TouchEvent& event);
-  void handleTouchMove(const TouchEvent& event);
-  std::optional<Gesture> handleTouchUp(const TouchEvent& event);
+  template<typename T>
+  using UniquePtr = std::unique_ptr<T, UdevDeleter<T>>;
 
-  std::pair<std::vector<Gesture>, std::vector<Event>> handleEvents(
-    const std::vector<Event>& events);
-
-  void sync(InputDeviceBase& device);
-
-  void reset() {
-    started = false;
-    tapFingers = 0;
-  }
-
-  int getCurrentFingers() {
-    return std::count_if(
-      slots.begin(), slots.end(), [](const auto& slot) { return slot.active; });
-  }
-
-  // members
-  int tapFingers = 0;
-
-  std::array<SlotState, max_num_slots> slots;
-
-  bool started = false;
-  Gesture gesture;
+  UniquePtr<udev> udevHandle;
+  UniquePtr<udev_monitor> udevMonitor;
 };
 
 } // namespace rmlib::input

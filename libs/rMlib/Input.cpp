@@ -289,6 +289,18 @@ handeDevice(InputManager& mgr, udev_device& dev) {
 
 } // namespace
 
+template<>
+void
+InputManager::UdevDeleter<udev>::operator()(udev* ptr) {
+  udev_unref(ptr);
+}
+
+template<>
+void
+InputManager::UdevDeleter<udev_monitor>::operator()(udev_monitor* ptr) {
+  udev_monitor_unref(ptr);
+}
+
 void
 InputDeviceBase::grab() {
   libevdev_grab(evdev, LIBEVDEV_GRAB);
@@ -302,17 +314,6 @@ InputDeviceBase::ungrab() {
 InputDeviceBase::~InputDeviceBase() {
   if (evdev != nullptr) {
     libevdev_free(evdev);
-  }
-}
-
-InputManager::InputManager() {}
-
-InputManager::~InputManager() {
-  if (udevHandle != nullptr) {
-    udev_unref(udevHandle);
-  }
-  if (udevMonitor != nullptr) {
-    udev_monitor_unref(udevMonitor);
   }
 }
 
@@ -345,11 +346,10 @@ InputManager::open(std::string_view input) {
 
 ErrorOr<BaseDevices>
 InputManager::openAll(bool monitor) {
+  auto udevHandle = this->udevHandle == nullptr ? UniquePtr<udev>(udev_new())
+                                                : std::move(this->udevHandle);
 
-  udev* udevHandle =
-    this->udevHandle == nullptr ? udev_new() : this->udevHandle;
-
-  udev_enumerate* enumerate = udev_enumerate_new(udevHandle);
+  udev_enumerate* enumerate = udev_enumerate_new(udevHandle.get());
   udev_enumerate_add_match_subsystem(enumerate, "input");
   udev_enumerate_scan_devices(enumerate);
 
@@ -358,7 +358,8 @@ InputManager::openAll(bool monitor) {
 
   udev_list_entry_foreach(entry, devList) {
     const char* path = udev_list_entry_get_name(entry);
-    struct udev_device* dev = udev_device_new_from_syspath(udevHandle, path);
+    struct udev_device* dev =
+      udev_device_new_from_syspath(udevHandle.get(), path);
     if (dev != nullptr) {
       handeDevice(*this, *dev);
       udev_device_unref(dev);
@@ -368,27 +369,32 @@ InputManager::openAll(bool monitor) {
   udev_enumerate_unref(enumerate);
 
   if (monitor) {
-    this->udevHandle = udevHandle;
+    this->udevHandle = std::move(udevHandle);
 
-    udevMonitor = udev_monitor_new_from_netlink(udevHandle, "udev");
-    udev_monitor_filter_add_match_subsystem_devtype(udevMonitor, "input", NULL);
-    udev_monitor_enable_receiving(udevMonitor);
-    udevMonitorFd = unistdpp::FD(udev_monitor_get_fd(udevMonitor));
+    udevMonitor = UniquePtr<udev_monitor>(
+      udev_monitor_new_from_netlink(udevHandle.get(), "udev"));
+
+    udev_monitor_filter_add_match_subsystem_devtype(
+      udevMonitor.get(), "input", NULL);
+    udev_monitor_enable_receiving(udevMonitor.get());
+
+    udevMonitorFd = unistdpp::FD(udev_monitor_get_fd(udevMonitor.get()));
 
   } else {
-    udev_unref(udevHandle);
-    this->udevHandle = nullptr;
-    this->udevMonitorFd = unistdpp::FD();
+    this->udevMonitorFd = unistdpp::FD{};
   }
 
   auto type = TRY(device::getDeviceType());
   auto paths = device::getInputPaths(type);
 
-  auto* touch = devices.at(paths.touchPath).get();
-  auto* pen = devices.at(paths.penPath).get();
-  auto* key = devices.at(paths.buttonPath).get();
+  auto touch = devices.find(paths.touchPath);
+  auto pen = devices.find(paths.penPath);
+  auto key = devices.find(paths.buttonPath);
 
-  baseDevices.emplace(BaseDevices{ *pen, *touch, *key });
+  baseDevices.emplace(
+    BaseDevices{ pen != devices.end() ? pen->second.get() : nullptr,
+                 touch != devices.end() ? touch->second.get() : nullptr,
+                 key != devices.end() ? key->second.get() : nullptr });
   return *baseDevices;
 }
 
@@ -416,7 +422,7 @@ InputManager::waitForInput(std::vector<pollfd>& extraFds,
   }
 
   if (udevMonitorFd.isValid() && unistdpp::canRead(extraFds.back())) {
-    udev_device* dev = udev_monitor_receive_device(udevMonitor);
+    udev_device* dev = udev_monitor_receive_device(udevMonitor.get());
     if (dev) {
       handeDevice(*this, *dev);
       udev_device_unref(dev);

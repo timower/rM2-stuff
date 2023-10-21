@@ -82,9 +82,11 @@ TEST_CASE("readFile", "[unistdpp]") {
 
   SECTION("sysfs") {
     auto res = readFile("/sys/devices/system/cpu/present");
+#ifndef __APPLE__
     REQUIRE(res);
     REQUIRE((*res)[0] == '0');
     REQUIRE(res->size() < 100);
+#endif
   }
 }
 

@@ -3,17 +3,12 @@
 #include "terminal.h"
 
 #include <Device.h>
+#include <Input.h>
 
 #include <unistd.h>
 
 #include <algorithm>
 #include <iostream>
-
-#ifdef __APPLE__
-#include "event-codes.h"
-#else
-#include <linux/input-event-codes.h>
-#endif
 
 using namespace rmlib;
 using namespace rmlib::input;
@@ -704,50 +699,11 @@ initMouseBuf(std::array<char, 6>& buf, Point loc) {
   buf = { esc_char, '[', 'M', 32, cx, cy };
 }
 
-// TODO: gesture progress updates, don't do multiple scrolls
-void
-handleGesture(Keyboard& kb, const SwipeGesture& gesture) {
-  if (gesture.fingers != 2) {
-    return;
-  }
-
-  std::array<char, 6> buf;
-  const auto loc = gesture.startPosition - kb.screenRect.topLeft;
-  initMouseBuf(buf, loc);
-
-  constexpr auto scroll_size = 4 * CELL_HEIGHT;
-  const auto distance = std::max(
-    1, abs(gesture.endPosition.y - gesture.startPosition.y) / scroll_size);
-
-  if (gesture.direction == rmlib::input::SwipeGesture::Up) {
-    buf[3] += 64 + 1;
-    for (int i = 0; i < distance; i++) {
-      write(kb.term->fd, buf.data(), buf.size());
-    }
-  } else if (gesture.direction == rmlib::input::SwipeGesture::Down) {
-    buf[3] += 64 + 0;
-    for (int i = 0; i < distance; i++) {
-      write(kb.term->fd, buf.data(), buf.size());
-    }
-  }
-}
-
 template<typename Event>
 void
 handleScreenEvent(Keyboard& kb, const Event& ev, const Point loc) {
   if ((kb.term->mode & ALL_MOUSE_MODES) == 0) {
     return;
-  }
-
-  const auto lastFingers = kb.gestureCtrlr.getCurrentFingers();
-
-  if constexpr (std::is_same_v<Event, TouchEvent>) {
-    const auto [gestures, _] = kb.gestureCtrlr.handleEvents({ ev });
-    for (const auto& gesture : gestures) {
-      if (std::holds_alternative<SwipeGesture>(gesture)) {
-        handleGesture(kb, std::get<SwipeGesture>(gesture));
-      }
-    }
   }
 
   const auto slot = event_traits<Event>::getSlot(ev);
@@ -756,8 +712,7 @@ handleScreenEvent(Keyboard& kb, const Event& ev, const Point loc) {
   initMouseBuf(buf, scaled_loc);
 
   // Mouse down on first finger if mouse is not down.
-  if (ev.type == event_traits<Event>::down_type && kb.mouseSlot == -1 &&
-      lastFingers == 0) {
+  if (ev.type == event_traits<Event>::down_type && kb.mouseSlot == -1) {
     kb.mouseSlot = slot;
 
     // Send mouse down code
@@ -765,8 +720,7 @@ handleScreenEvent(Keyboard& kb, const Event& ev, const Point loc) {
     write(kb.term->fd, buf.data(), buf.size());
 
   } else if ((ev.type == event_traits<Event>::up_type &&
-              slot == kb.mouseSlot) ||
-             (kb.mouseSlot != -1 && kb.gestureCtrlr.getCurrentFingers() > 1)) {
+              slot == kb.mouseSlot)) {
     // Mouse up after finger lift or second finger down (for scrolling).
 
     kb.mouseSlot = -1;
