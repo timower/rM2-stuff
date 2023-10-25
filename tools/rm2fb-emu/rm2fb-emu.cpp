@@ -69,11 +69,11 @@ main(int argc, char* argv[]) {
     auto [events, fds] = *fdsOrErr;
 
     for (const auto& event : events) {
-      if (!std::holds_alternative<TouchEvent>(event)) {
+      if (!std::holds_alternative<PenEvent>(event)) {
         continue;
       }
 
-      const auto& touchEv = std::get<TouchEvent>(event);
+      const auto& touchEv = std::get<PenEvent>(event);
       const auto type = [&] {
         if (touchEv.isDown()) {
           return 1;
