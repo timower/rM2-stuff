@@ -16,7 +16,19 @@ if (APPLE)
   target_link_libraries(${PROJECT_NAME} PRIVATE linux::mxcfb)
 endif()
 
-install(TARGETS ${PROJECT_NAME} DESTINATION opt/bin)
+install(TARGETS ${PROJECT_NAME}
+  COMPONENT ${PROJECT_NAME}
+  DESTINATION opt/bin)
 
-install(FILES draft/yaft.draft DESTINATION opt/etc/draft)
-install(FILES draft/yaft.png DESTINATION opt/etc/draft/icons)
+install(DIRECTORY ${CMAKE_BINARY_DIR}/terminfo
+  COMPONENT ${PROJECT_NAME}
+  DESTINATION opt/share)
+
+install(FILES draft/yaft.draft
+  COMPONENT ${PROJECT_NAME}
+  DESTINATION opt/etc/draft)
+install(FILES draft/yaft.png
+  COMPONENT ${PROJECT_NAME}
+  DESTINATION opt/etc/draft/icons)
+
+add_deploy(${PROJECT_NAME})

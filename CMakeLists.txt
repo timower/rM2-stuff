@@ -23,9 +23,12 @@ endif()
 
 set(CPACK_GENERATOR "DEB")
 set(CPACK_POST_BUILD_SCRIPTS "${PROJECT_SOURCE_DIR}/cmake/GenIPK.cmake")
+
+get_cmake_property(CPACK_COMPONENTS_ALL COMPONENTS)
 configure_file("${PROJECT_SOURCE_DIR}/cmake/CPackOptions.cmake.in"
                "${PROJECT_BINARY_DIR}/CPackOptions.cmake"
                @ONLY)
+
 set(CPACK_PROJECT_CONFIG_FILE "${PROJECT_BINARY_DIR}/CPackOptions.cmake")
 
 include(CPack)
