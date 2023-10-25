@@ -61,8 +61,8 @@ InputManager::openAll(bool monitor) {
   auto* fakeDevRef = fakeDev.get();
   devices.emplace("Test", std::move(fakeDev));
 
-  baseDevices.emplace(BaseDevices{ fakeDevRef, fakeDevRef, fakeDevRef });
-  return *baseDevices;
+  baseDevices = { fakeDevRef, fakeDevRef, fakeDevRef };
+  return baseDevices;
 }
 
 ErrorOr<std::vector<Event>>
@@ -70,7 +70,7 @@ InputManager::waitForInput(std::vector<pollfd>& extraFds,
                            std::optional<std::chrono::milliseconds> timeout) {
   static bool down = false;
 
-  FakeInputDevice& dev = *static_cast<FakeInputDevice*>(getBaseDevices()->key);
+  FakeInputDevice& dev = *static_cast<FakeInputDevice*>(getBaseDevices().key);
 
   std::thread selectThread([&readPipe = dev.pipes.readPipe,
                             &extraFds,
@@ -125,10 +125,9 @@ InputManager::waitForInput(std::vector<pollfd>& extraFds,
 
   KeyEvent keyEv;
 
-  TouchEvent ev;
+  PenEvent ev;
   ev.id = 1;
   ev.pressure = 1;
-  ev.slot = 1;
 
   std::vector<Event> result;
   switch (event.type) {
@@ -141,7 +140,7 @@ InputManager::waitForInput(std::vector<pollfd>& extraFds,
       if (down) {
         auto x = event.motion.x * EMULATE_SCALE;
         auto y = event.motion.y * EMULATE_SCALE;
-        ev.type = TouchEvent::Move;
+        ev.type = PenEvent::Move;
         ev.location = { x, y };
         result.push_back(ev);
       }
@@ -151,7 +150,7 @@ InputManager::waitForInput(std::vector<pollfd>& extraFds,
         auto x = event.button.x * EMULATE_SCALE;
         auto y = event.button.y * EMULATE_SCALE;
         down = true;
-        ev.type = TouchEvent::Down;
+        ev.type = PenEvent::TouchDown;
         ev.location = { x, y };
         result.push_back(ev);
       }
@@ -161,7 +160,7 @@ InputManager::waitForInput(std::vector<pollfd>& extraFds,
         auto x = event.button.x * EMULATE_SCALE;
         auto y = event.button.y * EMULATE_SCALE;
         down = false;
-        ev.type = TouchEvent::Up;
+        ev.type = PenEvent::TouchUp;
         ev.location = { x, y };
         result.push_back(ev);
       }

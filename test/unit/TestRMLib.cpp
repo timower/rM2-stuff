@@ -53,7 +53,7 @@ TEST_CASE("Init Input", "[rmlib]") {
   evs = input.waitForInput(std::chrono::milliseconds(2));
   REQUIRE(evs.has_value());
   REQUIRE(evs->size() == 1);
-  REQUIRE(std::holds_alternative<input::TouchEvent>(evs->front()));
+  REQUIRE(std::holds_alternative<input::PenEvent>(evs->front()));
 }
 
 TEST_CASE("Text", "[rmlib][ui]") {
