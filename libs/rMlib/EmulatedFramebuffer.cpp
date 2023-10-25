@@ -285,7 +285,7 @@ FrameBuffer::open() {
   }
 #endif
 
-  return FrameBuffer(FrameBuffer::rM2fb, 1337, canvas);
+  return FrameBuffer(FrameBuffer::rM2Stuff, 1337, canvas);
 }
 
 void

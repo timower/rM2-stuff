@@ -37,7 +37,7 @@ FrameBuffer::detectType() {
     case device::DeviceType::reMarkable2:
       if (getenv("RM2STUFF_RM2FB") != nullptr) {
         std::cerr << "Using our own rm2fb!\n";
-        return rM2fb;
+        return rM2Stuff;
       }
 
       if (getenv("RM2FB_SHIM") != nullptr) {
@@ -110,7 +110,7 @@ FrameBuffer::doUpdate(Rect region, Waveform waveform, UpdateFlags flags) const {
   update.update_region.width = region.width();
   update.update_region.height = region.height();
 
-  if (type == rM2fb) {
+  if (type == rM2Stuff) {
     update.update_mode = RM2_UPDATE_MODE;
     update.flags = static_cast<int>(flags);
     update.waveform_mode = static_cast<int>(waveform);
@@ -122,14 +122,13 @@ FrameBuffer::doUpdate(Rect region, Waveform waveform, UpdateFlags flags) const {
     update.waveform_mode = [&] {
       switch (waveform) {
         case Waveform::DU:
+        case Waveform::A2:
           return WAVEFORM_MODE_DU;
         default:
         case Waveform::GC16:
           return WAVEFORM_MODE_GC16;
         case Waveform::GC16Fast:
           return WAVEFORM_MODE_GL16;
-        case Waveform::A2:
-          return WAVEFORM_MODE_A2;
       }
     }();
 

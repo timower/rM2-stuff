@@ -104,26 +104,31 @@ ScreenRenderObject::doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) {
   }
 
   Rect currentRect;
+
   const auto maybeDraw = [&](bool last = false) {
     if (currentRect.empty() || shouldRefresh()) {
       return;
     }
-    fb->doUpdate(currentRect,
-                 last ? fb::Waveform::A2 : fb::Waveform::DU,
-                 last ? fb::UpdateFlags::None : fb::UpdateFlags::Priority);
-    currentRect = {};
 
+    bool useA2 = widget->isLandscape
+                   ? term.lines * CELL_HEIGHT <= currentRect.width()
+                   : term.lines * CELL_HEIGHT <= currentRect.height();
+    fb->doUpdate(currentRect,
+                 useA2 ? fb::Waveform::A2 : fb::Waveform::DU,
+                 useA2 ? fb::UpdateFlags::None : fb::UpdateFlags::Priority);
+
+    currentRect = {};
     numUpdates++;
   };
 
   for (int line = 0; line < term.lines; line++) {
-    if (!isPartialDraw() || term.line_dirty[line]) {
+    if (isFullDraw() || term.line_dirty[line]) {
       currentRect |= drawLine(canvas, rect, term, line);
     } else {
       maybeDraw();
     }
   }
-  maybeDraw(true);
+  maybeDraw(/* last */ true);
 
   if (shouldRefresh()) {
     term.shouldClear = false;

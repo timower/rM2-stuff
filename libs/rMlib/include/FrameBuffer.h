@@ -11,7 +11,7 @@ enum class Waveform { DU = 0, GC16 = 1, GC16Fast = 2, A2 = 3 };
 enum UpdateFlags { None = 0, FullRefresh = 1, Sync = 2, Priority = 4 };
 
 struct FrameBuffer {
-  enum Type { rM1, Shim, rM2fb };
+  enum Type { rM1, Shim, rM2Stuff };
 
   /// Opens the framebuffer.
   static ErrorOr<FrameBuffer> open();
