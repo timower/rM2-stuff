@@ -4,12 +4,8 @@ add_subdirectory(frida)
 add_subdirectory(linux)
 add_subdirectory(tomlplusplus)
 add_subdirectory(noto)
+add_subdirectory(expected EXCLUDE_FROM_ALL)
 
-FetchContent_Declare(
-  expected
-  DOWNLOAD_EXTRACT_TIMESTAMP ON
-  URL https://github.com/TartanLlama/expected/archive/refs/tags/v1.1.0.tar.gz
-)
-
-set(EXPECTED_BUILD_TESTS OFF)
-FetchContent_MakeAvailable(expected)
+if (${BUILD_TESTS})
+  add_subdirectory(catch2 EXCLUDE_FROM_ALL)
+endif()
