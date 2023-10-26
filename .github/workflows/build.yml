@@ -2,34 +2,11 @@ name: Build
 
 on: [push, pull_request]
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: 'ghcr.io/timower/rm-docker:main'
+
 jobs:
-  build-host:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v3
-        with:
-          lfs: 'true'
-
-      - name: Install Deps
-        run: sudo apt-get install -y ninja-build libsdl2-dev xxd llvm
-
-      - name: Configure CMake
-        run: cmake --preset dev-host
-
-      - name: Build
-        run: cmake --build build/host
-
-      - name: Test
-        run: cmake --build build/host --target make-coverage
-
-      - name: Upload Coverage
-        uses: codecov/codecov-action@v3
-        with:
-          files: ./build/host/report.lcov
-          fail_ci_if_error: true # optional (default = false)
-          verbose: true # optional (default = false)
-
   build:
     runs-on: ubuntu-latest
     container:
@@ -58,6 +35,53 @@ jobs:
           name: package
           path: build/release-toltec/*.ipk
 
+  build-host:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          lfs: 'true'
+
+      - name: Install Deps
+        run: sudo apt-get install -y ninja-build libsdl2-dev xxd llvm
+
+      - name: Configure CMake
+        run: cmake --preset dev-host
+
+      - name: Build
+        run: cmake --build build/host
+
+      - name: Unit Tests
+        run: cmake --build build/host --target make-coverage
+
+      - name: Upload Coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./build/host/report.lcov
+          fail_ci_if_error: true # optional (default = false)
+          verbose: true # optional (default = false)
+
+      - uses: yogeshlonkar/wait-for-jobs@v0
+        with:
+          jobs: 'build'
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download package
+        uses: actions/download-artifact@v2
+        with:
+          name: package
+          path: packages/
+
+      - name: Integration Tests
+        run: ./test/integration/test.sh ${{ env.IMAGE_NAME }} ./packages/
+
   release:
     runs-on: ubuntu-latest
     needs: build
@@ -65,10 +89,10 @@ jobs:
 
     steps:
       - name: Download package
-        id: download_package
         uses: actions/download-artifact@v2
         with:
           name: package
+
       - run: ls -la
 
       - name: Release
