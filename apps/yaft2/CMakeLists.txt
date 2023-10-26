@@ -23,7 +23,16 @@ target_link_libraries(${PROJECT_NAME}
     yaft_app_lib
     rMlib)
 
-install(TARGETS ${PROJECT_NAME} DESTINATION opt/bin)
-install(FILES draft/yaft2.draft DESTINATION opt/etc/draft)
+install(TARGETS ${PROJECT_NAME}
+  COMPONENT ${PROJECT_NAME}
+  DESTINATION opt/bin)
+
+install(DIRECTORY ${CMAKE_BINARY_DIR}/terminfo
+  COMPONENT ${PROJECT_NAME}
+  DESTINATION opt/share)
+
+install(FILES draft/yaft2.draft
+  COMPONENT ${PROJECT_NAME}
+  DESTINATION opt/etc/draft)
 
 add_deploy(${PROJECT_NAME})

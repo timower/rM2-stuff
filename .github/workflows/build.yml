@@ -56,7 +56,7 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           name: package
-          path: build/release-toltec/rm2stuff.ipk
+          path: build/release-toltec/*.ipk
 
   release:
     runs-on: ubuntu-latest
@@ -69,26 +69,12 @@ jobs:
         uses: actions/download-artifact@v2
         with:
           name: package
-      - name: Create release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: true
-          prerelease: true
       - run: ls -la
-      - name: Upload Release Package
-        id: upload-release-asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: rm2stuff.ipk
-          asset_name: rm2stuff.ipk
-          asset_content_type: application/gzip
+          draft: true
+          files: ./*
 
 

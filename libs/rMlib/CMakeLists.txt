@@ -68,5 +68,9 @@ if (EMULATE)
   endif()
 endif()
 
-install(TARGETS ${PROJECT_NAME} DESTINATION opt/lib)
-install(DIRECTORY include/ DESTINATION opt/include/rmlib)
+install(TARGETS ${PROJECT_NAME}
+  COMPONENT ${PROJECT_NAME}
+  DESTINATION opt/lib)
+install(DIRECTORY include/
+  COMPONENT ${PROJECT_NAME}
+  DESTINATION opt/include/rmlib)

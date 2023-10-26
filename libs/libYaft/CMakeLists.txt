@@ -13,4 +13,3 @@ if (NOT APPLE)
       -o "${CMAKE_BINARY_DIR}/terminfo")
 endif()
 
-install(DIRECTORY ${CMAKE_BINARY_DIR}/terminfo DESTINATION opt/share)
