@@ -3,8 +3,10 @@
 #include <unistdpp/error.h>
 
 #include <cassert>
+#include <cstdlib>
 #include <cstring>
 
+#include <iostream>
 #include <string>
 #include <variant>
 
@@ -21,8 +23,29 @@ struct Error {
   Error(std::string msg) : msg(std::move(msg)) {}
 };
 
+inline std::string
+to_string(const Error& err) {
+  return err.msg;
+}
+
 template<typename T, typename E = Error>
 using ErrorOr = tl::expected<T, E>;
 
 template<typename E = Error>
 using OptError = tl::expected<void, E>;
+
+template<typename T, typename E = Error>
+T
+fatalOnError(tl::expected<T, E> error) {
+  if (!error.has_value()) {
+    using namespace std;
+    std::cerr << "FATA: " << to_string(error.error()) << std::endl;
+    std::abort();
+  }
+
+  if constexpr (std::is_void_v<T>) {
+    return;
+  } else {
+    return *error;
+  }
+}

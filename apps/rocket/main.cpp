@@ -5,6 +5,7 @@
 #include <sys/wait.h>
 
 #include <Device.h>
+#include <Error.h>
 #include <UI.h>
 
 #include <unistdpp/file.h>
@@ -583,7 +584,7 @@ main(int argc, char* argv[]) {
 
   std::signal(SIGCHLD, cleanup);
 
-  runApp(LauncherWidget());
+  fatalOnError(runApp(LauncherWidget()));
 
   auto fb = fb::FrameBuffer::open();
   if (fb.has_value()) {

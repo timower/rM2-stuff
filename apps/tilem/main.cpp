@@ -15,12 +15,7 @@ int
 main(int argc, char* argv[]) {
   const auto* calc_name = argc > 1 ? argv[1] : calc_default_rom;
 
-  const auto err = runApp(Navigator(tilem::Calculator(calc_name)));
-
-  if (!err.has_value()) {
-    std::cerr << err.error().msg << std::endl;
-    return EXIT_FAILURE;
-  }
+  fatalOnError(runApp(Navigator(tilem::Calculator(calc_name))));
 
   return EXIT_SUCCESS;
 }
