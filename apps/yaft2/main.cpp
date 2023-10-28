@@ -18,9 +18,13 @@ int
 main(int argc, char* argv[]) {
   static const char* shell_args[3] = { shell_cmd, "-l", NULL };
 
-  if (setlocale(LC_ALL, "") == NULL) /* for wcwidth() */ {
+  /* for wcwidth() */
+  char* locale = nullptr;
+  if ((locale = setlocale(LC_ALL, "en_US.UTF-8")) == NULL &&
+      (locale = setlocale(LC_ALL, "")) == NULL) {
     std::cout << "setlocale failed\n";
   }
+  std::cout << "Locale is: " << locale << "\n";
 
   const char* cmd;
   char* const* args;

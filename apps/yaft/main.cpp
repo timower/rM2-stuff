@@ -210,8 +210,11 @@ main(int argc, const char* argv[]) {
   Keyboard keyboard;
 
   /* init */
-  if (setlocale(LC_ALL, "") == NULL) /* for wcwidth() */
+  /* for wcwidth() */
+  if (setlocale(LC_ALL, "en_US.UTF-8") == NULL &&
+      setlocale(LC_ALL, "") == NULL) {
     logging(WARN, "setlocale falied\n");
+  }
 
   auto fb = rmlib::fb::FrameBuffer::open();
   if (!fb.has_value()) {
