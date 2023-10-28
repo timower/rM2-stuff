@@ -4,10 +4,10 @@
 #include "stb_image_write.h"
 #include "stb_truetype.h"
 
+#include <utf8.h>
+
 #include <array>
-#include <codecvt>
 #include <iostream>
-#include <locale>
 #include <vector>
 
 #include "thick.cpp"
@@ -94,18 +94,16 @@ Canvas::getTextSize(std::string_view text, int size) {
   float charEnd = baseLine - float(descent) * scale; // descent is negative.
   float height = charEnd + charStart;
 
-  auto utf32 =
-    std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t>{}.from_bytes(
-      text.data());
+  auto utf32 = utf8::utf8to32(utf8::replace_invalid(text));
 
   float xpos = 0;
-  for (int ch = 0; utf32[ch] != 0; ch++) {
+  for (size_t ch = 0; ch != utf32.size(); ch++) {
     int advance = 0;
     int lsb = 0;
     stbtt_GetCodepointHMetrics(font, utf32[ch], &advance, &lsb);
 
     xpos += float(advance) * scale;
-    if (utf32[ch + 1] != 0) {
+    if (ch + 1 != utf32.size()) {
       xpos +=
         scale *
         float(stbtt_GetCodepointKernAdvance(font, utf32[ch], utf32[ch + 1]));
@@ -137,14 +135,12 @@ Canvas::drawText(std::string_view text,
   float baseLine = charStart + float(ascent) * scale;
   float yShfit = 0; // baseLine - floorf(baseLine);
 
-  auto utf32 =
-    std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t>{}.from_bytes(
-      text.data());
+  auto utf32 = utf8::utf8to32(utf8::replace_invalid(text));
 
   std::vector<uint8_t> textBuffer;
 
   float xpos = 0;
-  for (int ch = 0; utf32[ch] != 0; ch++) {
+  for (size_t ch = 0; ch != utf32.size(); ch++) {
     float xShift = xpos - floorf(xpos);
 
     int advance = 0;
@@ -207,7 +203,7 @@ Canvas::drawText(std::string_view text,
     // you really need to render each bitmap to a temp font_buffer, then "alpha
     // blend" that into the working font_buffer
     xpos += float(advance) * scale;
-    if (utf32[ch + 1] != 0) {
+    if (ch + 1 != utf32.size()) {
       xpos +=
         scale *
         float(stbtt_GetCodepointKernAdvance(font, utf32[ch], utf32[ch + 1]));
