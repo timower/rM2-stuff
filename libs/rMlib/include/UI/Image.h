@@ -67,7 +67,7 @@ public:
 
   std::unique_ptr<RenderObject> createRenderObject() const;
 
-  const Canvas& canvas;
+  Canvas canvas;
   bool stretch;
 };
 
@@ -93,25 +93,29 @@ protected:
   }
 
   UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) override {
-    float scale_x = (float)rect.width() / widget->canvas.width();
-    float scale_y = (float)rect.height() / widget->canvas.height();
-    int offset_x = 0;
-    int offset_y = 0;
+    auto rectW = float(rect.width());
+    auto rectH = float(rect.height());
+    auto canvasW = float(widget->canvas.width());
+    auto canvasH = float(widget->canvas.height());
+    float scaleX = rectW / canvasW;
+    float scaleY = rectH / canvasH;
+    int offsetX = 0;
+    int offsetY = 0;
 
     if (!widget->stretch) {
-      if (scale_x > scale_y) {
-        scale_x = scale_y;
-        offset_x = (rect.width() - widget->canvas.width() * scale_x) / 2;
+      if (scaleX > scaleY) {
+        scaleX = scaleY;
+        offsetX = int((rectW - canvasW * scaleX) / 2);
       } else {
-        scale_y = scale_x;
-        offset_y = (rect.height() - widget->canvas.height() * scale_y) / 2;
+        scaleY = scaleX;
+        offsetY = int((rectH - canvasH * scaleY) / 2);
       }
     }
 
     canvas.transform(
       [&](int x, int y, int old) {
-        int subY = (y - rect.topLeft.y - offset_y) / scale_y;
-        int subX = (x - rect.topLeft.x - offset_x) / scale_x;
+        auto subY = int(float(y - rect.topLeft.y - offsetY) / scaleY);
+        auto subX = int(float(x - rect.topLeft.x - offsetX) / scaleX);
         if (!widget->canvas.rect().contains(Point{ subX, subY })) {
           return old;
         }

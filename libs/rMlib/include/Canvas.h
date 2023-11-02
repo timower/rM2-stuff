@@ -9,7 +9,6 @@
 #include <memory>
 #include <optional>
 #include <string_view>
-#include <type_traits>
 
 #include <iostream>
 
@@ -98,7 +97,7 @@ public:
   }
 
   template<typename Func>
-  void forEach(Func&& func, Rect r) const {
+  void forEach(const Func& func, Rect r) const {
     assert(rect().contains(r.bottomRight) && rect().contains(r.topLeft));
     for (int y = r.topLeft.y; y <= r.bottomRight.y; y++) {
       for (int x = r.topLeft.x; x <= r.bottomRight.x; x++) {
@@ -190,7 +189,7 @@ public:
 
 private:
   template<typename ValueType, typename Func>
-  void transformImpl(Func&& f, Rect r) {
+  void transformImpl(const Func& f, Rect r) {
     for (int y = r.topLeft.y; y <= r.bottomRight.y; y++) {
       for (int x = r.topLeft.x; x <= r.bottomRight.x; x++) {
         auto* ptr = getPtr<ValueType>(x, y);
@@ -215,11 +214,11 @@ struct ImageCanvas {
                                          int size,
                                          int background = white);
 
-  ImageCanvas(ImageCanvas&& other) : canvas(other.canvas) {
+  ImageCanvas(ImageCanvas&& other) noexcept : canvas(other.canvas) {
     other.canvas = Canvas{};
   }
 
-  ImageCanvas& operator=(ImageCanvas&& other) {
+  ImageCanvas& operator=(ImageCanvas&& other) noexcept {
     release();
     std::swap(other.canvas, this->canvas);
     return *this;
@@ -270,7 +269,7 @@ transform(Canvas& dest,
           const Point& destOffset,
           const Canvas& src,
           const Rect& srcRect,
-          Func&& f) {
+          const Func& f) {
   assert(src.rect().contains(srcRect));
   assert(dest.rect().contains(srcRect + destOffset));
 

@@ -30,7 +30,7 @@
 namespace rmlib {
 
 namespace details {
-static inline AppContext* currentContext = nullptr;
+static inline AppContext* currentContext = nullptr; // NOLINT
 
 inline void
 stop(int signal) {

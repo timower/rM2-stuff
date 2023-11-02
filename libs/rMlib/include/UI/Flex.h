@@ -63,8 +63,6 @@ protected:
     // assert(isVertical() ? constraints.hasBoundedHeight()
     //                     : constraints.hasBoundedWidth());
 
-    Size result = { 0, 0 };
-
     const auto childConstraints =
       isVertical()
         ? Constraints{ { constraints.min.width, 0 },
@@ -73,73 +71,15 @@ protected:
                        { Constraints::unbound, constraints.max.height } };
 
     // First layout non flex children with unbounded contraints.
-    for (auto i = 0U; i < num_children; i++) {
-      if (this->widget->flexes[i] != 0) {
-        continue;
-      }
-
-      // TODO: DRY
-      const auto newSize = this->children[i]->layout(childConstraints);
-      if (isVertical() ? newSize.height != childSizes[i].height
-                       : newSize.width != childSizes[i].width) {
-        this->markNeedsDraw();
-      }
-
-      childSizes[i] = newSize;
-
-      if (isVertical()) {
-        result.height += childSizes[i].height;
-        result.width = std::max(childSizes[i].width, result.width);
-      } else {
-        result.width += childSizes[i].width;
-        result.height = std::max(childSizes[i].height, result.height);
-      }
-    }
+    auto result = layoutNonFlex(childConstraints);
 
     assert(result.height <= constraints.max.height && "Flex too large");
     assert(result.width <= constraints.max.width && "Flex too wide");
 
     // Divide the remaining space.
-    const auto totalFlex = std::accumulate(
-      this->widget->flexes.begin(), this->widget->flexes.end(), 0);
-    const auto remainingSpace = isVertical()
-                                  ? constraints.max.height - result.height
-                                  : constraints.max.width - result.width;
+    result = layoutFlex(constraints, result);
 
     // TODO: if totalFlex or remainingSpace changed, then we need to re-layout
-
-    for (auto i = 0U; i < num_children; i++) {
-      const auto flex = this->widget->flexes[i];
-      if (flex == 0) {
-        continue;
-      }
-
-      const auto sizeAllocation = int(flex * remainingSpace / totalFlex);
-      const auto childConstraints =
-        isVertical()
-          ? Constraints{ { constraints.min.width, sizeAllocation },
-                         { constraints.max.width, sizeAllocation } }
-          : Constraints{ { sizeAllocation, constraints.min.height },
-                         { sizeAllocation, constraints.max.height } };
-
-      const auto newSize = this->children[i]->layout(childConstraints);
-
-      // TODO: DRY
-      if (isVertical() ? newSize.height != childSizes[i].height
-                       : newSize.width != childSizes[i].width) {
-        this->markNeedsDraw();
-      }
-
-      childSizes[i] = newSize;
-
-      if (isVertical()) {
-        result.height += childSizes[i].height;
-        result.width = std::max(childSizes[i].width, result.width);
-      } else {
-        result.width += childSizes[i].width;
-        result.height = std::max(childSizes[i].height, result.height);
-      }
-    }
 
     totalSize = isVertical() ? result.height : result.width;
 
@@ -187,6 +127,78 @@ protected:
   }
 
 private:
+  Size layoutNonFlex(Constraints childConstraints) {
+    Size result = { 0, 0 };
+
+    for (auto i = 0U; i < num_children; i++) {
+      if (this->widget->flexes[i] != 0) {
+        continue;
+      }
+
+      // TODO: DRY
+      const auto newSize = this->children[i]->layout(childConstraints);
+      if (isVertical() ? newSize.height != childSizes[i].height
+                       : newSize.width != childSizes[i].width) {
+        this->markNeedsDraw();
+      }
+
+      childSizes[i] = newSize;
+
+      if (isVertical()) {
+        result.height += childSizes[i].height;
+        result.width = std::max(childSizes[i].width, result.width);
+      } else {
+        result.width += childSizes[i].width;
+        result.height = std::max(childSizes[i].height, result.height);
+      }
+    }
+
+    return result;
+  }
+
+  Size layoutFlex(Constraints constraints, Size result) {
+    const auto totalFlex = std::accumulate(
+      this->widget->flexes.begin(), this->widget->flexes.end(), 0);
+    const auto remainingSpace = isVertical()
+                                  ? constraints.max.height - result.height
+                                  : constraints.max.width - result.width;
+
+    for (auto i = 0U; i < num_children; i++) {
+      const auto flex = this->widget->flexes[i];
+      if (flex == 0) {
+        continue;
+      }
+
+      const auto sizeAllocation = int(flex * remainingSpace / totalFlex);
+      const auto childConstraints =
+        isVertical()
+          ? Constraints{ { constraints.min.width, sizeAllocation },
+                         { constraints.max.width, sizeAllocation } }
+          : Constraints{ { sizeAllocation, constraints.min.height },
+                         { sizeAllocation, constraints.max.height } };
+
+      const auto newSize = this->children[i]->layout(childConstraints);
+
+      // TODO: DRY
+      if (isVertical() ? newSize.height != childSizes[i].height
+                       : newSize.width != childSizes[i].width) {
+        this->markNeedsDraw();
+      }
+
+      childSizes[i] = newSize;
+
+      if (isVertical()) {
+        result.height += childSizes[i].height;
+        result.width = std::max(childSizes[i].width, result.width);
+      } else {
+        result.width += childSizes[i].width;
+        result.height = std::max(childSizes[i].height, result.height);
+      }
+    }
+
+    return result;
+  }
+
   constexpr bool isVertical() const { return widget->axis == Axis::Vertical; }
 
   const Flex<Children...>* widget;

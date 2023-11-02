@@ -16,6 +16,9 @@ struct Key {
 
 namespace {
 
+constexpr auto shift_color = 0x55;
+constexpr auto alpha_color = 0xaa;
+
 const std::vector<std::vector<Key>> keymap = {
   { { TILEM_KEY_YEQU, "Y=", "STAT PLOT", "F1" },
     { TILEM_KEY_WINDOW, "WINDOW", "TBLST", "F2" },
@@ -81,7 +84,7 @@ const std::vector<std::vector<Key>> keymap = {
 
 };
 
-}  // namespace
+} // namespace
 
 Keypad::Keypad(TilemCalc* calc) : calc(calc), numRows(keymap.size()) {
   maxRowSize = std::max_element(keymap.begin(),
@@ -90,7 +93,6 @@ Keypad::Keypad(TilemCalc* calc) : calc(calc), numRows(keymap.size()) {
                                   return a.size() < b.size();
                                 })
                  ->size();
-  
 }
 
 std::unique_ptr<rmlib::RenderObject>
@@ -100,8 +102,8 @@ Keypad::createRenderObject() const {
 
 rmlib::Size
 KeypadRenderObject::doLayout(const Constraints& constraints) {
-  keyWidth = constraints.max.width / widget->maxRowSize;
-  keyHeight = keyWidth / key_aspect;
+  keyWidth = int(constraints.max.width / widget->maxRowSize);
+  keyHeight = int(keyWidth / key_aspect);
 
   const auto width = std::clamp(keyWidth * int(widget->maxRowSize),
                                 constraints.min.width,
@@ -109,7 +111,7 @@ KeypadRenderObject::doLayout(const Constraints& constraints) {
   const auto height = std::clamp(keyHeight * int(widget->numRows),
                                  constraints.min.height,
                                  constraints.max.height);
-  padding = constraints.max.width - keyWidth * widget->maxRowSize;
+  padding = int(constraints.max.width - keyWidth * widget->maxRowSize);
 
   return { width, height };
 }
@@ -126,8 +128,8 @@ KeypadRenderObject::drawKey(rmlib::Canvas& canvas,
 
   // Draw front label.
   {
-    const auto fontSize =
-      std::min(frontLabelHeight, int(key_aspect * keyWidth / key.front.size()));
+    const auto fontSize = std::min(
+      frontLabelHeight, int(key_aspect * keyWidth / double(key.front.size())));
     const auto fontSizes = Canvas::getTextSize(key.front, fontSize);
 
     const auto xOffset = (keyWidth - fontSizes.x) / 2;
@@ -146,7 +148,7 @@ KeypadRenderObject::drawKey(rmlib::Canvas& canvas,
     }
 
     const auto fontSize =
-      std::min(upperLabelHeight, int(1.6 * keyWidth / upperLength));
+      std::min(upperLabelHeight, int(1.6 * keyWidth / double(upperLength)));
 
     auto testStr = std::string(key.shift);
     if (!key.alpha.empty()) {
@@ -160,13 +162,13 @@ KeypadRenderObject::drawKey(rmlib::Canvas& canvas,
 
     const auto position = pos + Point{ xOffset, yOffset };
 
-    canvas.drawText(key.shift, position, fontSize, 0x55);
+    canvas.drawText(key.shift, position, fontSize, shift_color);
 
     if (!key.alpha.empty()) {
       const auto spacing =
         Canvas::getTextSize(std::string(key.shift) + " ", fontSize);
       const auto positonA = pos + Point{ xOffset + spacing.x, yOffset };
-      canvas.drawText(key.alpha, positonA, fontSize, 0xaa);
+      canvas.drawText(key.alpha, positonA, fontSize, alpha_color);
     }
   }();
 
@@ -184,7 +186,7 @@ KeypadRenderObject::doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) {
     int padding = this->padding;
     int x = rect.topLeft.x;
     for (const auto& key : row) {
-      auto keyW = int(keyWidth * key.width);
+      auto keyW = int(float(keyWidth) * key.width);
       if (padding > 0) {
         keyW += 1;
         padding -= 1;

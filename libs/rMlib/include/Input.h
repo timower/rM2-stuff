@@ -83,11 +83,6 @@ struct InputDeviceBase {
   void ungrab() const;
   virtual void flood() = 0;
 
-  InputDeviceBase() = default;
-  InputDeviceBase(const InputDeviceBase& other) = delete;
-  InputDeviceBase(InputDeviceBase&& other) = default;
-  InputDeviceBase& operator=(const InputDeviceBase& other) = delete;
-  InputDeviceBase& operator=(InputDeviceBase&& other) = default;
   virtual ~InputDeviceBase() = default;
 
   virtual OptError<> readEvents(std::vector<Event>& out) = 0;

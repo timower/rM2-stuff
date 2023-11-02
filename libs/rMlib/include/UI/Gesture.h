@@ -72,45 +72,15 @@ public:
 
     std::visit(
       [this](const auto& ev) {
+        bool handled = false;
         if constexpr (input::is_pointer_event<decltype(ev)>) {
-          if (ev.isDown() && this->getRect().contains(ev.location) &&
-              currentId == -1) {
-            if (this->widget->gestures.handlesTouch()) {
-              currentId = ev.id;
-            }
-
-            if (this->widget->gestures.onTouchDownFn) {
-              this->widget->gestures.onTouchDownFn(ev.location);
-              return;
-            }
-          }
-
-          if (ev.id == currentId) {
-            if (ev.isUp()) {
-              currentId = -1;
-              if (this->widget->gestures.onTapFn) {
-                this->widget->gestures.onTapFn();
-              }
-              return;
-            }
-
-            if (ev.isMove() && this->widget->gestures.onTouchMoveFn) {
-              this->widget->gestures.onTouchMoveFn(ev.location);
-              return;
-            }
-          }
+          handled = handlePointerEv(ev);
         } else {
-          if (ev.type == input::KeyEvent::Press &&
-              this->widget->gestures.onKeyDownFn) {
-            this->widget->gestures.onKeyDownFn(ev.keyCode);
-            return;
-          }
+          handled = handleKeyEv(ev);
+        }
 
-          if (ev.type == input::KeyEvent::Release &&
-              this->widget->gestures.onKeyUpFn) {
-            this->widget->gestures.onKeyUpFn(ev.keyCode);
-            return;
-          }
+        if (handled) {
+          return;
         }
 
         // If we didn't return yet we didn't handle the event.
@@ -126,6 +96,52 @@ public:
   }
 
 private:
+  template<typename Ev>
+  bool handlePointerEv(const Ev& ev) {
+    if (ev.isDown() && this->getRect().contains(ev.location) &&
+        currentId == -1) {
+      if (this->widget->gestures.handlesTouch()) {
+        currentId = ev.id;
+      }
+
+      if (this->widget->gestures.onTouchDownFn) {
+        this->widget->gestures.onTouchDownFn(ev.location);
+        return true;
+      }
+    }
+
+    if (ev.id == currentId) {
+      if (ev.isUp()) {
+        currentId = -1;
+        if (this->widget->gestures.onTapFn) {
+          this->widget->gestures.onTapFn();
+        }
+        return true;
+      }
+
+      if (ev.isMove() && this->widget->gestures.onTouchMoveFn) {
+        this->widget->gestures.onTouchMoveFn(ev.location);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool handleKeyEv(const input::KeyEvent& ev) {
+    if (ev.type == input::KeyEvent::Press &&
+        this->widget->gestures.onKeyDownFn) {
+      this->widget->gestures.onKeyDownFn(ev.keyCode);
+      return true;
+    }
+
+    if (ev.type == input::KeyEvent::Release &&
+        this->widget->gestures.onKeyUpFn) {
+      this->widget->gestures.onKeyUpFn(ev.keyCode);
+      return true;
+    }
+    return false;
+  }
+
   int currentId = -1;
 };
 

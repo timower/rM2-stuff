@@ -67,7 +67,7 @@ public:
   using SingleChildRenderObject<Padding<Child>>::SingleChildRenderObject;
 
   void update(const Padding<Child>& newWidget) {
-    if (/*newWidget.insets != widget->insets*/ false) {
+    if (newWidget.insets != this->widget->insets) {
       this->markNeedsLayout();
       this->markNeedsDraw();
     }

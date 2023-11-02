@@ -167,7 +167,7 @@ protected:
     rootConstraints = Constraints{ fbSize, fbSize };
   }
 
-  fb::FrameBuffer framebuffer;
+  fb::FrameBuffer framebuffer; // NOLINT (not private)
 
 private:
   input::InputManager inputManager;

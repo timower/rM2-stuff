@@ -12,7 +12,7 @@ class AppContext;
 class RenderObject;
 
 struct BuildContext {
-  const RenderObject& renderObject;
+  const RenderObject& renderObject; // NOLINT (TODO)
   const BuildContext* parent;
 
   BuildContext(const RenderObject& ro, const BuildContext* parent)
@@ -22,11 +22,11 @@ struct BuildContext {
   const RO* getRenderObject() const;
 };
 
-class RenderObject {
-  static inline int roCount = 0;
+class RenderObject {             // NOLINT (DEBUG, custom destructor)
+  static inline int roCount = 0; // NOLINT (DEBUG)
 
 public:
-  RenderObject(type_id::TypeIdT typeID) : mTypeID(typeID), mID(roCount++) {
+  RenderObject(type_id::TypeIdT typeID) : mID(roCount++), mTypeID(typeID) {
 #ifndef NDEBUG
     std::cout << "alloc RO: " << mID << "\n";
 #endif
@@ -139,11 +139,14 @@ protected:
   bool isPartialDraw() const { return mNeedsDraw == Partial; }
   bool isFullDraw() const { return mNeedsDraw == Full; }
 
-  type_id::TypeIdT mTypeID;
-  std::optional<BuildContext> buildContext;
+  const BuildContext* getBuildContext() const {
+    return buildContext.has_value() ? &*buildContext : nullptr;
+  }
 
 private:
   int mID;
+  type_id::TypeIdT mTypeID;
+
   rmlib::Rect rect;
 
   Size lastSize = { 0, 0 };
@@ -158,10 +161,11 @@ private:
   enum { No, Full, Partial } mNeedsDraw = Full;
 
   bool mNeedsRebuild = false;
+  std::optional<BuildContext> buildContext;
 
 #ifndef NDEBUG
 protected:
-  bool mInRebuild = false;
+  bool mInRebuild = false; // NOLINT (DEBUG)
 #endif
 };
 
@@ -236,7 +240,7 @@ public:
 #ifndef NDEBUG
     mInRebuild = true;
 #endif
-    child->rebuild(context, &*buildContext);
+    child->rebuild(context, getBuildContext());
 #ifndef NDEBUG
     mInRebuild = false;
 #endif
@@ -248,7 +252,7 @@ public:
   }
 
   std::vector<RenderObject*> getChildren() final { return { child.get() }; }
-  const Widget& getWidget() { return *widget; }
+  const Widget& getWidget() const { return *widget; }
 
 protected:
   Size doLayout(const Constraints& constraints) override {
@@ -334,7 +338,7 @@ public:
     mInRebuild = true;
 #endif
     for (const auto& child : children) {
-      child->rebuild(context, &*buildContext);
+      child->rebuild(context, getBuildContext());
     }
 
 #ifndef NDEBUG

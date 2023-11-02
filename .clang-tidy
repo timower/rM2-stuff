@@ -3,6 +3,8 @@ Checks:
 #,-google-readability-todo,-cppcoreguidelines-pro-bounds-array-to-pointer-decay,-modernize-use-nodiscard,-cppcoreguidelines-macro-usage,-*-magic-numbers,performance-*,bugprone-*,-cppcoreguidelines-non-private-member-variables-in-classes,-bugprone-exception-escape,-modernize-use-trailing-return-type,-cppcoreguidelines-pro-type-vararg,-cppcoreguidelines-pro-bounds-pointer-arithmetic,-readability-identifier-length,-google-readability-casting,-bugprone-easily-swappable-parameters'
 HeaderFilterRegex: 'libs/|apps/|tools/|test/'
 CheckOptions:
+  - key: cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor
+    value: true
   - key: readability-identifier-naming.AbstractClassCase
     value: CamelCase
   - key: readability-identifier-naming.ClassCase
