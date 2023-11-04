@@ -38,3 +38,21 @@ function(add_deploy target)
     DEPENDS deploy_${target}
     USES_TERMINAL)
 endfunction()
+
+
+function(add_opkg_targets)
+  if ("${SCP}" STREQUAL "SCP-NOTFOUND" OR "${SSH}" STREQUAL "SSH-NOTFOUND")
+    return()
+  endif()
+
+  get_cmake_property(all_comps COMPONENTS)
+  list(REMOVE_ITEM all_comps "Unspecified")
+
+  foreach(comp IN LISTS all_comps)
+    add_custom_target(opkg_${comp}
+      COMMAND "${SCP}" "${CMAKE_BINARY_DIR}/${comp}.ipk" "${SSH_HOST}:"
+      COMMAND "${SSH}" "${SSH_HOST}" bash -l -c "'opkg install ${comp}.ipk'"
+      DEPENDS package)
+  endforeach()
+
+endfunction()

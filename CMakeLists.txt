@@ -35,3 +35,5 @@ configure_file("${PROJECT_SOURCE_DIR}/cmake/CPackOptions.cmake.in"
 set(CPACK_PROJECT_CONFIG_FILE "${PROJECT_BINARY_DIR}/CPackOptions.cmake")
 
 include(CPack)
+
+add_opkg_targets()
