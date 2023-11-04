@@ -120,13 +120,16 @@ __libc_start_main(int (*_main)(int, char**, char**),
   setenv("RM2STUFF_RM2FB", "1", true);
 
   if (fb.mem == nullptr) {
+    std::cout << "No rm2fb shared memory\n";
     return EXIT_FAILURE;
   }
 
   if (!clientSock.init(nullptr)) {
+    std::cout << "No rm2fb socket\n";
     return EXIT_FAILURE;
   }
   if (!clientSock.connect(DEFAULT_SOCK_ADDR)) {
+    std::cout << "No rm2fb socket\n";
     return EXIT_FAILURE;
   }
 

@@ -29,6 +29,9 @@ add_library(rm2fb_client SHARED
 target_compile_features(rm2fb_client PUBLIC cxx_std_17)
 target_link_libraries(rm2fb_client
   PRIVATE unistdpp linux::mxcfb Frida::Gum rt dl)
+set_target_properties(rm2fb_client PROPERTIES
+  VERSION "1.1.0"
+  SOVERSION "1")
 
 # Utility target that builds both the client and server libs.
 add_custom_target(rm2fb DEPENDS rm2fb_client rm2fb_server)
