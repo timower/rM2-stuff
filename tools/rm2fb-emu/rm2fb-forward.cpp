@@ -41,54 +41,6 @@ setupExitHandler() {
     exit(EXIT_FAILURE);
   }
 }
-
-bool
-doUpdate(const FD& fd, const UpdateParams& params) {
-  static_assert(sizeof(UpdateParams) == sizeof(Params), "Params wrong size?");
-  if (auto res = fd.writeAll(params); !res) {
-    std::cerr << "Error writing: " << toString(res.error()) << "\n";
-    exit(EXIT_FAILURE);
-  }
-
-  int width = params.x2 - params.x1 + 1;
-  int height = params.y2 - params.y1 + 1;
-  int size = width * height;
-  std::vector<uint16_t> buffer(size);
-
-  for (int row = 0; row < height; row++) {
-    int fbRow = row + params.y1;
-
-    memcpy(buffer.data() + row * width,
-           fb.mem + fbRow * fb_width + params.x1,
-           width * sizeof(uint16_t));
-  }
-
-  int writeSize = size * sizeof(uint16_t);
-  auto res = fd.writeAll(buffer.data(), writeSize);
-  if (!res) {
-    std::cerr << "Error writing: " << toString(res.error()) << "\n";
-    exit(EXIT_FAILURE);
-  }
-
-  return true;
-}
-
-// Starts a tcp server and waits for a client to connect.
-Result<FD>
-getTcpSocket(int port) {
-  auto listenfd = TRY(unistdpp::socket(AF_INET, SOCK_STREAM, 0));
-
-  // lose the pesky "Address already in use" error message
-  int yes = 1;
-  TRY(unistdpp::setsockopt(
-    listenfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)));
-
-  TRY(unistdpp::bind(listenfd, Address::fromHostPort(INADDR_ANY, port)));
-  TRY(unistdpp::listen(listenfd, 1));
-
-  return unistdpp::accept(listenfd, nullptr, nullptr);
-}
-
 struct libevdev_uinput*
 makeWacomDevice() {
   auto* dev = libevdev_new();
@@ -237,6 +189,37 @@ makeButtonDevice() {
   return uidev;
 }
 
+bool
+doUpdate(const FD& fd, const UpdateParams& params) {
+  static_assert(sizeof(UpdateParams) == sizeof(Params), "Params wrong size?");
+  if (auto res = fd.writeAll(params); !res) {
+    std::cerr << "Error writing: " << toString(res.error()) << "\n";
+    exit(EXIT_FAILURE);
+  }
+
+  int width = params.x2 - params.x1 + 1;
+  int height = params.y2 - params.y1 + 1;
+  int size = width * height;
+  std::vector<uint16_t> buffer(size);
+
+  for (int row = 0; row < height; row++) {
+    int fbRow = row + params.y1;
+
+    memcpy(buffer.data() + row * width,
+           fb.mem + fbRow * fb_width + params.x1,
+           width * sizeof(uint16_t));
+  }
+
+  int writeSize = size * sizeof(uint16_t);
+  auto res = fd.writeAll(buffer.data(), writeSize);
+  if (!res) {
+    std::cerr << "Error writing: " << toString(res.error()) << "\n";
+    exit(EXIT_FAILURE);
+  }
+
+  return true;
+}
+
 void
 handleInput(const Input& inp, libevdev_uinput& dev) {
   constexpr auto wacom_width = 15725;
@@ -260,6 +243,22 @@ handleInput(const Input& inp, libevdev_uinput& dev) {
   libevdev_uinput_write_event(&dev, EV_SYN, SYN_REPORT, 0);
 }
 
+// Starts a tcp server and waits for a client to connect.
+Result<FD>
+getTcpSocket(int port) {
+  auto listenfd = TRY(unistdpp::socket(AF_INET, SOCK_STREAM, 0));
+
+  // lose the pesky "Address already in use" error message
+  int yes = 1;
+  TRY(unistdpp::setsockopt(
+    listenfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)));
+
+  TRY(unistdpp::bind(listenfd, Address::fromHostPort(INADDR_ANY, port)));
+  TRY(unistdpp::listen(listenfd, 1));
+
+  // return unistdpp::accept(listenfd, nullptr, nullptr);
+  return listenfd;
+}
 } // namespace
 
 int
@@ -287,36 +286,67 @@ main() {
   if (fb.mem == nullptr) {
     return EXIT_FAILURE;
   }
-  memset(fb.mem, 0xff, fb_size);
+  memset(fb.mem, UINT8_MAX, fb_size);
 
-  std::cout << "Waiting for connection on port 8888\n";
-  auto tcpFd = getTcpSocket(8888);
+  constexpr auto port = 8888;
+  std::cout << "Listening for TCP connections on: " << port << "\n";
+  auto tcpFd = getTcpSocket(port);
   if (!tcpFd) {
     std::cerr << "Unable to get TCP connection\n";
     return EXIT_FAILURE;
   }
 
+  constexpr auto tcp_poll_idx = 0;
+  constexpr auto server_poll_idx = 1;
+  constexpr auto fixed_poll_fds = server_poll_idx + 1;
+
+  std::vector<unistdpp::FD> clientSocks;
+
   std::cout << "SWTCON :p!\n";
   while (running) {
-    std::vector<pollfd> pollfds = { waitFor(*tcpFd, Wait::Read),
-                                    waitFor(serverSock.sock, Wait::Read) };
+    std::vector<pollfd> pollfds(fixed_poll_fds);
+    pollfds.reserve(clientSocks.size() + fixed_poll_fds);
+    pollfds[tcp_poll_idx] = waitFor(*tcpFd, Wait::Read);
+    pollfds[server_poll_idx] = waitFor(serverSock.sock, Wait::Read);
+    std::transform(
+      clientSocks.begin(),
+      clientSocks.end(),
+      std::back_inserter(pollfds),
+      [](const auto& client) { return waitFor(client, Wait::Read); });
+
     auto res = unistdpp::poll(pollfds);
     if (!res) {
       std::cerr << "Poll error: " << toString(res.error()) << "\n";
       break;
     }
 
-    if (canRead(pollfds[1])) {
+    if (canRead(pollfds[tcp_poll_idx])) {
+      auto clientOrErr = unistdpp::accept(*tcpFd, nullptr, nullptr);
+      if (clientOrErr) {
+        std::cout << "Got new client!\n";
+        clientSocks.emplace_back(std::move(*clientOrErr));
+        pollfds.push_back(waitFor(clientSocks.back(), Wait::Read));
+      } else if (!clientOrErr) {
+        std::cerr << "Client accept errror: " << toString(clientOrErr.error())
+                  << "\n";
+      }
+    }
+
+    if (canRead(pollfds[server_poll_idx])) {
       auto result =
         serverSock.recvfrom<UpdateParams>().and_then([&](auto result) {
           auto [msg, addr] = result;
 
-          bool res = doUpdate(*tcpFd, msg);
+          auto res = false;
+          for (const auto& clientSock : clientSocks) {
+            res |= doUpdate(clientSock, msg);
+          }
 
           // Don't log Stroke updates
           if (msg.flags != 4) {
             std::cerr << "UPDATE " << msg << ": " << res << "\n";
           }
+
           return serverSock.sendto(res, addr);
         });
       if (!result) {
@@ -324,8 +354,13 @@ main() {
       }
     }
 
-    if (canRead(pollfds[0])) {
-      tcpFd->readAll<Input>()
+    for (size_t idx = fixed_poll_fds; idx < pollfds.size(); idx++) {
+      if (!canRead(pollfds[idx])) {
+        continue;
+      }
+
+      auto& clientSock = clientSocks[idx - fixed_poll_fds];
+      clientSock.readAll<Input>()
         .map([&](auto input) {
           if (uinputDev != nullptr) {
             handleInput(input, *uinputDev);
@@ -333,9 +368,18 @@ main() {
         })
         .or_else([&](auto err) {
           std::cerr << "Reading input: " << toString(err) << "\n";
-          running = false;
+          if (err == unistdpp::FD::eof_error) {
+            clientSock.close();
+          }
         });
     }
+
+    // Remove closed clients
+    clientSocks.erase(
+      std::remove_if(clientSocks.begin(),
+                     clientSocks.end(),
+                     [](const auto& sock) { return !sock.isValid(); }),
+      clientSocks.end());
   }
 
   if (buttonDev != nullptr) {
