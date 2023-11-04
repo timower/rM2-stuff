@@ -90,7 +90,7 @@ getTcpSocket(int port) {
 }
 
 struct libevdev_uinput*
-makeDevice() {
+makeWacomDevice() {
   auto* dev = libevdev_new();
 
   libevdev_set_name(dev, "Wacom I2C Digitizer");
@@ -127,7 +127,103 @@ makeDevice() {
   libevdev_enable_event_code(dev, EV_ABS, ABS_TILT_X, &info);
   libevdev_enable_event_code(dev, EV_ABS, ABS_TILT_Y, &info);
 
-  struct libevdev_uinput* uidev;
+  struct libevdev_uinput* uidev = nullptr;
+  auto err = libevdev_uinput_create_from_device(
+    dev, LIBEVDEV_UINPUT_OPEN_MANAGED, &uidev);
+  if (err != 0) {
+    perror("uintput");
+    std::cerr << "Error making uinput device\n";
+    return nullptr;
+  }
+
+  std::cout << "Added uintput device\n";
+
+  return uidev;
+}
+
+struct libevdev_uinput*
+makeTouchDevice() {
+  auto* dev = libevdev_new();
+
+  libevdev_set_name(dev, "pt_mt");
+  libevdev_enable_event_type(dev, EV_SYN);
+
+  libevdev_enable_event_type(dev, EV_KEY);
+  libevdev_enable_event_code(dev, EV_KEY, KEY_F1, nullptr);
+  libevdev_enable_event_code(dev, EV_KEY, KEY_F2, nullptr);
+  libevdev_enable_event_code(dev, EV_KEY, KEY_F3, nullptr);
+  libevdev_enable_event_code(dev, EV_KEY, KEY_F4, nullptr);
+  libevdev_enable_event_code(dev, EV_KEY, KEY_F5, nullptr);
+  libevdev_enable_event_code(dev, EV_KEY, KEY_F6, nullptr);
+  libevdev_enable_event_code(dev, EV_KEY, KEY_F7, nullptr);
+  libevdev_enable_event_code(dev, EV_KEY, KEY_F8, nullptr);
+
+  libevdev_enable_event_type(dev, EV_REL);
+  libevdev_enable_event_type(dev, EV_ABS);
+  struct input_absinfo info = {};
+  info.resolution = 0;
+
+  info.minimum = 0;
+  info.maximum = 255;
+  libevdev_enable_event_code(dev, EV_ABS, ABS_DISTANCE, &info);
+
+  info.minimum = 0;
+  info.maximum = 31;
+  libevdev_enable_event_code(dev, EV_ABS, ABS_MT_SLOT, &info);
+
+  info.minimum = 0;
+  info.maximum = 255;
+  libevdev_enable_event_code(dev, EV_ABS, ABS_MT_TOUCH_MAJOR, &info);
+  libevdev_enable_event_code(dev, EV_ABS, ABS_MT_TOUCH_MINOR, &info);
+
+  info.minimum = -127;
+  info.maximum = 127;
+  libevdev_enable_event_code(dev, EV_ABS, ABS_MT_ORIENTATION, &info);
+
+  info.minimum = 0;
+  info.maximum = 1403;
+  libevdev_enable_event_code(dev, EV_ABS, ABS_MT_POSITION_X, &info);
+  info.minimum = 0;
+  info.maximum = 1871;
+  libevdev_enable_event_code(dev, EV_ABS, ABS_MT_POSITION_Y, &info);
+
+  info.minimum = 0;
+  info.maximum = 1;
+  libevdev_enable_event_code(dev, EV_ABS, ABS_MT_TOOL_TYPE, &info);
+
+  info.minimum = 0;
+  info.maximum = 65535;
+  libevdev_enable_event_code(dev, EV_ABS, ABS_MT_TRACKING_ID, &info);
+
+  info.minimum = 0;
+  info.maximum = 255;
+  libevdev_enable_event_code(dev, EV_ABS, ABS_MT_PRESSURE, &info);
+
+  struct libevdev_uinput* uidev = nullptr;
+  auto err = libevdev_uinput_create_from_device(
+    dev, LIBEVDEV_UINPUT_OPEN_MANAGED, &uidev);
+  if (err != 0) {
+    perror("uintput");
+    std::cerr << "Error making uinput device\n";
+    return nullptr;
+  }
+
+  std::cout << "Added uintput device\n";
+
+  return uidev;
+}
+
+struct libevdev_uinput*
+makeButtonDevice() {
+  auto* dev = libevdev_new();
+
+  libevdev_set_name(dev, "30371337.snvs:snvs-powerkey");
+  libevdev_enable_event_type(dev, EV_SYN);
+
+  libevdev_enable_event_type(dev, EV_KEY);
+  libevdev_enable_event_code(dev, EV_KEY, KEY_POWER, nullptr);
+
+  struct libevdev_uinput* uidev = nullptr;
   auto err = libevdev_uinput_create_from_device(
     dev, LIBEVDEV_UINPUT_OPEN_MANAGED, &uidev);
   if (err != 0) {
@@ -171,7 +267,9 @@ main() {
   setupExitHandler();
   std::cout << "Mem: " << fb.mem << "\n";
 
-  auto* uinputDev = makeDevice();
+  auto* buttonDev = makeButtonDevice();
+  auto* uinputDev = makeWacomDevice();
+  auto* touchDev = makeTouchDevice();
 
   const char* socketAddr = DEFAULT_SOCK_ADDR;
 
@@ -228,12 +326,28 @@ main() {
 
     if (canRead(pollfds[0])) {
       tcpFd->readAll<Input>()
-        .map([&](auto input) { handleInput(input, *uinputDev); })
+        .map([&](auto input) {
+          if (uinputDev != nullptr) {
+            handleInput(input, *uinputDev);
+          }
+        })
         .or_else([&](auto err) {
           std::cerr << "Reading input: " << toString(err) << "\n";
           running = false;
         });
     }
+  }
+
+  if (buttonDev != nullptr) {
+    libevdev_uinput_destroy(buttonDev);
+  }
+
+  if (touchDev != nullptr) {
+    libevdev_uinput_destroy(touchDev);
+  }
+
+  if (uinputDev != nullptr) {
+    libevdev_uinput_destroy(uinputDev);
   }
 
   return 0;
