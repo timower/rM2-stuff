@@ -1,9 +1,13 @@
+project(rm2fb)
+
+add_library(rm2fb_headers INTERFACE)
+target_include_directories(rm2fb_headers
+  INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
+
 # rm2fb uses Linux APIs extensively
 if (NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
   return()
 endif()
-
-project(rm2fb)
 
 find_package(PkgConfig)
 pkg_check_modules(LIBEVDEV libevdev REQUIRED)

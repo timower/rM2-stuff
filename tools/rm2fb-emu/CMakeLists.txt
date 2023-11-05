@@ -12,7 +12,7 @@ target_link_libraries(${PROJECT_NAME}
   PRIVATE
     unistdpp
     rMlib
-    rm2fb_lib)
+    rm2fb_headers)
 
 project(rm2fb-test)
 add_executable(${PROJECT_NAME} rm2fb-test.cpp)
