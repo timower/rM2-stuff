@@ -24,7 +24,7 @@ struct Error {
 };
 
 inline std::string
-to_string(const Error& err) {
+to_string(const Error& err) { // NOLINT
   return err.msg;
 }
 
@@ -39,7 +39,7 @@ T
 fatalOnError(tl::expected<T, E> error) {
   if (!error.has_value()) {
     using namespace std;
-    std::cerr << "FATA: " << to_string(error.error()) << std::endl;
+    std::cerr << "FATAL: " << to_string(error.error()) << std::endl;
     std::abort();
   }
 

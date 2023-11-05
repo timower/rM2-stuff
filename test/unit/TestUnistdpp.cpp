@@ -121,8 +121,8 @@ TEST_CASE("poll", "[unistdpp]") {
   auto [read2, write2] = std::move(*pipe2);
 
   std::vector<pollfd> pollfds;
-  pollfds.emplace_back(waitFor(read1, Wait::READ));
-  pollfds.emplace_back(waitFor(read2, Wait::READ));
+  pollfds.emplace_back(waitFor(read1, Wait::Read));
+  pollfds.emplace_back(waitFor(read2, Wait::Read));
 
   constexpr auto nowait = std::chrono::milliseconds(0);
 
@@ -130,7 +130,7 @@ TEST_CASE("poll", "[unistdpp]") {
   REQUIRE(res.has_value());
   REQUIRE(*res == 0);
 
-  pollfds.emplace_back(waitFor(write1, Wait::WRITE));
+  pollfds.emplace_back(waitFor(write1, Wait::Write));
   res = unistdpp::poll(pollfds, nowait);
   REQUIRE(res);
   REQUIRE(*res == 1);

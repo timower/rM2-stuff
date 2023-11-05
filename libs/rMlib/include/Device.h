@@ -10,6 +10,7 @@
 /// Contains any device specific information.
 namespace rmlib::device {
 
+// NOLINTNEXTLINE
 enum class DeviceType { reMarkable1, reMarkable2 };
 
 /// \returns The device type on which we're currently running or nullopt if
@@ -19,8 +20,8 @@ getDeviceType();
 
 enum class InputType { MultiTouch, Pen, Key };
 struct BaseDevice {
-  InputType type;
-  Transform transform;
+  InputType type = InputType::MultiTouch;
+  Transform transform = {};
 };
 
 std::optional<BaseDevice>
@@ -32,6 +33,6 @@ std::vector<std::string>
 listDirectory(std::string_view path, bool onlyFiles = true);
 
 bool
-IsPogoConnected();
+isPogoConnected();
 
 } // namespace rmlib::device

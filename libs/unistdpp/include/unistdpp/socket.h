@@ -19,16 +19,23 @@ struct Address {
   static Address fromHostPort(int32_t host, int port);
   static Result<Address> fromHostPort(std::string_view host, int port);
 
-  sockaddr* ptr() noexcept { return reinterpret_cast<sockaddr*>(&storage); }
-  const sockaddr* ptr() const noexcept {
+  [[nodiscard]] sockaddr* ptr() noexcept {
+    // NOLINTNEXTLINE
+    return reinterpret_cast<sockaddr*>(&storage);
+  }
+
+  [[nodiscard]] const sockaddr* ptr() const noexcept {
+    // NOLINTNEXTLINE
     return reinterpret_cast<const sockaddr*>(&storage);
   }
 
-  sa_family_t type() const noexcept { return ptr()->sa_family; }
+  [[nodiscard]] sa_family_t type() const noexcept { return ptr()->sa_family; }
 
-  socklen_t size() const noexcept { return addressSize; }
+  [[nodiscard]] socklen_t size() const noexcept { return addressSize; }
+  [[nodiscard]] socklen_t* sizePtr() noexcept { return &addressSize; }
 
-  std::aligned_union_t<0, sockaddr_un, sockaddr_in> storage;
+private:
+  std::aligned_union_t<0, sockaddr_un, sockaddr_in> storage = {};
   socklen_t addressSize = sizeof(storage);
 };
 
@@ -42,15 +49,16 @@ struct WrapperTraits<const Address&> {
 template<>
 struct WrapperTraits<const Address*> {
   static std::tuple<const sockaddr*, socklen_t> arg(const Address* addr) {
-    return { addr ? addr->ptr() : nullptr, addr ? addr->size() : 0 };
+    return { addr != nullptr ? addr->ptr() : nullptr,
+             addr != nullptr ? addr->size() : 0 };
   }
 };
 
 template<>
 struct WrapperTraits<Address*> {
   static std::tuple<sockaddr*, socklen_t*> arg(Address* addr) {
-    return { addr ? addr->ptr() : nullptr,
-             addr ? &addr->addressSize : nullptr };
+    return { addr != nullptr ? addr->ptr() : nullptr,
+             addr != nullptr ? addr->sizePtr() : nullptr };
   }
 };
 
@@ -67,7 +75,7 @@ constexpr auto setsockopt =
 
 // int
 // bind(int socket, const struct sockaddr *address, socklen_t address_len);
-constexpr auto bindRaw =
+constexpr auto bind_raw =
   FnWrapper<::bind, Result<void>(const FD& fd, const sockaddr*, socklen_t)>{};
 constexpr auto bind =
   FnWrapper<::bind, Result<void>(const FD& fd, const Address&)>{};
@@ -84,7 +92,7 @@ constexpr auto accept =
 
 // int connect(int socket, const struct sockaddr *address,
 //             socklen_t address_len);
-constexpr auto connectRaw =
+constexpr auto connect_raw =
   FnWrapper<::connect, Result<void>(const FD&, const sockaddr*, socklen_t)>{};
 constexpr auto connect =
   FnWrapper<::connect, Result<void>(const FD&, const Address&)>{};

@@ -6,15 +6,15 @@
 #include <chrono>
 
 #include <atomic>
+#include <csignal>
 #include <iostream>
-#include <signal.h>
 #include <thread>
 
 #if EMULATE_UINPUT
 #include <libevdev/libevdev-uinput.h>
 #endif
 
-bool rmlib_disable_window = false;
+bool rmlibDisableWindow = false; // NOLINT
 
 namespace rmlib::fb {
 namespace {
@@ -24,9 +24,11 @@ constexpr auto canvas_components = 2;
 constexpr auto window_width = canvas_width / EMULATE_SCALE;
 constexpr auto window_height = canvas_height / EMULATE_SCALE;
 
+constexpr int emulated_fd = 1337;
+
 // Global window for emulation.
-SDL_Window* window = nullptr;
-std::unique_ptr<uint8_t[]> emuMem;
+SDL_Window* window = nullptr;      // NOLINT
+std::unique_ptr<uint8_t[]> emuMem; // NOLINT
 
 void
 putpixel(SDL_Surface* surface, int x, int y, Uint32 pixel) {
@@ -36,38 +38,14 @@ putpixel(SDL_Surface* surface, int x, int y, Uint32 pixel) {
 
   int bpp = surface->format->BytesPerPixel;
   /* Here p is the address to the pixel we want to set */
-  Uint8* p = (Uint8*)surface->pixels + y * surface->pitch + x * bpp;
-
-  switch (bpp) {
-    case 1:
-      *p = pixel;
-      break;
-
-    case 2:
-      *(Uint16*)p = pixel;
-      break;
-
-    case 3:
-      if (SDL_BYTEORDER == SDL_BIG_ENDIAN) {
-        p[0] = (pixel >> 16) & 0xff;
-        p[1] = (pixel >> 8) & 0xff;
-        p[2] = pixel & 0xff;
-      } else {
-        p[0] = pixel & 0xff;
-        p[1] = (pixel >> 8) & 0xff;
-        p[2] = (pixel >> 16) & 0xff;
-      }
-      break;
-
-    case 4:
-      *(Uint32*)p = pixel;
-      break;
-  }
+  auto* p = // NOLINTNEXTLINE
+    reinterpret_cast<Uint8*>(surface->pixels) + y * surface->pitch + x * bpp;
+  memcpy(p, &pixel, bpp);
 }
 
 ErrorOr<Canvas>
 makeEmulatedCanvas() {
-  if (!rmlib_disable_window) {
+  if (!rmlibDisableWindow) {
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
       return Error::make(std::string("could not initialize sdl2:") +
                          SDL_GetError());
@@ -79,29 +57,31 @@ makeEmulatedCanvas() {
                               window_width,
                               window_height,
                               SDL_WINDOW_SHOWN);
-    if (window == NULL) {
+    if (window == nullptr) {
       return Error::make(std::string("could not create window:") +
                          SDL_GetError());
     }
 
+    constexpr auto clear_color = 0x1f << 3;
     auto* screenSurface = SDL_GetWindowSurface(window);
     SDL_FillRect(
       screenSurface,
-      NULL,
-      SDL_MapRGB(screenSurface->format, 0x1F << 3, 0x1F << 3, 0x1F << 3));
+      nullptr,
+      SDL_MapRGB(screenSurface->format, clear_color, clear_color, clear_color));
     SDL_UpdateWindowSurface(window);
   }
 
+  constexpr auto clear_color = 0xaa;
   const auto memSize = canvas_width * canvas_height * canvas_components;
-  emuMem = std::make_unique<uint8_t[]>(memSize);
-  memset(emuMem.get(), 0xaa, memSize);
+  emuMem = std::make_unique<uint8_t[]>(memSize); // NOLINT
+  memset(emuMem.get(), clear_color, memSize);
   return Canvas(emuMem.get(), canvas_width, canvas_height, canvas_components);
 }
 
 void
 updateEmulatedCanvas(const Canvas& canvas, Rect region) {
   std::cout << "Update: " << region << "\n";
-  if (rmlib_disable_window) {
+  if (rmlibDisableWindow) {
     return;
   }
 
@@ -144,9 +124,9 @@ updateEmulatedCanvas(const Canvas& canvas, Rect region) {
 
       if (y == surfStart.y || y == surfEnd.y || x == surfStart.x ||
           x == surfEnd.x) {
-        r = color == 2 ? 0xff : 0x00;
-        g = color == 1 ? 0xff : 0x00;
-        b = color == 0 ? 0xff : 0x00;
+        r = color == 2 ? UINT8_MAX : 0x00;
+        g = color == 1 ? UINT8_MAX : 0x00;
+        b = color == 0 ? UINT8_MAX : 0x00;
       }
 
       putpixel(surface, x, y, SDL_MapRGB(surface->format, r, g, b));
@@ -286,12 +266,12 @@ FrameBuffer::open() {
   }
 #endif
 
-  return FrameBuffer(FrameBuffer::rM2Stuff, 1337, canvas);
+  return FrameBuffer(FrameBuffer::rM2Stuff, unistdpp::FD(emulated_fd), canvas);
 }
 
 void
 FrameBuffer::close() {
-  if (fd == 1337) {
+  if (fd.fd == emulated_fd) {
 #if EMULATE_UINPUT
     stop_input = true;
     inputThread.join();
@@ -299,7 +279,7 @@ FrameBuffer::close() {
 
     SDL_DestroyWindow(window);
     window = nullptr;
-    fd = -1;
+    fd.fd = unistdpp::FD::invalid_fd;
   }
 }
 

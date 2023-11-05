@@ -22,10 +22,10 @@
 using namespace rmlib;
 
 // TODO: move somewhere?
-extern bool rmlib_disable_window;
+extern bool rmlibDisableWindow;
 
 const auto disable_window_on_start = [] {
-  rmlib_disable_window = true;
+  rmlibDisableWindow = true;
   return true;
 }();
 
@@ -359,4 +359,23 @@ TEST_CASE("Navigator", "[rmlib][ui]") {
   REQUIRE_THAT(navTest, ctx.matchesGolden("nav-init.png"));
 }
 
+namespace static_tests {
+static_assert(Transform::identity() * Point{ 4, 10 } == Point{ 4, 10 });
+static_assert(Transform::scale(4, 2) * Point{ 4, 10 } == Point{ 16, 20 });
+static_assert(Transform::translate({ -1, 2 }) * Point{ 4, 10 } ==
+              Point{ 3, 12 });
+
+static_assert((Transform::translate({ -1, 2 }) * Transform::scale(4, 2)) *
+                Point{ 4, 10 } ==
+              Point{ 15, 22 });
+static_assert((Transform::scale(4, 2) * Transform::translate({ -1, 2 })) *
+                Point{ 4, 10 } ==
+              Point{ 12, 24 });
+
+static_assert(Transform{ { { { 0, 1 }, { 1, 0 } } }, { 0, 0 } } *
+                Point{ 4, 10 } ==
+              Point{ 10, 4 });
+} // namespace static_tests
+
 // TODO: image, colored, Positioned
+//

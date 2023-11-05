@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.19)
 
-project(rm2-stuff VERSION 0.0.1 LANGUAGES CXX)
+project(rm2-stuff VERSION 0.0.1 LANGUAGES CXX C)
 
 set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 

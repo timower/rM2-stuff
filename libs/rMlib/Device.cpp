@@ -20,8 +20,8 @@ constexpr auto wacom_width = 15725;
 constexpr auto wacom_height = 20967;
 
 constexpr auto wacom_transform =
-  Transform{ { { 0, float(screen_width) / wacom_width },
-               { -float(screen_height) / wacom_height, 0 } },
+  Transform{ { { { 0, float(screen_width) / wacom_width },
+                 { -float(screen_height) / wacom_height, 0 } } },
              { 0, screen_height } };
 
 struct BaseDeviceName : BaseDevice {
@@ -33,8 +33,8 @@ using BaseDevices = std::array<BaseDeviceName, 3>;
 const BaseDevices rm1_paths = { {
   // touch
   { { InputType::MultiTouch,
-      Transform{ { { -float(screen_width) / rm1_touch_width, 0 },
-                   { 0, -float(screen_height) / rm1_touch_height } },
+      Transform{ { { { -float(screen_width) / rm1_touch_width, 0 },
+                     { 0, -float(screen_height) / rm1_touch_height } } },
                  { screen_width, screen_height } } },
     "cyttsp5_mt" },
 
@@ -48,7 +48,7 @@ const BaseDevices rm1_paths = { {
 const BaseDevices rm2_paths = { {
   // touch
   { { InputType::MultiTouch,
-      Transform{ { { 1, 0 }, { 0, -1 } }, { 0, screen_height } } },
+      Transform{ { { { 1, 0 }, { 0, -1 } } }, { 0, screen_height } } },
     "pt_mt" },
 
   // pen
@@ -123,7 +123,7 @@ listDirectory(std::string_view path, bool onlyFiles) {
 }
 
 bool
-IsPogoConnected() {
+isPogoConnected() {
 #ifndef EMULATE
   constexpr auto path = "/sys/pogo/status/pogo_connected";
 #else

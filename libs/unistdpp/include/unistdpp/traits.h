@@ -29,17 +29,18 @@ struct FnWrapper;
 
 /// Exposes lower level C APIs to C++, using the wrapper traits to translate
 /// arguments.
-template<auto Fn, typename Res, typename... Args>
-struct FnWrapper<Fn, Res(Args...)> {
-
-  template<typename... WrappedArgs>
-  auto expand(WrappedArgs... args) const noexcept {
-    return std::tuple_cat(details::Expander<WrappedArgs>::expand(args)...);
-  }
+template<auto fn, typename Res, typename... Args>
+struct FnWrapper<fn, Res(Args...)> {
 
   [[nodiscard]] auto operator()(Args... args) const noexcept {
     auto argsTuple = expand(WrapperTraits<Args>::arg(args)...);
-    return WrapperTraits<Res>::ret(std::apply(Fn, std::move(argsTuple)));
+    return WrapperTraits<Res>::ret(std::apply(fn, std::move(argsTuple)));
+  }
+
+private:
+  template<typename... WrappedArgs>
+  [[nodiscard]] auto expand(WrappedArgs... args) const noexcept {
+    return std::tuple_cat(details::Expander<WrappedArgs>::expand(args)...);
   }
 };
 } // namespace unistdpp

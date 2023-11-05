@@ -2,7 +2,7 @@
 
 #include <Canvas.h>
 
-namespace rmlib {
+using namespace rmlib;
 
 /***********************************************************************
  *                                                                     *
@@ -362,4 +362,3 @@ draw_thick_line(Canvas& canvas,
       canvas, color, x0, y0, dx, dy, xstep, ystep, width, pxstep, pystep);
   }
 }
-} // namespace rmlib

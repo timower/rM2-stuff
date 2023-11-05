@@ -145,7 +145,7 @@ YaftState::checkLandscape(rmlib::AppContext& ctx) {
     // The pogo state updates after a delay, so wait 100 ms before checking.
     pogoTimer = ctx.addTimer(std::chrono::milliseconds(100), [this] {
       setState(
-        [](auto& self) { self.isLandscape = device::IsPogoConnected(); });
+        [](auto& self) { self.isLandscape = device::isPogoConnected(); });
     });
   } else {
     isLandscape = config.orientation == YaftConfig::Orientation::Landscape;

@@ -1,5 +1,6 @@
 #pragma once
 
+#define SDL_DISABLE_ARM_NEON_H
 #include <SDL.h>
 
 #define KEY_ESC SDL_SCANCODE_ESCAPE

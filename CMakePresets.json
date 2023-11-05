@@ -93,9 +93,8 @@
       "inherits": ["base", "toltec", "debug-base"],
       "binaryDir": "${sourceDir}/build/dev-toltec",
       "cacheVariables": {
-              "BUILD_TESTS": false
+        "BUILD_TESTS": false
       }
     }
-
   ]
 }

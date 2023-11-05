@@ -58,7 +58,7 @@ struct FD {
       });
   }
 
-  [[nodiscard]] Result<void> writeAll(const void* buf, std::size_t) const;
+  [[nodiscard]] Result<void> writeAll(const void* buf, std::size_t size) const;
 
   template<typename T,
            typename = std::enable_if_t<std::is_trivially_copyable_v<T>>>

@@ -4,7 +4,6 @@ option(EMULATE "Emulate a rM tablet using SDL" OFF)
 option(EMULATE_UINPUT "Emulate input devices using uinput" OFF)
 
 set(RMLIB_SOURCES
-  stb.c
   Device.cpp
   Canvas.cpp)
 
@@ -30,6 +29,9 @@ target_include_directories(${PROJECT_NAME}
     ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_link_libraries(${PROJECT_NAME}
+  PRIVATE
+    thick
+    stb
   PUBLIC
     utf8cpp
     tl::expected

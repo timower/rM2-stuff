@@ -172,10 +172,6 @@ main() {
     std::cerr << err.error().msg << std::endl;
   }
 
-  for (const auto& [_, dev] : input.devices) {
-    std::cout << "device @ " << dev->path << " '" << dev->getName() << "'\n";
-  }
-
   while (true) {
     auto events = input.waitForInput(std::nullopt);
     if (!events.has_value()) {

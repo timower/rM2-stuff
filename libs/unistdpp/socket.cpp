@@ -4,12 +4,12 @@ namespace unistdpp {
 Address
 Address::fromUnixPath(const char* path) {
   Address res;
-  auto* addr = new (&res.storage) sockaddr_un();
+  auto* addr = new (&res.storage) sockaddr_un(); // NOLINT
   memset(addr, 0, sizeof(sockaddr_un));
   addr->sun_family = AF_UNIX;
 
   if (path != nullptr) {
-    strncpy(addr->sun_path, path, sizeof(addr->sun_path) - 1);
+    strncpy(&addr->sun_path[0], path, sizeof(addr->sun_path) - 1);
     res.addressSize = sizeof(sockaddr_un);
   } else {
     res.addressSize = sizeof(sa_family_t);
@@ -19,10 +19,10 @@ Address::fromUnixPath(const char* path) {
 }
 
 Address
-Address::fromHostPort(int32_t host, int port) {
+Address::fromHostPort(int32_t host, int port) { // NOLINT
   Address res;
   res.addressSize = sizeof(sockaddr_in);
-  auto* addr = new (&res.storage) sockaddr_in();
+  auto* addr = new (&res.storage) sockaddr_in(); // NOLINT
   memset(addr, 0, sizeof(sockaddr_in));
   addr->sin_family = AF_INET;
 
@@ -36,7 +36,7 @@ Result<Address>
 Address::fromHostPort(std::string_view host, int port) {
   Address res;
   res.addressSize = sizeof(sockaddr_in);
-  auto* addr = new (&res.storage) sockaddr_in();
+  auto* addr = new (&res.storage) sockaddr_in(); // NOLINT
   memset(addr, 0, sizeof(sockaddr_in));
   addr->sin_family = AF_INET;
 

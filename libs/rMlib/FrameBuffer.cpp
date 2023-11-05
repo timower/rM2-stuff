@@ -1,8 +1,12 @@
 #include "FrameBuffer.h"
 #include "Device.h"
 
+#include <unistdpp/file.h>
+#include <unistdpp/ioctl.h>
+
 #include <array>
 #include <cassert>
+#include <climits>
 #include <iostream>
 
 #include <sys/ioctl.h>
@@ -55,50 +59,37 @@ ErrorOr<FrameBuffer>
 FrameBuffer::open() {
   const auto fbType = TRY(detectType());
 
-  auto fd = ::open(fb_path, O_RDWR);
-  if (fd < 0) {
-    perror("error");
-    return Error::make("Error opening " + std::string(fb_path));
-  }
+  auto fd = TRY(unistdpp::open(fb_path, O_RDWR));
 
-  fb_var_screeninfo screeninfo;
-  int res = ioctl(fd, FBIOGET_VSCREENINFO, &screeninfo);
-  fb_fix_screeninfo fixScreenInfo;
-  res |= ioctl(fd, FBIOGET_FSCREENINFO, &fixScreenInfo);
+  fb_var_screeninfo screeninfo{};
+  TRY(
+    unistdpp::ioctl<fb_var_screeninfo*>(fd, FBIOGET_VSCREENINFO, &screeninfo));
+  fb_fix_screeninfo fixScreenInfo{};
+  TRY(unistdpp::ioctl<fb_fix_screeninfo*>(
+    fd, FBIOGET_FSCREENINFO, &fixScreenInfo));
 
-  if (res != 0) {
-    ::close(fd);
-    return Error::make("Error getting framebuffer size");
-  }
+  auto components = int(screeninfo.bits_per_pixel / CHAR_BIT);
+  auto width = int(screeninfo.xres);
+  auto height = int(screeninfo.yres);
+  auto stride = int(fixScreenInfo.line_length);
 
-  int components = screeninfo.bits_per_pixel / 8;
-  auto width = screeninfo.xres;
-  auto height = screeninfo.yres;
-  auto stride = fixScreenInfo.line_length;
-
-  auto* memory = static_cast<uint8_t*>(
-    mmap(nullptr, stride * height, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
+  auto* memory = static_cast<uint8_t*>(mmap(
+    nullptr, stride * height, PROT_READ | PROT_WRITE, MAP_SHARED, fd.fd, 0));
 
   if (memory == nullptr) {
-    ::close(fd);
     return Error::make("Error mapping fb");
   }
 
   Canvas canvas(memory, width, height, stride, components);
-  return FrameBuffer(fbType, fd, canvas);
+  return FrameBuffer(fbType, std::move(fd), canvas);
 }
 
 void
 FrameBuffer::close() {
-  if (canvas.getMemory() != nullptr) {
+  if (canvas.getMemory() != nullptr && fd.isValid()) {
     munmap(canvas.getMemory(), canvas.totalSize());
   }
   canvas = Canvas{};
-
-  if (fd != -1) {
-    ::close(fd);
-  }
-  fd = -1;
 }
 
 void
@@ -132,14 +123,16 @@ FrameBuffer::doUpdate(Rect region, Waveform waveform, UpdateFlags flags) const {
       }
     }();
 
-#define TEMP_USE_REMARKABLE_DRAW 0x0018
-#define EPDC_FLAG_EXP1 0x270ce20
+    constexpr auto temp_use_remarkable_draw = 0x0018;
+    constexpr auto epdc_flag_exp1 = 0x270ce20;
+
     update.update_marker = 0;
-    update.dither_mode = EPDC_FLAG_EXP1;
-    update.temp = TEMP_USE_REMARKABLE_DRAW;
+    update.dither_mode = epdc_flag_exp1;
+    update.temp = temp_use_remarkable_draw;
     update.flags = 0;
   }
-  ioctl(fd, MXCFB_SEND_UPDATE, &update);
+
+  (void)unistdpp::ioctl<mxcfb_update_data*>(fd, MXCFB_SEND_UPDATE, &update);
 
   // Debug logging.
   assert([&] {

@@ -3,13 +3,11 @@
 #include "Error.h"
 #include "MathUtil.h"
 
-#include <algorithm>
 #include <array>
 #include <chrono>
 #include <memory>
 #include <optional>
 #include <unordered_map>
-#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -31,12 +29,12 @@ namespace rmlib::input {
 constexpr static auto max_num_slots = 32;
 
 struct TouchEvent {
-  enum { Down, Up, Move } type;
-  int id;
-  int slot;
+  enum { Down, Up, Move } type = Move;
+  int id{};
+  int slot{};
 
   Point location;
-  int pressure;
+  int pressure{};
 
   constexpr bool isDown() const { return type == Down; }
   constexpr bool isUp() const { return type == Up; }
@@ -44,13 +42,14 @@ struct TouchEvent {
 };
 
 struct PenEvent {
-  enum { TouchDown, TouchUp, ToolClose, ToolLeave, Move } type;
+  constexpr static auto pen_id = -1234;
+  enum { TouchDown, TouchUp, ToolClose, ToolLeave, Move } type = Move;
 
-  Point location;
-  int distance;
-  int pressure;
+  Point location = {};
+  int distance = 0;
+  int pressure = 0;
 
-  int id = -1234;
+  int id = pen_id;
 
   constexpr bool isDown() const { return type == TouchDown; }
   constexpr bool isUp() const { return type == TouchUp; }
@@ -65,50 +64,37 @@ struct KeyEvent {
 template<typename T>
 constexpr bool is_pointer_event = !std::is_same_v<std::decay_t<T>, KeyEvent>;
 
-struct SwipeGesture {
-  enum Direction { Up, Down, Left, Right };
-
-  Direction direction;
-  Point startPosition;
-  Point endPosition;
-  int fingers;
-};
-
-struct PinchGesture {
-  enum Direction { In, Out };
-  Direction direction;
-  Point position;
-  int fingers;
-};
-
-struct TapGesture {
-  int fingers;
-  Point position;
-};
-
-using Gesture = std::variant<SwipeGesture, PinchGesture, TapGesture>;
-
 using Event = std::variant<TouchEvent, PenEvent, KeyEvent>;
 
 struct InputDeviceBase {
+  struct EvDevDeleter {
+    void operator()(libevdev* evdev);
+  };
+  using EvDevPtr = std::unique_ptr<libevdev, EvDevDeleter>;
+
   unistdpp::FD fd;
-  libevdev* evdev;
+  EvDevPtr evdev;
 
   std::string path;
 
-  const char* getName();
+  const char* getName() const;
 
-  void grab();
-  void ungrab();
+  void grab() const;
+  void ungrab() const;
   virtual void flood() = 0;
 
-  virtual ~InputDeviceBase();
+  InputDeviceBase() = default;
+  InputDeviceBase(const InputDeviceBase& other) = delete;
+  InputDeviceBase(InputDeviceBase&& other) = default;
+  InputDeviceBase& operator=(const InputDeviceBase& other) = delete;
+  InputDeviceBase& operator=(InputDeviceBase&& other) = default;
+  virtual ~InputDeviceBase() = default;
 
   virtual OptError<> readEvents(std::vector<Event>& out) = 0;
 
 protected:
-  InputDeviceBase(unistdpp::FD fd, libevdev* evdev, std::string path)
-    : fd(std::move(fd)), evdev(evdev), path(std::move(path)) {}
+  InputDeviceBase(unistdpp::FD fd, EvDevPtr evdev, std::string path)
+    : fd(std::move(fd)), evdev(std::move(evdev)), path(std::move(path)) {}
 };
 
 struct BaseDevices {
@@ -157,7 +143,7 @@ struct InputManager {
         if constexpr (std::is_same_v<decltype(fd), const int&>) {
           fds.emplace_back(pollfd{ .fd = fd, .events = POLLIN, .revents = 0 });
         } else {
-          fds.emplace_back(unistdpp::waitFor(fd, unistdpp::Wait::READ));
+          fds.emplace_back(unistdpp::waitFor(fd, unistdpp::Wait::Read));
         }
       };
       (fd_set(extraFds, fds), ...);
@@ -178,11 +164,14 @@ struct InputManager {
 
   BaseDevices getBaseDevices() const { return baseDevices; }
 
+  size_t numDevices() const { return devices.size(); }
+  void removeDevice(std::string_view path) { devices.erase(path); }
+
+private:
   /// members
   std::unordered_map<std::string_view, std::unique_ptr<InputDeviceBase>>
     devices;
 
-private:
   BaseDevices baseDevices;
   unistdpp::FD udevMonitorFd;
 

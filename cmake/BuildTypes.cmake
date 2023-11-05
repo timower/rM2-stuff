@@ -31,7 +31,7 @@ set(ASAN_OPTS
   -fsanitize=undefined)
 
 if (SANITIZE)
-  list(APPEND BASE_OPTS ${ASAN_OPTS})
+  list(APPEND BASE_OPTS ${ASAN_OPTS} -Werror)
 endif()
 
 list(JOIN BASE_OPTS " " BASE_OPTS)

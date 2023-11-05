@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cmath>
 #include <ostream>
 
@@ -78,31 +79,33 @@ operator<<(std::basic_ostream<char, T>& os, const Point& p) {
 }
 
 struct Transform {
-  float matrix[2][2] = { { 1, 0 }, { 0, 1 } };
+  std::array<std::array<float, 2>, 2> matrix = { { { 1, 0 }, { 0, 1 } } };
   Point offset;
 
   static constexpr Transform identity() { return Transform{}; }
 
   static constexpr Transform scale(float sx, float sy) {
-    return Transform{ { { sx, 0 }, { 0, sy } }, { 0, 0 } };
+    return Transform{ { { { sx, 0 }, { 0, sy } } }, { 0, 0 } };
   }
 
   static constexpr Transform translate(Point t) {
-    return Transform{ { { 1, 0 }, { 0, 1 } }, t };
+    return Transform{ { { { 1, 0 }, { 0, 1 } } }, t };
   }
 
   static Transform rotate(float radians) {
     auto cs = cosf(radians);
     auto sn = sinf(radians);
-    return Transform{ { { cs, -sn }, { sn, cs } }, { 0, 0 } };
+    return Transform{ { { { cs, -sn }, { sn, cs } } }, { 0, 0 } };
   }
 };
 
 constexpr Point
 operator*(const Transform& t, const Point& p) {
   Point r;
-  r.x = t.matrix[0][0] * p.x + t.matrix[0][1] * p.y + t.offset.x;
-  r.y = t.matrix[1][0] * p.x + t.matrix[1][1] * p.y + t.offset.y;
+  auto px = float(p.x);
+  auto py = float(p.y);
+  r.x = int(t.matrix[0][0] * px + t.matrix[0][1] * py + float(t.offset.x));
+  r.y = int(t.matrix[1][0] * px + t.matrix[1][1] * py + float(t.offset.y));
   return r;
 }
 
@@ -216,8 +219,9 @@ struct Rect {
     // assert(0 <= horizontal && horizontal <= 1.0);
     // assert(0 <= vertical && vertical <= 1.0);
     const auto diff = this->size() - size;
-    const auto offset =
-      Point{ int(diff.width * horizontal), int(diff.height * vertical) };
+    const auto dx = float(diff.width);
+    const auto dy = float(diff.height);
+    const auto offset = Point{ int(dx * horizontal), int(dy * vertical) };
     const auto start = topLeft + offset;
     return Rect{ start, start + size.toPoint() };
   }
@@ -267,22 +271,5 @@ operator<<(std::basic_ostream<char, T>& os, const Size& p) {
   os << "{ " << p.width << ", " << p.height << " }";
   return os;
 }
-
-namespace static_tests {
-static_assert(Transform::identity() * Point{ 4, 10 } == Point{ 4, 10 });
-static_assert(Transform::scale(4, 2) * Point{ 4, 10 } == Point{ 16, 20 });
-static_assert(Transform::translate({ -1, 2 }) * Point{ 4, 10 } ==
-              Point{ 3, 12 });
-
-static_assert((Transform::translate({ -1, 2 }) * Transform::scale(4, 2)) *
-                Point{ 4, 10 } ==
-              Point{ 15, 22 });
-static_assert((Transform::scale(4, 2) * Transform::translate({ -1, 2 })) *
-                Point{ 4, 10 } ==
-              Point{ 12, 24 });
-
-static_assert(Transform{ { { 0, 1 }, { 1, 0 } }, { 0, 0 } } * Point{ 4, 10 } ==
-              Point{ 10, 4 });
-} // namespace static_tests
 
 } // namespace rmlib

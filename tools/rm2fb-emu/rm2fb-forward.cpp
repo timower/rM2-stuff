@@ -200,8 +200,8 @@ main() {
 
   std::cout << "SWTCON :p!\n";
   while (running) {
-    std::vector<pollfd> pollfds = { waitFor(*tcpFd, Wait::READ),
-                                    waitFor(serverSock.sock, Wait::READ) };
+    std::vector<pollfd> pollfds = { waitFor(*tcpFd, Wait::Read),
+                                    waitFor(serverSock.sock, Wait::Read) };
     auto res = unistdpp::poll(pollfds);
     if (!res) {
       std::cerr << "Poll error: " << toString(res.error()) << "\n";

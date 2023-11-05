@@ -11,9 +11,9 @@
 namespace unistdpp {
 
 enum class Wait {
-  READ = POLLIN,
-  WRITE = POLLOUT,
-  READ_WRITE = POLLIN | POLLOUT,
+  Read = POLLIN,
+  Write = POLLOUT,
+  ReadWrite = POLLIN | POLLOUT,
 };
 
 inline pollfd

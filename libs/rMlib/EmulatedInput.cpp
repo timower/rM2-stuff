@@ -19,15 +19,14 @@ InputDeviceBase::grab() {}
 void
 InputDeviceBase::ungrab() {}
 
-InputDeviceBase::~InputDeviceBase() {}
-
 namespace {
 struct FakeInputDevice : public InputDeviceBase {
   unistdpp::Pipe pipes;
   unsigned int sdlUserEvent;
 
-  FakeInputDevice() : InputDeviceBase(unistdpp::FD(), nullptr, "test") {
-    sdlUserEvent = SDL_RegisterEvents(1);
+  FakeInputDevice()
+    : InputDeviceBase(unistdpp::FD(), nullptr, "test")
+    , sdlUserEvent(SDL_RegisterEvents(1)) {
 
     pipes = unistdpp::pipe()
               .or_else([](auto err) {
@@ -50,6 +49,9 @@ template<>
 void
 InputManager::UdevDeleter<udev_monitor>::operator()(udev_monitor* ptr) {}
 
+void
+InputDeviceBase::EvDevDeleter::operator()(libevdev* evdev) {}
+
 ErrorOr<BaseDevices>
 InputManager::openAll(bool monitor) {
   if (SDL_Init(SDL_INIT_EVENTS) < 0) {
@@ -70,14 +72,14 @@ InputManager::waitForInput(std::vector<pollfd>& extraFds,
                            std::optional<std::chrono::milliseconds> timeout) {
   static bool down = false;
 
-  FakeInputDevice& dev = *static_cast<FakeInputDevice*>(getBaseDevices().key);
+  auto& dev = *dynamic_cast<FakeInputDevice*>(getBaseDevices().key);
 
   std::thread selectThread([&readPipe = dev.pipes.readPipe,
                             &extraFds,
                             &timeout,
                             userEv = dev.sdlUserEvent]() {
     // Also listen to the notify pipe
-    extraFds.push_back(unistdpp::waitFor(readPipe, unistdpp::Wait::READ));
+    extraFds.push_back(unistdpp::waitFor(readPipe, unistdpp::Wait::Read));
 
     auto ret = unistdpp::poll(extraFds, timeout);
     if (!ret) {
@@ -108,7 +110,7 @@ InputManager::waitForInput(std::vector<pollfd>& extraFds,
   SDL_Event event;
   if (timeout.has_value()) {
     SDL_ClearError();
-    sdlRes = SDL_WaitEventTimeout(&event, timeout->count() / 1000);
+    sdlRes = SDL_WaitEventTimeout(&event, int(timeout->count()));
   } else {
     sdlRes = SDL_WaitEvent(&event);
   }
@@ -123,7 +125,7 @@ InputManager::waitForInput(std::vector<pollfd>& extraFds,
 
   selectThread.join();
 
-  KeyEvent keyEv;
+  KeyEvent keyEv{};
 
   PenEvent ev;
   ev.id = 1;
@@ -142,7 +144,7 @@ InputManager::waitForInput(std::vector<pollfd>& extraFds,
         auto y = event.motion.y * EMULATE_SCALE;
         ev.type = PenEvent::Move;
         ev.location = { x, y };
-        result.push_back(ev);
+        result.emplace_back(ev);
       }
       break;
     case SDL_MOUSEBUTTONDOWN:
@@ -152,7 +154,7 @@ InputManager::waitForInput(std::vector<pollfd>& extraFds,
         down = true;
         ev.type = PenEvent::TouchDown;
         ev.location = { x, y };
-        result.push_back(ev);
+        result.emplace_back(ev);
       }
       break;
     case SDL_MOUSEBUTTONUP:
@@ -162,19 +164,19 @@ InputManager::waitForInput(std::vector<pollfd>& extraFds,
         down = false;
         ev.type = PenEvent::TouchUp;
         ev.location = { x, y };
-        result.push_back(ev);
+        result.emplace_back(ev);
       }
       break;
 
     case SDL_KEYDOWN:
       keyEv.keyCode = event.key.keysym.scancode;
       keyEv.type = KeyEvent::Press;
-      result.push_back(keyEv);
+      result.emplace_back(keyEv);
       break;
     case SDL_KEYUP:
       keyEv.keyCode = event.key.keysym.scancode;
       keyEv.type = KeyEvent::Release;
-      result.push_back(keyEv);
+      result.emplace_back(keyEv);
       break;
   }
   return result;

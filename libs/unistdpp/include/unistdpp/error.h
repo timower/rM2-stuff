@@ -19,6 +19,7 @@ getValue(tl::expected<T, E> v) {
 }
 } // namespace error_details
 
+// NOLINTNEXTLINE
 #define TRY(x)                                                                 \
   ({                                                                           \
     auto&& xOrErr = x;                                                         \

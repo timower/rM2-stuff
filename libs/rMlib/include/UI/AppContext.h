@@ -91,7 +91,7 @@ public:
       return std::chrono::duration_cast<std::chrono::milliseconds>(*durantion);
     }();
 
-    std::size_t startDevices = inputManager.devices.size();
+    std::size_t startDevices = inputManager.numDevices();
     std::vector<input::Event> result;
 
     if (!extraFds.empty()) {
@@ -115,7 +115,7 @@ public:
       result = std::move(evs);
     }
 
-    if (inputManager.devices.size() != startDevices) {
+    if (inputManager.numDevices() != startDevices) {
       for (const auto& onDeviceUpdate : onDeviceUpdates) {
         onDeviceUpdate();
       }

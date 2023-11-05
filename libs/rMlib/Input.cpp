@@ -13,11 +13,10 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#include <algorithm>
-#include <cassert>
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <unordered_set>
 
 namespace rmlib::input {
 
@@ -56,14 +55,14 @@ template<typename Device>
 struct InputDevice : public InputDeviceBase {
   using InputDeviceBase::InputDeviceBase;
 
-  virtual OptError<> readEvents(std::vector<Event>& out) final {
-    Device* devThis = static_cast<Device*>(this);
+  OptError<> readEvents(std::vector<Event>& out) final {
+    auto* devThis = static_cast<Device*>(this);
 
     int rc = 0;
     do {
 
       auto event = input_event{};
-      rc = libevdev_next_event(evdev, LIBEVDEV_READ_FLAG_NORMAL, &event);
+      rc = libevdev_next_event(evdev.get(), LIBEVDEV_READ_FLAG_NORMAL, &event);
 
       if (rc == LIBEVDEV_READ_STATUS_SUCCESS) {
         auto evs = TRY(devThis->handleEvent(event));
@@ -74,7 +73,8 @@ struct InputDevice : public InputDeviceBase {
           auto evs = TRY(devThis->handleEvent(event));
           out.insert(out.end(), evs.begin(), evs.end());
 
-          rc = libevdev_next_event(evdev, LIBEVDEV_READ_FLAG_SYNC, &event);
+          rc =
+            libevdev_next_event(evdev.get(), LIBEVDEV_READ_FLAG_SYNC, &event);
         }
       }
     } while (rc == LIBEVDEV_READ_STATUS_SYNC ||
@@ -86,16 +86,16 @@ struct InputDevice : public InputDeviceBase {
 
 struct TouchDevice : public InputDevice<TouchDevice> {
   TouchDevice(unistdpp::FD fd,
-              libevdev* evdev,
+              EvDevPtr evdev,
               std::string path,
               Transform transform)
-    : InputDevice(std::move(fd), evdev, std::move(path))
+    : InputDevice(std::move(fd), std::move(evdev), std::move(path))
     , transform(transform) {}
-  ErrorOr<std::vector<TouchEvent>> handleEvent(input_event);
+  ErrorOr<std::vector<TouchEvent>> handleEvent(input_event /*event*/);
   TouchEvent& getSlot() { return slots.at(slot); }
 
   void flood() final {
-    auto* buf = getTouchFlood();
+    const auto* buf = getTouchFlood();
     (void)fd.writeAll(buf, touch_flood_size * sizeof(input_event));
   }
 
@@ -107,15 +107,15 @@ struct TouchDevice : public InputDevice<TouchDevice> {
 
 struct PenDevice : public InputDevice<PenDevice> {
   PenDevice(unistdpp::FD fd,
-            libevdev* evdev,
+            EvDevPtr evdev,
             std::string path,
             Transform transform)
-    : InputDevice(std::move(fd), evdev, std::move(path))
+    : InputDevice(std::move(fd), std::move(evdev), std::move(path))
     , transform(transform) {}
-  ErrorOr<std::vector<PenEvent>> handleEvent(input_event);
+  ErrorOr<std::vector<PenEvent>> handleEvent(input_event /*event*/);
 
   void flood() final {
-    auto* buf = getTouchFlood();
+    const auto* buf = getTouchFlood();
     (void)fd.writeAll(buf, touch_flood_size * sizeof(input_event));
   }
 
@@ -124,13 +124,13 @@ struct PenDevice : public InputDevice<PenDevice> {
 };
 
 struct KeyDevice : public InputDevice<KeyDevice> {
-  KeyDevice(unistdpp::FD fd, libevdev* evdev, std::string path)
-    : InputDevice(std::move(fd), evdev, std::move(path)) {}
-  ErrorOr<std::vector<KeyEvent>> handleEvent(input_event);
+  KeyDevice(unistdpp::FD fd, EvDevPtr evdev, std::string path)
+    : InputDevice(std::move(fd), std::move(evdev), std::move(path)) {}
+  ErrorOr<std::vector<KeyEvent>> handleEvent(input_event /*event*/);
 
   void flood() final {
     // TODO: this probably doesn't work
-    auto* buf = getTouchFlood();
+    const auto* buf = getTouchFlood();
     (void)fd.writeAll(buf, touch_flood_size * sizeof(input_event));
   }
 
@@ -228,7 +228,7 @@ ErrorOr<std::vector<KeyEvent>>
 KeyDevice::handleEvent(input_event event) {
   if (event.type == EV_KEY) {
 
-    KeyEvent keyEvent;
+    KeyEvent keyEvent{};
     keyEvent.type = static_cast<decltype(keyEvent.type)>(event.value);
     keyEvent.keyCode = event.code;
     keyEvents.push_back(keyEvent);
@@ -245,46 +245,48 @@ KeyDevice::handleEvent(input_event event) {
 
 std::unique_ptr<InputDeviceBase>
 makeDevice(unistdpp::FD fd,
-           libevdev* evdev,
+           InputDeviceBase::EvDevPtr evdev,
            std::string path,
            Transform transform = {}) {
-  if (libevdev_has_event_type(evdev, EV_ABS)) {
+  if (libevdev_has_event_type(evdev.get(), EV_ABS) != 0) {
     // multi-touch screen -> ev_abs & abs_mt_slot
-    if (libevdev_has_event_code(evdev, EV_ABS, ABS_MT_SLOT)) {
+    if (libevdev_has_event_code(evdev.get(), EV_ABS, ABS_MT_SLOT) != 0) {
       std::cout << "Got touch\n";
       return std::make_unique<TouchDevice>(
-        std::move(fd), evdev, std::move(path), transform);
+        std::move(fd), std::move(evdev), std::move(path), transform);
     }
 
     // pen/single touch screen -> ev_abs
-    if (libevdev_has_event_code(evdev, EV_ABS, ABS_X)) {
+    if (libevdev_has_event_code(evdev.get(), EV_ABS, ABS_X) != 0) {
       std::cout << "Got pen\n";
       return std::make_unique<PenDevice>(
-        std::move(fd), evdev, std::move(path), transform);
+        std::move(fd), std::move(evdev), std::move(path), transform);
     }
   }
 
   std::cout << "Got key\n";
   // finally keyboard -> ev_key
   // TODO: support mouse?
-  return std::make_unique<KeyDevice>(std::move(fd), evdev, std::move(path));
+  return std::make_unique<KeyDevice>(
+    std::move(fd), std::move(evdev), std::move(path));
 }
 
 void
 handeDevice(InputManager& mgr, udev_device& dev) {
-  auto* devnode = udev_device_get_devnode(&dev);
+  const auto* devnode = udev_device_get_devnode(&dev);
   if (devnode == nullptr) {
     return;
   }
 
-  auto* action = udev_device_get_action(&dev);
+  const auto* action = udev_device_get_action(&dev);
   std::cout << "action: " << (action == nullptr ? "null" : action) << "\n";
 
   if (action == nullptr || action == std::string_view("add")) {
     mgr.open(devnode);
     return;
   }
-  mgr.devices.erase(devnode);
+
+  mgr.removeDevice(devnode);
 }
 
 } // namespace
@@ -301,25 +303,24 @@ InputManager::UdevDeleter<udev_monitor>::operator()(udev_monitor* ptr) {
   udev_monitor_unref(ptr);
 }
 
+void
+InputDeviceBase::EvDevDeleter::operator()(libevdev* evdev) {
+  libevdev_free(evdev);
+}
+
 const char*
-InputDeviceBase::getName() {
-  return libevdev_get_name(evdev);
+InputDeviceBase::getName() const {
+  return libevdev_get_name(evdev.get());
 }
 
 void
-InputDeviceBase::grab() {
-  libevdev_grab(evdev, LIBEVDEV_GRAB);
+InputDeviceBase::grab() const {
+  libevdev_grab(evdev.get(), LIBEVDEV_GRAB);
 }
 
 void
-InputDeviceBase::ungrab() {
-  libevdev_grab(evdev, LIBEVDEV_UNGRAB);
-}
-
-InputDeviceBase::~InputDeviceBase() {
-  if (evdev != nullptr) {
-    libevdev_free(evdev);
-  }
+InputDeviceBase::ungrab() const {
+  libevdev_grab(evdev.get(), LIBEVDEV_UNGRAB);
 }
 
 ErrorOr<InputDeviceBase*>
@@ -330,22 +331,25 @@ InputManager::open(std::string_view input) {
 
   auto fd = TRY(unistdpp::open(input.data(), O_RDWR | O_NONBLOCK));
 
-  libevdev* dev = nullptr;
-  if (libevdev_new_from_fd(fd.fd, &dev) < 0) {
-    return Error::make("Error initializing evdev for '" + std::string(input) +
-                       "'");
-  }
+  auto dev = TRY([&]() -> ErrorOr<InputDeviceBase::EvDevPtr> {
+    libevdev* dev = nullptr;
+    if (libevdev_new_from_fd(fd.fd, &dev) < 0) {
+      return Error::make("Error initializing evdev for '" + std::string(input) +
+                         "'");
+    }
+    return InputDeviceBase::EvDevPtr(dev);
+  }());
 
   auto baseTransform = [&]() -> Transform {
-    auto base = device::getBaseDevice(libevdev_get_name(dev));
+    auto base = device::getBaseDevice(libevdev_get_name(dev.get()));
     if (!base) {
       return {};
     }
     return base->transform;
   }();
 
-  auto device =
-    makeDevice(std::move(fd), dev, std::string(input), baseTransform);
+  auto device = makeDevice(
+    std::move(fd), std::move(dev), std::string(input), baseTransform);
   auto* devicePtr = device.get();
   devices.emplace(devicePtr->path, std::move(device));
   return devicePtr;
@@ -361,7 +365,7 @@ InputManager::openAll(bool monitor) {
   udev_enumerate_scan_devices(enumerate);
 
   struct udev_list_entry* devList = udev_enumerate_get_list_entry(enumerate);
-  struct udev_list_entry* entry;
+  struct udev_list_entry* entry = nullptr;
 
   udev_list_entry_foreach(entry, devList) {
     const char* path = udev_list_entry_get_name(entry);
@@ -382,7 +386,7 @@ InputManager::openAll(bool monitor) {
       udev_monitor_new_from_netlink(udevHandle.get(), "udev"));
 
     udev_monitor_filter_add_match_subsystem_devtype(
-      udevMonitor.get(), "input", NULL);
+      udevMonitor.get(), "input", nullptr);
     udev_monitor_enable_receiving(udevMonitor.get());
 
     udevMonitorFd = unistdpp::FD(udev_monitor_get_fd(udevMonitor.get()));
@@ -421,12 +425,12 @@ InputManager::waitForInput(std::vector<pollfd>& extraFds,
   for (auto& [_, device] : devices) {
     (void)_;
     deviceOrder.emplace_back(device.get());
-    extraFds.emplace_back(unistdpp::waitFor(device->fd, unistdpp::Wait::READ));
+    extraFds.emplace_back(unistdpp::waitFor(device->fd, unistdpp::Wait::Read));
   }
 
   if (udevMonitorFd.isValid()) {
     extraFds.emplace_back(
-      unistdpp::waitFor(udevMonitorFd, unistdpp::Wait::READ));
+      unistdpp::waitFor(udevMonitorFd, unistdpp::Wait::Read));
   }
 
   auto ret = TRY(unistdpp::poll(extraFds, timeout));
@@ -437,7 +441,7 @@ InputManager::waitForInput(std::vector<pollfd>& extraFds,
 
   if (udevMonitorFd.isValid() && unistdpp::canRead(extraFds.back())) {
     udev_device* dev = udev_monitor_receive_device(udevMonitor.get());
-    if (dev) {
+    if (dev != nullptr) {
       handeDevice(*this, *dev);
       udev_device_unref(dev);
     }

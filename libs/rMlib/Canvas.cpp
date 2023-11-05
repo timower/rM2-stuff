@@ -7,28 +7,33 @@
 #include <utf8.h>
 
 #include <array>
+#include <climits>
 #include <iostream>
 #include <vector>
 
-#include "thick.cpp"
+#include <thick.h>
 
 namespace rmlib {
 
 namespace {
+constexpr auto uint8_max = std::numeric_limits<std::uint8_t>::max();
+
 constexpr uint8_t
 blend(uint8_t factor, uint8_t fg, uint8_t bg) {
-  int val = bg + (int(factor) * (int(fg) - int(bg))) / 0xff;
+  int val = bg + (int(factor) * (int(fg) - int(bg))) / uint8_max;
   return uint8_t(val);
 }
 
 constexpr uint16_t
 toRGB565(uint8_t grey) {
+  // NOLINTNEXTLINE
   return (grey >> 3) | ((grey >> 2) << 5) | ((grey >> 3) << 11);
 }
 
 constexpr uint8_t
 fromRGB565(uint16_t rgb) {
   // uint8_t r = (rgb & 0x1f) << 3;
+  // NOLINTNEXTLINE
   uint8_t g = ((rgb >> 5) & 0x3f) << 2;
   // uint8_t b = ((rgb >> 11) & 0x1f) << 3;
 
@@ -42,13 +47,14 @@ fromRGB565(uint16_t rgb) {
 constexpr auto font_path = "/usr/share/fonts/ttf/noto/NotoMono-Regular.ttf";
 #endif
 
-stbtt_fontinfo*
+const stbtt_fontinfo*
 getFont() {
-  static auto* font = [] {
+  static const auto* font = [] {
     static stbtt_fontinfo font;
 #ifndef EMULATE
     // TODO: unistdpp
-    static std::array<uint8_t, 24 << 20> fontBuffer = { 0 };
+    constexpr auto large_number = 24 << 20;
+    static std::array<uint8_t, large_number> fontBuffer = { 0 };
     auto* fp = fopen(font_path, "r"); // NOLINT
     if (fp == nullptr) {
       std::cerr << "Error opening font\n";
@@ -62,7 +68,7 @@ getFont() {
     const auto* data = NotoSansMono_Regular_ttf;
 #endif
 
-    if (!stbtt_InitFont(&font, data, 0)) {
+    if (stbtt_InitFont(&font, data, 0) == 0) {
       std::cerr << "Error initializing font!\n";
       std::exit(EXIT_FAILURE);
     }
@@ -100,13 +106,14 @@ Canvas::getTextSize(std::string_view text, int size) {
   for (size_t ch = 0; ch != utf32.size(); ch++) {
     int advance = 0;
     int lsb = 0;
-    stbtt_GetCodepointHMetrics(font, utf32[ch], &advance, &lsb);
+
+    int codepoint = static_cast<int>(utf32[ch]);
+    stbtt_GetCodepointHMetrics(font, codepoint, &advance, &lsb);
 
     xpos += float(advance) * scale;
     if (ch + 1 != utf32.size()) {
-      xpos +=
-        scale *
-        float(stbtt_GetCodepointKernAdvance(font, utf32[ch], utf32[ch + 1]));
+      xpos += scale * float(stbtt_GetCodepointKernAdvance(
+                        font, codepoint, static_cast<int>(utf32[ch + 1])));
     }
   }
 
@@ -145,14 +152,15 @@ Canvas::drawText(std::string_view text,
 
     int advance = 0;
     int lsb = 0;
-    stbtt_GetCodepointHMetrics(font, utf32[ch], &advance, &lsb);
+    int codepoint = static_cast<int>(utf32[ch]);
+    stbtt_GetCodepointHMetrics(font, codepoint, &advance, &lsb);
 
     int x0 = 0;
     int x1 = 0;
     int y0 = 0;
     int y1 = 0;
     stbtt_GetCodepointBitmapBox(
-      font, utf32[ch], scale, scale, &x0, &y0, &x1, &y1);
+      font, codepoint, scale, scale, &x0, &y0, &x1, &y1);
 
     int w = x1 - x0 + 1;
     int h = y1 - y0 + 1;
@@ -170,7 +178,7 @@ Canvas::drawText(std::string_view text,
                                       /* yscale */ scale,
                                       xShift,
                                       yShfit,
-                                      utf32[ch]);
+                                      codepoint);
 
     const auto fg8 = fg & 0xff;
     const auto bg8 = bg & 0xff;
@@ -204,9 +212,8 @@ Canvas::drawText(std::string_view text,
     // blend" that into the working font_buffer
     xpos += float(advance) * scale;
     if (ch + 1 != utf32.size()) {
-      xpos +=
-        scale *
-        float(stbtt_GetCodepointKernAdvance(font, utf32[ch], utf32[ch + 1]));
+      xpos += scale * float(stbtt_GetCodepointKernAdvance(
+                        font, codepoint, static_cast<int>(utf32[ch + 1])));
     }
   }
 }
@@ -257,8 +264,8 @@ Canvas::drawDisk(Point center, int radius, int val) {
 
 constexpr uint16_t
 greyAlphaToRGB565(uint8_t background, uint16_t pixel) {
-  uint8_t grey = pixel & 0xff;
-  uint8_t alpha = (pixel >> 8);
+  uint8_t grey = pixel & uint8_max;
+  uint8_t alpha = (pixel >> CHAR_BIT);
 
   auto blended = blend(alpha, grey, background);
 
@@ -267,9 +274,9 @@ greyAlphaToRGB565(uint8_t background, uint16_t pixel) {
 
 std::optional<ImageCanvas>
 ImageCanvas::loadRaw(const char* path) {
-  int width;
-  int height;
-  int imgComponents;
+  int width = 0;
+  int height = 0;
+  int imgComponents = 0;
   auto* mem = stbi_load(path, &width, &height, &imgComponents, 2);
   if (mem == nullptr) {
     return std::nullopt;
@@ -293,9 +300,9 @@ ImageCanvas::load(const char* path, int background) {
 
 std::optional<ImageCanvas>
 ImageCanvas::load(uint8_t* data, int size, int background) {
-  int width;
-  int height;
-  int imgComponents;
+  int width = 0;
+  int height = 0;
+  int imgComponents = 0;
   auto* mem =
     stbi_load_from_memory(data, size, &width, &height, &imgComponents, 2);
   if (mem == nullptr) {
@@ -327,6 +334,7 @@ MemoryCanvas::MemoryCanvas(const Canvas& other, Rect rect) {
 }
 
 MemoryCanvas::MemoryCanvas(int width, int height, int components) {
+  // NOLINTNEXTLINE
   memory = std::make_unique<uint8_t[]>(width * height * components);
   canvas = Canvas(memory.get(), width, height, components);
 }
@@ -339,12 +347,12 @@ writeImage(const char* path, const Canvas& canvas) {
     test.canvas.setPixel({ x, y }, fromRGB565(pixel));
   });
 
-  if (!stbi_write_png(path,
-                      test.canvas.width(),
-                      test.canvas.height(),
-                      test.canvas.components(),
-                      test.canvas.getMemory(),
-                      test.canvas.lineSize())) {
+  if (stbi_write_png(path,
+                     test.canvas.width(),
+                     test.canvas.height(),
+                     test.canvas.components(),
+                     test.canvas.getMemory(),
+                     test.canvas.lineSize()) == 0) {
     return Error::make("Error writing image");
   }
   return {};

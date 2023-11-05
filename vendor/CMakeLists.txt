@@ -10,6 +10,9 @@ add_subdirectory(utfcpp)
 add_subdirectory(libYaft)
 add_subdirectory(libTilEm)
 
+add_subdirectory(thick)
+add_subdirectory(stb)
+
 if (${BUILD_TESTS})
   add_subdirectory(catch2)
 endif()

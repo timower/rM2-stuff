@@ -4,8 +4,8 @@ namespace unistdpp {
 
 Result<Pipe>
 pipe() {
-  int fds[2];
-  int res = ::pipe(fds);
+  std::array<int, 2> fds{};
+  int res = ::pipe(fds.data());
   if (res == -1) {
     return tl::unexpected(getErrno());
   }

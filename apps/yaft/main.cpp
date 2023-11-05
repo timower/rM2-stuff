@@ -33,7 +33,6 @@ volatile sig_atomic_t child_alive =
 
 void
 sig_handler(int signo) {
-  sigset_t sigset;
   /* global */
   extern volatile sig_atomic_t vt_active;
   extern volatile sig_atomic_t child_alive;
@@ -47,6 +46,7 @@ sig_handler(int signo) {
   }
 
 #ifndef __APPLE__
+  sigset_t sigset;
   if constexpr (VT_CONTROL) {
     if (signo == SIGUSR1) { /* vt activate */
       vt_active = true;
@@ -249,7 +249,7 @@ main(int argc, const char* argv[]) {
   }
   child_alive = true;
 
-  isLandscape = rmlib::device::IsPogoConnected();
+  isLandscape = rmlib::device::isPogoConnected();
   wasLandscape = isLandscape;
   if (!keyboard.init(*fb, term, isLandscape).has_value()) {
     logging(FATAL, "Keyboard failed\n");
@@ -261,7 +261,7 @@ main(int argc, const char* argv[]) {
   while (child_alive) {
 
     // If landscape changed, update keymap.
-    isLandscape = rmlib::device::IsPogoConnected();
+    isLandscape = rmlib::device::isPogoConnected();
     if (isLandscape != wasLandscape) {
       keyboard.isLandscape = isLandscape;
       keyboard.initKeyMap();
