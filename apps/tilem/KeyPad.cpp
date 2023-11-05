@@ -9,8 +9,8 @@ namespace tilem {
 struct Key {
   int scancode;
   std::string_view front;
-  std::string_view shift = "";
-  std::string_view alpha = "";
+  std::string_view shift;
+  std::string_view alpha;
   float width = 1;
 };
 
@@ -23,7 +23,7 @@ const std::vector<std::vector<Key>> keymap = {
     { TILEM_KEY_TRACE, "TRACE", "CALC", "F4" },
     { TILEM_KEY_GRAPH, "GRAPH", "TABLE", "F5" } },
 
-  { { 0, "", "", "", 3.5f }, { TILEM_KEY_UP, "Λ", "", "", 1 } },
+  { { 0, "", "", "", 3.5F }, { TILEM_KEY_UP, "Λ", "", "", 1 } },
 
   { { TILEM_KEY_2ND, "2ND", "", "" },
     { TILEM_KEY_MODE, "MODE", "QUIT", "" },
@@ -34,7 +34,7 @@ const std::vector<std::vector<Key>> keymap = {
   { { TILEM_KEY_ALPHA, "ALPHA", "A-LOCK", "" },
     { TILEM_KEY_GRAPHVAR, "X,T,θ,n", "LINK", "" },
     { TILEM_KEY_STAT, "STAT", "LIST", "" },
-    { 0, "", "", "", 0.5f },
+    { 0, "", "", "", 0.5F },
     { TILEM_KEY_DOWN, "V", "", "", 1 } },
 
   { { TILEM_KEY_MATH, "MATH", "TEST", "A" },
@@ -81,16 +81,16 @@ const std::vector<std::vector<Key>> keymap = {
 
 };
 
-}
+}  // namespace
 
-Keypad::Keypad(TilemCalc* calc) : calc(calc) {
+Keypad::Keypad(TilemCalc* calc) : calc(calc), numRows(keymap.size()) {
   maxRowSize = std::max_element(keymap.begin(),
                                 keymap.end(),
                                 [](const auto& a, const auto& b) {
                                   return a.size() < b.size();
                                 })
                  ->size();
-  numRows = keymap.size();
+  
 }
 
 std::unique_ptr<rmlib::RenderObject>
@@ -118,7 +118,7 @@ void
 KeypadRenderObject::drawKey(rmlib::Canvas& canvas,
                             rmlib::Point pos,
                             const Key& key,
-                            int keyWidth) {
+                            int keyWidth) const {
   const auto frontLabelHeight = key.shift.empty() && key.alpha.empty()
                                   ? keyHeight
                                   : int(front_label_factor * keyHeight);

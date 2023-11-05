@@ -86,7 +86,7 @@ protected:
     if (!this->widget->child.has_value()) {
       if (this->widget->background != nullptr) {
         const auto offset =
-          rect.align(this->widget->background->rect().size(), 0.5f, 0.5f)
+          rect.align(this->widget->background->rect().size(), 0.5F, 0.5F)
             .topLeft;
         copy(canvas,
              offset,
@@ -109,7 +109,7 @@ protected:
   }
 
 private:
-  Size childSize;
+  Size childSize{};
   bool doRefresh = false;
 };
 
@@ -130,7 +130,7 @@ private:
   const Canvas* background;
 };
 
-const auto missingImage = [] {
+const auto missing_image = [] {
   auto mem = MemoryCanvas(128, 128, 2);
   mem.canvas.set(0xaa);
   return mem;
@@ -147,13 +147,13 @@ public:
     , onKill(std::move(onKill))
     , isCurrent(isCurrent) {}
 
-  auto build(AppContext&, const BuildContext&) const {
+  auto build(AppContext& /*unused*/, const BuildContext& /*unused*/) const {
     const Canvas& canvas =
-      app.savedFb.has_value() ? app.savedFb->canvas : missingImage.canvas;
+      app.savedFb.has_value() ? app.savedFb->canvas : missing_image.canvas;
 
-    return Container(
+    return container(
       Column(GestureDetector(Sized(Image(canvas), 234, 300),
-                             Gestures{}.OnTap(onTap)),
+                             Gestures{}.onTap(onTap)),
              Row(Text(app.description.name), Button("X", onKill))),
       Insets::all(isCurrent ? 1 : 2),
       Insets::all(isCurrent ? 2 : 1),
@@ -172,13 +172,13 @@ public:
   AppWidget(const App& app, Callback onLaunch)
     : app(app), onLaunch(std::move(onLaunch)) {}
 
-  auto build(AppContext&, const BuildContext&) const {
+  auto build(AppContext& /*unused*/, const BuildContext& /*unused*/) const {
     const Canvas& canvas = app.description.iconImage.has_value()
                              ? app.description.iconImage->canvas
-                             : missingImage.canvas;
-    return Container(GestureDetector(Column(Sized(Image(canvas), 128, 128),
+                             : missing_image.canvas;
+    return container(GestureDetector(Column(Sized(Image(canvas), 128, 128),
                                             Text(app.description.name)),
-                                     Gestures{}.OnTap(onLaunch)),
+                                     Gestures{}.onTap(onLaunch)),
                      Insets::all(2),
                      Insets::all(1),
                      Insets::all(2));
@@ -193,7 +193,7 @@ class LauncherState;
 
 class LauncherWidget : public StatefulWidget<LauncherWidget> {
 public:
-  LauncherState createState() const;
+  static LauncherState createState() ;
 };
 
 constexpr auto default_sleep_timeout = 10;
@@ -206,7 +206,7 @@ public:
     stopCallback = nullptr; // TODO: stop all apps
   }
 
-  void init(AppContext& context, const BuildContext&) {
+  void init(AppContext& context, const BuildContext& /*unused*/) {
     if (auto* key = context.getInputManager().getBaseDevices().key;
         key != nullptr) {
       key->grab();
@@ -254,14 +254,13 @@ public:
       if (sleepCountdown > 0) {
         return Button(
           "Stop", [this] { setState([](auto& self) { self.stopTimer(); }); });
-      } else if (sleepCountdown == 0) {
+      } if (sleepCountdown == 0) {
         // TODO: make hideable?
         return Button("...", [] {});
-      } else {
-        return Button("Sleep", [this, &context] {
+      }         return Button("Sleep", [this, &context] {
           setState([&context](auto& self) { self.startTimer(context, 0); });
         });
-      }
+     
     }();
 
     return Center(Padding(
@@ -310,9 +309,9 @@ public:
     return Cleared(Column(header(context), runningApps(), appList()));
   }
 
-  auto build(AppContext& context, const BuildContext&) const {
+  auto build(AppContext& context, const BuildContext& /*unused*/) const {
     const Canvas* background = nullptr;
-    if (auto* currentApp = getCurrentApp(); currentApp != nullptr) {
+    if (const auto* currentApp = getCurrentApp(); currentApp != nullptr) {
       if (currentApp->savedFb.has_value()) {
         background = &currentApp->savedFb->canvas;
       } else if (currentApp->description.iconImage.has_value()) {
@@ -326,16 +325,16 @@ public:
     return GestureDetector(
       ui,
       Gestures{}
-        .OnKeyDown([this, &context](auto keyCode) {
+        .onKeyDown([this, &context](auto keyCode) {
           if (keyCode == KEY_POWER) {
             setState([&context](auto& self) { self.toggle(context); });
           }
         })
-        .OnAny([this]() { resetInactivity(); }));
+        .onAny([this]() { resetInactivity(); }));
   }
 
 private:
-  bool sleep() {
+  static bool sleep() {
     system("/sbin/rmmod brcmfmac");
     int res = system("echo \"mem\" > /sys/power/state");
     system("/sbin/modprobe brcmfmac");
@@ -350,10 +349,9 @@ private:
         // If there is no irq it must be the user which pressed the button:
         return true;
 
-      } else {
-        std::cout << "Reason for wake irq: " << *irq << std::endl;
+      }         std::cout << "Reason for wake irq: " << *irq << std::endl;
         return false;
-      }
+     
     }
 
     return false;
@@ -458,7 +456,7 @@ private:
 
     // resume or launch app
     if (app.isPaused()) {
-      if (touchDevice) {
+      if (touchDevice != nullptr) {
         touchDevice->flood();
       }
       app.resume();
@@ -528,10 +526,9 @@ private:
         if (!appIt->isRunning()) {
           appIt = apps.erase(appIt);
           continue;
-        } else {
-          // Defer removing until exit.
+        }           // Defer removing until exit.
           appIt->runInfo->shouldRemove = true;
-        }
+       
       } else {
 
         // Update existing apps.
@@ -573,7 +570,7 @@ private:
 };
 
 LauncherState
-LauncherWidget::createState() const {
+LauncherWidget::createState() {
   return LauncherState{};
 }
 

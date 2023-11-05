@@ -116,7 +116,7 @@ getKeyCodeStr(int scancode, bool shift, bool alt, bool ctrl, bool appCursor) {
       buf[1] = 0;
     }
     return buf.data();
-  } else if (scancode == 0x3) {
+  } if (scancode == 0x3) {
     buf[0] = char(scancode);
     buf[1] = 0;
     return buf.data();
@@ -162,7 +162,7 @@ KeyboardRenderObject::update(const Keyboard& keyboard) {
 
 void
 KeyboardRenderObject::doRebuild(rmlib::AppContext& ctx,
-                                const rmlib::BuildContext&) {
+                                const rmlib::BuildContext& /*buildContext*/) {
   const auto duration = getWidget().params.repeatTime / 10;
   repeatTimer = ctx.addTimer(
     duration, [this]() { updateRepeat(); }, duration);
@@ -238,7 +238,7 @@ KeyboardRenderObject::handleInput(const rmlib::input::Event& ev) {
 
 void
 KeyboardRenderObject::updateRepeat() {
-  const auto time = time_source::now();
+  const auto time = TimeSource::now();
   const auto repeatTime = getWidget().params.repeatTime;
 
   for (auto& [key, state] : keyState) {
@@ -393,7 +393,7 @@ KeyboardRenderObject::getKey(const rmlib::Point& point) {
   const auto& row = widget->params.layout.rows[rowIdx];
 
   int keyCounter = 0;
-  for (auto& key : row) {
+  for (const auto& key : row) {
     if (keyCounter <= columnIdx && columnIdx < keyCounter + key.width) {
       return &key;
     }
@@ -404,7 +404,7 @@ KeyboardRenderObject::getKey(const rmlib::Point& point) {
 
 void
 KeyboardRenderObject::clearSticky() {
-  for (auto* key : { shiftKey, altKey, ctrlKey }) {
+  for (const auto* key : { shiftKey, altKey, ctrlKey }) {
     if (key == nullptr) {
       continue;
     }
@@ -412,7 +412,7 @@ KeyboardRenderObject::clearSticky() {
     auto& state = keyState[key];
 
     // Prevent key being held when multi touch typing.
-    state.nextRepeat = time_source::now() + getWidget().params.repeatDelay;
+    state.nextRepeat = TimeSource::now() + getWidget().params.repeatDelay;
 
     if (state.stuck) {
       state.stuck = false;
@@ -435,7 +435,7 @@ KeyboardRenderObject::handleTouchEvent(const Ev& ev) {
     auto& state = keyState[key];
     state.dirty = true;
     state.slot = getSlot(ev);
-    state.nextRepeat = time_source::now() + getWidget().params.repeatDelay;
+    state.nextRepeat = TimeSource::now() + getWidget().params.repeatDelay;
 
     if (isModifier(key->code)) {
       if (!state.held) {
@@ -471,12 +471,12 @@ KeyboardRenderObject::handleKeyEvent(const rmlib::input::KeyEvent& ev) {
     std::cout << "Unknown physical key: " << ev.keyCode << "\n";
     return;
   }
-  auto& key = it->second;
+  const auto& key = it->second;
   auto& state = physKeyState[&key];
 
   if (ev.type == input::KeyEvent::Press) {
     state.down = true;
-    state.nextRepeat = time_source::now() + getWidget().params.repeatDelay;
+    state.nextRepeat = TimeSource::now() + getWidget().params.repeatDelay;
     sendKeyDown(key);
   } else if (ev.type == input::KeyEvent::Release) {
     state.down = false;
@@ -545,5 +545,5 @@ KeyboardRenderObject::drawKey(rmlib::Point pos,
   }
 
   state.dirty = false;
-  return UpdateRegion(keyRect, fb::Waveform::DU, fb::UpdateFlags::Priority);
+  return {keyRect, fb::Waveform::DU, fb::UpdateFlags::Priority};
 }

@@ -12,8 +12,8 @@ namespace {
 
 constexpr auto calc_save_extension = ".sav";
 
-const auto FPS = 100;
-const auto TPS = std::chrono::milliseconds(1000) / FPS;
+const auto fps = 100;
+const auto tps = std::chrono::milliseconds(1000) / fps;
 
 } // namespace
 
@@ -21,7 +21,7 @@ Calculator::Calculator(std::string romPath)
   : romPath(romPath), savePath(romPath + calc_save_extension) {}
 
 CalcState
-Calculator::createState() const {
+Calculator::createState() {
   return CalcState{};
 }
 
@@ -50,7 +50,7 @@ CalcState::init(rmlib::AppContext& context,
   std::cout << "loaded rom, entering mainloop\n";
   lastUpdateTime = std::chrono::steady_clock::now();
   updateTimer = context.addTimer(
-    TPS, [this] { updateCalcState(); }, TPS);
+    tps, [this] { updateCalcState(); }, tps);
 }
 
 CalcState::~CalcState() {
@@ -115,7 +115,7 @@ CalcState::updateCalcState() {
   // Skip frames if we were paused.
   if (diff > std::chrono::seconds(1)) {
     std::cout << "Skipping frames...\n";
-    diff = TPS;
+    diff = tps;
   }
 
   tilem_z80_run_time(

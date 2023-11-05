@@ -139,7 +139,7 @@ private:
 
   const Wrap<Child>* widget;
   std::vector<int> runSizes;
-  Size totalSize;
+  Size totalSize{};
 };
 
 template<typename Child>

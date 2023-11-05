@@ -110,7 +110,7 @@ struct TestContext : rmlib::AppContext {
   template<typename Widget>
   FindResult<typename Widget::RenderObjectType> findByType() {
     auto res =
-      find([typeID = rmlib::typeID::type_id<Widget>()](const auto& ro) {
+      find([typeID = rmlib::type_id::typeId<Widget>()](const auto& ro) {
         return ro->getWidgetTypeID() == typeID;
       });
 

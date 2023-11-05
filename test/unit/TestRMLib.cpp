@@ -118,7 +118,7 @@ TEST_CASE("Sized", "[rmlib][ui]") {
 TEST_CASE("Container", "[rmlib][ui]") {
   auto ctx = TestContext::make();
   ctx.pumpWidget(Center(
-    Container(Text("Test"), Insets::all(5), Insets::all(6), Insets::all(3))));
+    container(Text("Test"), Insets::all(5), Insets::all(6), Insets::all(3))));
   REQUIRE_THAT(ctx.findByType<Padding<Border<Padding<Text>>>>(),
                ctx.matchesGolden("container-text.png"));
 }

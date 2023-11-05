@@ -1,6 +1,7 @@
 #include <functional>
 #include <iostream>
 #include <type_traits>
+#include <utility>
 
 #include <unistd.h>
 
@@ -19,7 +20,7 @@ class LabledInt : public StatelessWidget<LabledInt> {
 public:
   LabledInt(std::string label, int n) : label(std::move(label)), integer(n) {}
 
-  auto build(AppContext& context, const BuildContext&) const {
+  auto build(AppContext& context, const BuildContext& /*unused*/) const {
     return Row(Text(label), Text(std::to_string(integer)));
   }
 
@@ -32,10 +33,10 @@ class ToggleTest : public StatefulWidget<ToggleTest> {
 public:
   class State : public StateBase<ToggleTest> {
   public:
-    auto build(AppContext& context, const BuildContext&) const {
+    auto build(AppContext& context, const BuildContext& /*unused*/) const {
       return GestureDetector(Border(Padding(Text(""), Insets::all(on ? 0 : 8)),
                                     Insets::all(on ? 10 : 2)),
-                             Gestures{}.OnTap([this]() {
+                             Gestures{}.onTap([this]() {
                                setState([](auto& self) { self.on = !self.on; });
                              }));
     }
@@ -44,20 +45,20 @@ public:
     bool on = true;
   };
 
-public:
-  State createState() const { return State{}; }
+
+  static State createState() { return State{}; }
 };
 
 class TimerTest : public StatefulWidget<TimerTest> {
 public:
   class State : public StateBase<TimerTest> {
   public:
-    void init(AppContext& context, const BuildContext&) {
+    void init(AppContext& context, const BuildContext& /*unused*/) {
       timer = context.addTimer(
         std::chrono::seconds(1), [this] { tick(); }, std::chrono::seconds(1));
     }
 
-    auto build(AppContext& context, const BuildContext&) const {
+    auto build(AppContext& context, const BuildContext& /*unused*/) const {
       return Text(getWidget().name + ": " + std::to_string(ticks));
     }
 
@@ -70,9 +71,9 @@ public:
     TimerHandle timer;
   };
 
-  TimerTest(std::string name) : name(name) {}
+  TimerTest(std::string name) : name(std::move(name)) {}
 
-  State createState() const { return State{}; }
+  static State createState() { return State{}; }
 
   std::string name;
 };
@@ -83,15 +84,14 @@ public:
   public:
     void init(AppContext& context) {}
 
-    DynamicWidget build(AppContext& context, const BuildContext&) const {
+    DynamicWidget build(AppContext& context, const BuildContext& /*unused*/) const {
       if (count < 5) {
         return Column(LabledInt("Counter: ", count),
                       Row(Button("-1", [this] { decrease(); }),
                           Button("+1", [this] { increase(); })),
                       TimerTest(std::to_string(count)));
-      } else {
-        return Row(Button("reset", [this]() { reset(); }), ToggleTest());
-      }
+      }         return Row(Button("reset", [this]() { reset(); }), ToggleTest());
+     
     }
 
   private:
@@ -110,16 +110,16 @@ public:
     TimerHandle timer;
   };
 
-public:
-  State createState() const { return State{}; }
+
+  static State createState() { return State{}; }
 };
 
 class TestW : public StatelessWidget<TestW> {
 public:
   TestW(int i) : x(i) {}
 
-  auto build(AppContext&, const BuildContext&) const {
-    return Container(Text("Test: " + std::to_string(x)),
+  auto build(AppContext& /*unused*/, const BuildContext& /*unused*/) const {
+    return container(Text("Test: " + std::to_string(x)),
                      Insets::all(2),
                      Insets::all(2),
                      Insets::all(2));
@@ -135,7 +135,7 @@ public:
   public:
     void init(AppContext& context) {}
 
-    auto build(AppContext& context, const BuildContext&) const {
+    auto build(AppContext& context, const BuildContext& /*unused*/) const {
       std::vector<TestW> widgets;
       for (auto i = 0; i < count; i++) {
         widgets.emplace_back(i);
@@ -162,15 +162,15 @@ public:
     TimerHandle timer;
   };
 
-public:
-  State createState() const { return State{}; }
+
+  static State createState() { return State{}; }
 };
 
 class DialogTest : public StatelessWidget<DialogTest> {
 public:
   DialogTest(std::string msg) : msg(std::move(msg)) {}
 
-  auto build(AppContext&, const BuildContext& ctx) const {
+  auto build(AppContext& /*unused*/, const BuildContext& ctx) const {
     return Center((Border(
       Cleared(Column(
         Text(msg),
@@ -186,7 +186,7 @@ public:
 
 class NavTest : public StatelessWidget<NavTest> {
 public:
-  auto build(AppContext&, const BuildContext& buildCtx) const {
+  static auto build(AppContext& /*unused*/, const BuildContext& buildCtx) {
     return Center(Button("show dialog", [&buildCtx] {
       Navigator::of(buildCtx)
         .push<bool>([] { return DialogTest("First dialog"); })
@@ -211,7 +211,7 @@ class DrawRenderObject;
 
 class Drawer : public rmlib::Widget<DrawRenderObject> {
 public:
-  Drawer() {}
+  Drawer() = default;
 
   std::unique_ptr<rmlib::RenderObject> createRenderObject() const;
 };
@@ -221,7 +221,7 @@ public:
   static constexpr int thickness = 20;
 
   using LeafRenderObject::LeafRenderObject;
-  ~DrawRenderObject() override {}
+  ~DrawRenderObject() override = default;
 
   void update(const Drawer& newWidget) {}
 

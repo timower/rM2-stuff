@@ -17,6 +17,6 @@ DownloadDialog::State::init(AppContext& ctx, const BuildContext& buildCtx) {
 }
 
 DownloadDialog::State
-DownloadDialog::createState() const {
+DownloadDialog::createState() {
   return State{};
 }

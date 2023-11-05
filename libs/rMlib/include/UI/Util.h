@@ -93,7 +93,7 @@ struct UpdateRegion {
   constexpr UpdateRegion() : region(), waveform(fb::Waveform::DU) {}
 
   constexpr UpdateRegion(Rect region)
-    : region(region), waveform(fb::Waveform::GC16Fast) {}
+    : region(region) {}
 
   constexpr UpdateRegion(Rect region, fb::Waveform waveform)
     : region(region), waveform(waveform) {}

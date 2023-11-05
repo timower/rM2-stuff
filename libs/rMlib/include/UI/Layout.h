@@ -372,9 +372,10 @@ private:
   Size childSize;
 };
 
+// TODO: make statless widget
 template<typename Child>
 auto
-Container(Child child,
+container(Child child,
           Insets padding = {},
           Insets border = Insets::all(0),
           Insets margin = {}) {

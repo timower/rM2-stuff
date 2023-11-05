@@ -12,7 +12,7 @@ namespace rmlib {
 template<typename Child>
 class Expanded {
 public:
-  Expanded(Child child, float flex = 1.0f)
+  Expanded(Child child, float flex = 1.0F)
     : child(std::move(child)), flex(flex) {}
 
   std::unique_ptr<RenderObject> createRenderObject() const {
@@ -73,7 +73,7 @@ protected:
                        { Constraints::unbound, constraints.max.height } };
 
     // First layout non flex children with unbounded contraints.
-    for (auto i = 0u; i < num_children; i++) {
+    for (auto i = 0U; i < num_children; i++) {
       if (this->widget->flexes[i] != 0) {
         continue;
       }
@@ -108,7 +108,7 @@ protected:
 
     // TODO: if totalFlex or remainingSpace changed, then we need to re-layout
 
-    for (auto i = 0u; i < num_children; i++) {
+    for (auto i = 0U; i < num_children; i++) {
       const auto flex = this->widget->flexes[i];
       if (flex == 0) {
         continue;
@@ -161,7 +161,7 @@ protected:
     const auto maxSize = isVertical() ? rect.height() : rect.width();
     auto offset = (maxSize - totalSize) / 2;
 
-    for (auto i = 0u; i < num_children; i++) {
+    for (auto i = 0U; i < num_children; i++) {
       const auto& size = childSizes[i];
       const auto& child = this->children[i];
 
@@ -194,7 +194,7 @@ private:
 
   // TODO: remove both:
   std::array<Size, num_children> childSizes;
-  int totalSize;
+  int totalSize{};
 };
 
 template<typename... Children>
@@ -207,7 +207,7 @@ private:
   struct IsExpanded<Expanded<T>> : std::true_type {};
 
   template<typename T>
-  static float GetFlex(const T& t) {
+  static float getFlex(const T& t) {
     if constexpr (IsExpanded<T>::value) {
       return t.flex;
     } else {
@@ -217,7 +217,7 @@ private:
 
 public:
   Flex(Axis axis, Children... children)
-    : flexes{ GetFlex(children)... }
+    : flexes{ getFlex(children)... }
     , children(std::move(children)...)
     , axis(axis) {}
 

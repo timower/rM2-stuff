@@ -21,7 +21,7 @@ private:
 
   struct DynamicWidgetBase {
     virtual std::unique_ptr<RenderObject> createRenderObject() const = 0;
-    virtual void update(RenderObject& RO) const = 0;
+    virtual void update(RenderObject& ro) const = 0;
     virtual ~DynamicWidgetBase() = default;
   };
 
@@ -34,8 +34,8 @@ private:
     }
 
     void update(RenderObject& ro) const final {
-      auto& dynRo = *static_cast<DynamicRenderObject*>(&ro);
-      if (dynRo.getChild().getWidgetTypeID() != typeID::type_id<W>()) {
+      auto& dynRo = *dynamic_cast<DynamicRenderObject*>(&ro);
+      if (dynRo.getChild().getWidgetTypeID() != type_id::typeId<W>()) {
         dynRo.setChild(widget.createRenderObject());
       } else {
         widget.update(dynRo.getChild());
@@ -55,7 +55,7 @@ public:
     return mWidget->createRenderObject();
   }
 
-  void update(RenderObject& RO) const { mWidget->update(RO); }
+  void update(RenderObject& ro) const { mWidget->update(ro); }
 
 private:
   // TODO: shared pointer? A widget should be copyable...

@@ -22,7 +22,7 @@ private:
 class ScreenRenderObject : public rmlib::LeafRenderObject<Screen> {
 public:
   ScreenRenderObject(const Screen& widget);
-  ~ScreenRenderObject();
+  ~ScreenRenderObject() override;
 
   static void stateFrameCallback(TilemCalc* calc, void* selfPtr);
 

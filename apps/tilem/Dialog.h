@@ -24,7 +24,7 @@ public:
 
   DownloadDialog(std::string_view romPath) : romPath(romPath) {}
 
-  State createState() const;
+  static State createState();
 
   std::string romPath;
 };

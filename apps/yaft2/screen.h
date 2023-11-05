@@ -36,7 +36,7 @@ protected:
 
   rmlib::UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) final;
 
-  void doRebuild(rmlib::AppContext& ctx, const rmlib::BuildContext&) final;
+  void doRebuild(rmlib::AppContext& ctx, const rmlib::BuildContext& /*buildContext*/) final;
 
   void handleInput(const rmlib::input::Event& ev) final;
 

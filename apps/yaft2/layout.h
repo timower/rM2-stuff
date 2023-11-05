@@ -7,7 +7,7 @@ struct KeyInfo {
   std::string_view name;
   int code;
 
-  std::string_view altName = "";
+  std::string_view altName{};
   int altCode = 0;
 
   int width = 1;

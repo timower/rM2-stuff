@@ -15,10 +15,10 @@ class Button : public StatefulWidget<Button> {
                                             Insets::all(2)),
                                      Insets::all(2)),
                              Gestures{}
-                               .OnTouchDown([this](auto pos) {
+                               .onTouchDown([this](auto pos) {
                                  setState([](auto& self) { self.down = true; });
                                })
-                               .OnTap([this] {
+                               .onTap([this] {
                                  setState(
                                    [](auto& self) { self.down = false; });
                                  getWidget().onClick();
@@ -33,7 +33,7 @@ public:
   Button(std::string text, Callback onClick)
     : text(std::move(text)), onClick(std::move(onClick)) {}
 
-  State createState() const { return State{}; }
+  static State createState() { return State{}; }
 
 private:
   std::string text;

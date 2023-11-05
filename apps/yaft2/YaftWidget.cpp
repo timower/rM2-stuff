@@ -15,17 +15,17 @@
 using namespace rmlib;
 
 namespace {
-const char* term_name = "yaft-256color";
+const char* termName = "yaft-256color";
 
 AppContext* globalCtx = nullptr;
 
 void
-sig_handler(int signo) {
+sigHandler(int signo) {
   if (signo == SIGCHLD) {
     if (globalCtx != nullptr) {
       globalCtx->stop();
     }
-    wait(NULL);
+    wait(nullptr);
   }
 }
 
@@ -33,21 +33,21 @@ void
 initSignalHandler(AppContext& ctx) {
   globalCtx = &ctx;
 
-  struct sigaction sigact;
+  struct sigaction sigact{};
   memset(&sigact, 0, sizeof(struct sigaction));
-  sigact.sa_handler = sig_handler;
+  sigact.sa_handler = sigHandler;
   sigact.sa_flags = SA_RESTART;
-  sigaction(SIGCHLD, &sigact, NULL);
+  sigaction(SIGCHLD, &sigact, nullptr);
 }
 
 bool
-fork_and_exec(int* master,
+forkAndExec(int* master,
               const char* cmd,
               char* const argv[],
               int lines,
               int cols) {
-  pid_t pid;
-  struct winsize ws;
+  pid_t pid = 0;
+  struct winsize ws{};
   ws.ws_row = lines;
   ws.ws_col = cols;
   /* XXX: this variables are UNUSED (man tty_ioctl),
@@ -55,11 +55,11 @@ fork_and_exec(int* master,
   ws.ws_ypixel = CELL_HEIGHT * lines;
   ws.ws_xpixel = CELL_WIDTH * cols;
 
-  pid = eforkpty(master, NULL, NULL, &ws);
+  pid = eforkpty(master, nullptr, nullptr, &ws);
   if (pid < 0) {
     return false;
-  } else if (pid == 0) { /* child */
-    setenv("TERM", term_name, 1);
+  } if (pid == 0) { /* child */
+    setenv("TERM", termName, 1);
     execvp(cmd, argv);
     /* never reach here */
     exit(EXIT_FAILURE);
@@ -80,7 +80,7 @@ YaftState::logTerm(std::string_view str) {
 }
 
 void
-YaftState::init(rmlib::AppContext& ctx, const rmlib::BuildContext&) {
+YaftState::init(rmlib::AppContext& ctx, const rmlib::BuildContext& /*unused*/) {
   term = std::make_unique<terminal_t>();
 
   // term_init needs the maximum size of the terminal.
@@ -97,7 +97,7 @@ YaftState::init(rmlib::AppContext& ctx, const rmlib::BuildContext&) {
 
   initSignalHandler(ctx);
 
-  if (!fork_and_exec(&term->fd,
+  if (!forkAndExec(&term->fd,
                      getWidget().cmd,
                      getWidget().argv,
                      term->lines,
@@ -107,27 +107,27 @@ YaftState::init(rmlib::AppContext& ctx, const rmlib::BuildContext&) {
   }
 
   ctx.listenFd(term->fd, [this] {
-    std::array<char, 512> buf;
-    auto size = read(term->fd, &buf[0], buf.size());
+    std::array<char, 512> buf{};
+    auto size = read(term->fd, buf.data(), buf.size());
 
     // Only update if the buffer isn't full. Otherwise more data is comming
     // probably.
     if (size != buf.size()) {
       setState([&](auto& self) {
-        parse(self.term.get(), reinterpret_cast<uint8_t*>(&buf[0]), size);
+        parse(self.term.get(), reinterpret_cast<uint8_t*>(buf.data()), size);
       });
     } else {
-      parse(term.get(), reinterpret_cast<uint8_t*>(&buf[0]), size);
+      parse(term.get(), reinterpret_cast<uint8_t*>(buf.data()), size);
     }
   });
 
   // listen to stdin in debug.
-  if constexpr (USE_STDIN) {
+  if constexpr (USE_STDIN != 0U) {
     ctx.listenFd(STDIN_FILENO, [this] {
-      std::array<char, 512> buf;
-      auto size = read(STDIN_FILENO, &buf[0], buf.size());
+      std::array<char, 512> buf{};
+      auto size = read(STDIN_FILENO, buf.data(), buf.size());
       if (size > 0) {
-        write(term->fd, &buf[0], size);
+        write(term->fd, buf.data(), size);
       }
     });
   }
@@ -153,6 +153,6 @@ YaftState::checkLandscape(rmlib::AppContext& ctx) {
 }
 
 YaftState
-Yaft::createState() const {
+Yaft::createState() {
   return {};
 }

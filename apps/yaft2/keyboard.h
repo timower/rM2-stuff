@@ -47,7 +47,7 @@ private:
 ///
 ///
 class KeyboardRenderObject : public rmlib::LeafRenderObject<Keyboard> {
-  using time_source = std::chrono::steady_clock;
+  using TimeSource = std::chrono::steady_clock;
 
 public:
   KeyboardRenderObject(const Keyboard& keyboard);
@@ -55,7 +55,8 @@ public:
   void update(const Keyboard& keyboard);
 
 protected:
-  void doRebuild(rmlib::AppContext& ctx, const rmlib::BuildContext&) final;
+  void doRebuild(rmlib::AppContext& ctx,
+                 const rmlib::BuildContext& /*buildContext*/) final;
 
   rmlib::Size doLayout(const rmlib::Constraints& constraints) final;
   rmlib::UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) final;
@@ -85,8 +86,8 @@ private:
                               rmlib::Canvas& canvas);
 
   // fields
-  float keyWidth;
-  float keyHeight;
+  float keyWidth{};
+  float keyHeight{};
 
   struct KeyState {
     int slot = -1;
@@ -98,7 +99,7 @@ private:
 
     bool isDown() const { return slot != -1 || stuck || held; }
 
-    time_source::time_point nextRepeat;
+    TimeSource::time_point nextRepeat;
   };
 
   const KeyInfo* shiftKey = nullptr;
@@ -108,7 +109,7 @@ private:
 
   struct PhysKeyState {
     bool down = false;
-    time_source::time_point nextRepeat;
+    TimeSource::time_point nextRepeat;
   };
   std::unordered_map<const EvKeyInfo*, PhysKeyState> physKeyState;
 

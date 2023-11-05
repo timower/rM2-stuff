@@ -43,7 +43,7 @@ protected:
     const auto textSize =
       rmlib::Canvas::getTextSize(widget->text, widget->fontSize);
 
-    Size result;
+    Size result{};
 
     if (textSize.x > constraints.max.width) {
       result.width = constraints.max.width;

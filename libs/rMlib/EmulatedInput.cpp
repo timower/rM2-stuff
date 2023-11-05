@@ -14,10 +14,10 @@
 namespace rmlib::input {
 
 void
-InputDeviceBase::grab() {}
+InputDeviceBase::grab() const {}
 
 void
-InputDeviceBase::ungrab() {}
+InputDeviceBase::ungrab() const {}
 
 namespace {
 struct FakeInputDevice : public InputDeviceBase {

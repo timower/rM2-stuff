@@ -182,7 +182,7 @@ private:
   bool mShouldStop = false;
 
   std::unique_ptr<RenderObject> rootRO;
-  Constraints rootConstraints;
+  Constraints rootConstraints{};
 };
 
 } // namespace rmlib

@@ -35,7 +35,7 @@ protected:
   void drawKey(rmlib::Canvas& canvas,
                rmlib::Point pos,
                const Key& key,
-               int keyWidth);
+               int keyWidth) const;
 
   rmlib::UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) final;
 
@@ -47,8 +47,8 @@ private:
 
   std::vector<std::pair<rmlib::Rect, const Key*>> keyLocations;
   std::unordered_map<int, const Key*> keyPointers;
-  int keyWidth;
-  int keyHeight;
-  int padding;
+  int keyWidth{};
+  int keyHeight{};
+  int padding{};
 };
 } // namespace tilem

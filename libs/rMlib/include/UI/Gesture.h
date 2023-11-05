@@ -11,46 +11,48 @@ using PosCallback = std::function<void(Point)>;
 using KeyCallback = std::function<void(int)>;
 
 struct Gestures {
-  Callback onAny;
-  Callback onTap;
+  Callback onAnyFn;
+  Callback onTapFn;
 
-  PosCallback onTouchMove;
-  PosCallback onTouchDown;
+  PosCallback onTouchMoveFn;
+  PosCallback onTouchDownFn;
 
-  KeyCallback onKeyDown;
-  KeyCallback onKeyUp;
+  KeyCallback onKeyDownFn;
+  KeyCallback onKeyUpFn;
 
-  Gestures& OnTap(Callback cb) {
-    onTap = std::move(cb);
+  Gestures& onTap(Callback cb) {
+    onTapFn = std::move(cb);
     return *this;
   }
 
-  Gestures& OnTouchMove(PosCallback cb) {
-    onTouchMove = std::move(cb);
+  Gestures& onTouchMove(PosCallback cb) {
+    onTouchMoveFn = std::move(cb);
     return *this;
   }
 
-  Gestures& OnTouchDown(PosCallback cb) {
-    onTouchDown = std::move(cb);
+  Gestures& onTouchDown(PosCallback cb) {
+    onTouchDownFn = std::move(cb);
     return *this;
   }
 
-  Gestures& OnKeyDown(KeyCallback cb) {
-    onKeyDown = std::move(cb);
+  Gestures& onKeyDown(KeyCallback cb) {
+    onKeyDownFn = std::move(cb);
     return *this;
   }
 
-  Gestures& OnKeyUp(KeyCallback cb) {
-    onKeyUp = std::move(cb);
+  Gestures& onKeyUp(KeyCallback cb) {
+    onKeyUpFn = std::move(cb);
     return *this;
   }
 
-  Gestures& OnAny(Callback cb) {
-    onAny = std::move(cb);
+  Gestures& onAny(Callback cb) {
+    onAnyFn = std::move(cb);
     return *this;
   }
 
-  bool handlesTouch() const { return onTap || onTouchDown || onTouchMove; }
+  bool handlesTouch() const {
+    return onTapFn || onTouchDownFn || onTouchMoveFn;
+  }
 };
 
 template<typename Child>
@@ -64,8 +66,8 @@ public:
     GestureDetector<Child>>::SingleChildRenderObject;
 
   void handleInput(const rmlib::input::Event& ev) final {
-    if (this->widget->gestures.onAny) {
-      this->widget->gestures.onAny();
+    if (this->widget->gestures.onAnyFn) {
+      this->widget->gestures.onAnyFn();
     }
 
     std::visit(
@@ -77,8 +79,8 @@ public:
               currentId = ev.id;
             }
 
-            if (this->widget->gestures.onTouchDown) {
-              this->widget->gestures.onTouchDown(ev.location);
+            if (this->widget->gestures.onTouchDownFn) {
+              this->widget->gestures.onTouchDownFn(ev.location);
               return;
             }
           }
@@ -86,27 +88,27 @@ public:
           if (ev.id == currentId) {
             if (ev.isUp()) {
               currentId = -1;
-              if (this->widget->gestures.onTap) {
-                this->widget->gestures.onTap();
+              if (this->widget->gestures.onTapFn) {
+                this->widget->gestures.onTapFn();
               }
               return;
             }
 
-            if (ev.isMove() && this->widget->gestures.onTouchMove) {
-              this->widget->gestures.onTouchMove(ev.location);
+            if (ev.isMove() && this->widget->gestures.onTouchMoveFn) {
+              this->widget->gestures.onTouchMoveFn(ev.location);
               return;
             }
           }
         } else {
           if (ev.type == input::KeyEvent::Press &&
-              this->widget->gestures.onKeyDown) {
-            this->widget->gestures.onKeyDown(ev.keyCode);
+              this->widget->gestures.onKeyDownFn) {
+            this->widget->gestures.onKeyDownFn(ev.keyCode);
             return;
           }
 
           if (ev.type == input::KeyEvent::Release &&
-              this->widget->gestures.onKeyUp) {
-            this->widget->gestures.onKeyUp(ev.keyCode);
+              this->widget->gestures.onKeyUpFn) {
+            this->widget->gestures.onKeyUpFn(ev.keyCode);
             return;
           }
         }

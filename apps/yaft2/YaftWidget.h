@@ -19,7 +19,7 @@ public:
     , cmd(cmd)
     , argv(argv) {}
 
-  YaftState createState() const;
+  static YaftState createState() ;
 
 private:
   friend class YaftState;
@@ -38,7 +38,7 @@ public:
   /// Logs the given string to the terminal console.
   void logTerm(std::string_view str);
 
-  void init(rmlib::AppContext& ctx, const rmlib::BuildContext&);
+  void init(rmlib::AppContext& ctx, const rmlib::BuildContext& /*unused*/);
 
   void checkLandscape(rmlib::AppContext& ctx);
 

@@ -20,8 +20,8 @@ class StateBase;
 namespace details {
 
 template<typename DerivedSW>
-using StateType =
-  std::result_of_t<decltype (&DerivedSW::createState)(const DerivedSW)>;
+using StateType = decltype(std::declval<const DerivedSW>().createState());
+// using StateType = std::result_of_t<decltype (&DerivedSW::createState)()>;
 
 template<typename DerivedSW>
 using WidgetType = std::result_of_t<decltype (&StateType<DerivedSW>::build)(
@@ -38,7 +38,7 @@ public:
     mRenderObject = &renderObject;
   }
 
-  void init(AppContext&, const BuildContext&) {
+  void init(AppContext& /*unused*/, const BuildContext& /*unused*/) {
     static_assert(std::is_base_of_v<StateBase<DerivedSW>,
                                     typename details::StateType<DerivedSW>>,
                   "State must derive StateBase");
@@ -92,7 +92,7 @@ public:
 
   // Provide a desctructor that destroys the child before destroying the
   // widgets.
-  virtual ~StatefulRenderObject() { this->child = nullptr; }
+  ~StatefulRenderObject() override { this->child = nullptr; }
 
 protected:
   void doRebuild(AppContext& context, const BuildContext& buildCtx) override {

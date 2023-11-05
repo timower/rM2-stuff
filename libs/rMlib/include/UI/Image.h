@@ -76,7 +76,7 @@ public:
   using LeafRenderObject<Image>::LeafRenderObject;
 
   void update(const Image& newWidget) {
-    if (newWidget.canvas != widget->canvas) {
+    if (newWidget.canvas.getMemory() != widget->canvas.getMemory()) {
       markNeedsDraw();
     }
     widget = &newWidget;

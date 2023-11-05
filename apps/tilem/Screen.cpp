@@ -78,8 +78,8 @@ ScreenRenderObject::doDraw(Rect rect, Canvas& canvas) {
   if (lcd->contrast == 0) {
     canvas.set(rect, black);
   } else {
-    float inc_x = float(lcd->width) / rect.width();
-    float inc_y = float(lcd->height) / rect.height();
+    float incX = float(lcd->width) / rect.width();
+    float incY = float(lcd->height) / rect.height();
 
     const auto canvasStride = canvas.lineSize() / sizeof(uint16_t);
     auto* canvasLinePtr =
@@ -93,14 +93,14 @@ ScreenRenderObject::doDraw(Rect rect, Canvas& canvas) {
       float subX = 0;
       for (int x = rect.topLeft.x; x <= rect.bottomRight.x; x++) {
         const uint8_t data = lcdRow[int(subX)];
-        const uint16_t pixel = data ? black : white;
+        const uint16_t pixel = data != 0U ? black : white;
 
         *canvasPtr = pixel;
 
-        subX += inc_x;
+        subX += incX;
         canvasPtr += 1;
       }
-      subY += inc_y;
+      subY += incY;
       canvasLinePtr += canvasStride;
     }
   }

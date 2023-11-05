@@ -154,6 +154,14 @@ public:
   }
 
   bool operator==(const Canvas& other) const {
+    if (memory == other.memory) {
+      return true;
+    }
+
+    if (memory == nullptr || other.memory == nullptr) {
+      return false;
+    }
+
     if (mWidth != other.mWidth) {
       return false;
     }
@@ -169,7 +177,7 @@ public:
     for (int y = 0; y < mHeight; y++) {
       const auto* line = getPtr(0, y);
       const auto* otherLine = other.getPtr(0, y);
-      if (memcmp(line, otherLine, width()) != 0) {
+      if (memcmp(line, otherLine, mWidth * mComponents) != 0) {
         std::cout << "Diff at line " << y << "\n";
         return false;
       }

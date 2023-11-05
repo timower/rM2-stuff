@@ -14,7 +14,7 @@ class Calculator : public rmlib::StatefulWidget<Calculator> {
 public:
   Calculator(std::string romPath);
 
-  CalcState createState() const;
+  static CalcState createState() ;
 
 private:
   friend class CalcState;
@@ -27,24 +27,24 @@ class CalcState : public rmlib::StateBase<Calculator> {
 public:
   void init(rmlib::AppContext& context, const rmlib::BuildContext& buildCtx);
 
-  auto closeButton(rmlib::AppContext& context, int fontSize) const {
+  static auto closeButton(rmlib::AppContext& context, int fontSize) {
     using namespace rmlib;
 
     return Sized(GestureDetector(
                    Border(Text("X", fontSize), Insets{ 0, 0, /* left */ 2, 0 }),
-                   Gestures{}.OnTap([&context] { context.stop(); })),
+                   Gestures{}.onTap([&context] { context.stop(); })),
                  fontSize,
                  fontSize);
   }
 
-  auto header(rmlib::AppContext& context, int width) const {
+  static auto header(rmlib::AppContext& context, int width) {
     using namespace rmlib;
 
-    constexpr auto fontSize = 48;
+    constexpr auto font_size = 48;
     // TODO: expand option
     return Border(
-      Row(Sized(Text("TilEm", fontSize), width - fontSize - 2, std::nullopt),
-          closeButton(context, fontSize)),
+      Row(Sized(Text("TilEm", font_size), width - font_size - 2, std::nullopt),
+          closeButton(context, font_size)),
       Insets::all(1));
   }
 

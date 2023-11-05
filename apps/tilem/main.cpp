@@ -13,9 +13,9 @@ constexpr auto calc_default_rom = "/home/root/ti84plus.rom";
 
 int
 main(int argc, char* argv[]) {
-  const auto* calc_name = argc > 1 ? argv[1] : calc_default_rom;
+  const auto* calcName = argc > 1 ? argv[1] : calc_default_rom;
 
-  fatalOnError(runApp(Navigator(tilem::Calculator(calc_name))));
+  fatalOnError(runApp(Navigator(tilem::Calculator(calcName))));
 
   return EXIT_SUCCESS;
 }

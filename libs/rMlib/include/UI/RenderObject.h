@@ -26,7 +26,7 @@ class RenderObject {
   static inline int roCount = 0;
 
 public:
-  RenderObject(typeID::type_id_t typeID) : mTypeID(typeID), mID(roCount++) {
+  RenderObject(type_id::TypeIdT typeID) : mTypeID(typeID), mID(roCount++) {
 #ifndef NDEBUG
     std::cout << "alloc RO: " << mID << "\n";
 #endif
@@ -123,12 +123,12 @@ public:
     needsDrawCache.reset();
   }
 
-  typeID::type_id_t getWidgetTypeID() const { return mTypeID; }
+  type_id::TypeIdT getWidgetTypeID() const { return mTypeID; }
 
   virtual std::vector<RenderObject*> getChildren() = 0;
 
 protected:
-  virtual Size doLayout(const Constraints& Constraints) = 0;
+  virtual Size doLayout(const Constraints& constraints) = 0;
   virtual UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) = 0;
   virtual void doRebuild(AppContext& context,
                          const BuildContext& buildContext) {}
@@ -139,7 +139,7 @@ protected:
   bool isPartialDraw() const { return mNeedsDraw == Partial; }
   bool isFullDraw() const { return mNeedsDraw == Full; }
 
-  typeID::type_id_t mTypeID;
+  type_id::TypeIdT mTypeID;
   std::optional<BuildContext> buildContext;
 
 private:
@@ -171,7 +171,7 @@ public:
   using WidgetType = Widget;
 
   LeafRenderObject(const Widget& widget)
-    : RenderObject(typeID::type_id<Widget>()), widget(&widget) {}
+    : RenderObject(type_id::typeId<Widget>()), widget(&widget) {}
 
   std::vector<RenderObject*> getChildren() final { return {}; }
   const Widget& getWidget() { return *widget; }
@@ -186,19 +186,19 @@ public:
   using WidgetType = Widget;
 
   SingleChildRenderObject(const Widget& widget)
-    : RenderObject(typeID::type_id<Widget>())
+    : RenderObject(type_id::typeId<Widget>())
     , widget(&widget)
     , child(widget.child.createRenderObject()) {}
 
   SingleChildRenderObject(const Widget& widget,
                           std::unique_ptr<RenderObject> child)
-    : RenderObject(typeID::type_id<Widget>())
+    : RenderObject(type_id::typeId<Widget>())
     , widget(&widget)
     , child(std::move(child)) {}
 
   SingleChildRenderObject(const Widget* widget,
                           std::unique_ptr<RenderObject> child)
-    : RenderObject(typeID::type_id<Widget>())
+    : RenderObject(type_id::typeId<Widget>())
     , widget(widget)
     , child(std::move(child)) {}
 
@@ -293,7 +293,7 @@ public:
   using WidgetType = Widget;
 
   MultiChildRenderObject(std::vector<std::unique_ptr<RenderObject>> children)
-    : RenderObject(typeID::type_id<Widget>()), children(std::move(children)) {}
+    : RenderObject(type_id::typeId<Widget>()), children(std::move(children)) {}
 
   void handleInput(const rmlib::input::Event& ev) override {
     for (const auto& child : children) {
@@ -405,7 +405,7 @@ protected:
 template<typename RO>
 const RO*
 BuildContext::getRenderObject() const {
-  const auto widgetTypeID = typeID::type_id<typename RO::WidgetType>();
+  const auto widgetTypeID = type_id::typeId<typename RO::WidgetType>();
 
   if (renderObject.getWidgetTypeID() == widgetTypeID) {
     return static_cast<const RO*>(&renderObject);

@@ -26,7 +26,7 @@ private:
 };
 
 class Timer {
-  using clock = std::chrono::steady_clock;
+  using Clock = std::chrono::steady_clock;
 
 public:
   static std::pair<std::shared_ptr<Timer>, TimerHandle> makeTimer(
@@ -46,7 +46,7 @@ public:
       return true;
     }
 
-    if (clock::now() >= triggerTime) {
+    if (Clock::now() >= triggerTime) {
       callback();
       return true;
     }
@@ -56,14 +56,14 @@ public:
 
   std::chrono::microseconds getDuration() const {
     return std::chrono::duration_cast<std::chrono::microseconds>(triggerTime -
-                                                                 clock::now());
+                                                                 Clock::now());
   }
 
   bool repeats() const { return repeat.has_value(); }
 
   void reset() {
     assert(repeats());
-    triggerTime = clock::now() + *repeat;
+    triggerTime = Clock::now() + *repeat;
   }
 
   void disable() {
@@ -76,13 +76,13 @@ private:
         Callback callback,
         std::optional<std::chrono::microseconds> repeat = std::nullopt)
     : repeat(repeat)
-    , triggerTime(clock::now() + duration)
+    , triggerTime(Clock::now() + duration)
     , callback(std::move(callback)) {}
 
   friend struct TimerCmp;
 
   std::optional<std::chrono::microseconds> repeat;
-  clock::time_point triggerTime;
+  Clock::time_point triggerTime;
   Callback callback;
   bool enabled = true;
 };

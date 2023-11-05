@@ -5,22 +5,20 @@
 #include <UI/Stack.h>
 #include <UI/StatefulWidget.h>
 
-#include <any>
-
 namespace rmlib {
 
 namespace details {
 class UniqueAny {
   struct AnyBase {
-    AnyBase(typeID::type_id_t id) : currentType(id) {}
+    AnyBase(type_id::TypeIdT id) : currentType(id) {}
     virtual ~AnyBase() = default;
 
-    typeID::type_id_t currentType;
+    type_id::TypeIdT currentType;
   };
 
   template<typename T>
   struct AnyImpl : AnyBase {
-    AnyImpl(T val) : AnyBase(typeID::type_id<T>()), value(std::move(val)) {}
+    AnyImpl(T val) : AnyBase(type_id::typeId<T>()), value(std::move(val)) {}
     T value;
   };
 
@@ -35,7 +33,7 @@ public:
 
   template<typename T>
   T get() {
-    assert(contents->currentType == typeID::type_id<T>());
+    assert(contents->currentType == type_id::typeId<T>());
     auto* impl = static_cast<AnyImpl<T>*>(contents.get());
     return std::move(impl->value);
   }
@@ -57,7 +55,7 @@ class Navigator : public StatefulWidget<Navigator> {
 private:
   class State : public StateBase<Navigator> {
   public:
-    void init(AppContext&, const BuildContext&) {
+    void init(AppContext& /*unused*/, const BuildContext& /*unused*/) {
       entries.reserve(getWidget().initElems.size());
       std::transform(getWidget().initElems.begin(),
                      getWidget().initElems.end(),
@@ -67,7 +65,7 @@ private:
                      });
     }
 
-    auto build(AppContext& context, const BuildContext&) const {
+    auto build(AppContext& context, const BuildContext& /*unused*/) const {
       std::vector<DynamicWidget> widgets;
       widgets.reserve(entries.size());
       std::transform(entries.begin(),
@@ -139,7 +137,7 @@ public:
   Navigator(std::vector<WidgetBuilder> initElems)
     : initElems(std::move(initElems)) {}
 
-  State createState() const { return State(); }
+  static State createState() { return {}; }
 
   static const State& of(const BuildContext& buildCtx) {
     return StatefulWidget::getState(buildCtx);

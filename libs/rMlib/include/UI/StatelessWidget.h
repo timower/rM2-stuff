@@ -10,8 +10,11 @@ class StatelessWidget;
 
 template<typename Derived>
 class StatelessRenderObject : public SingleChildRenderObject<Derived> {
-  using WidgetT = std::result_of_t<decltype (
-    &Derived::build)(const Derived, AppContext&, const BuildContext&)>;
+  using WidgetT = decltype(std::declval<const Derived>().build(
+    std::declval<AppContext&>(),
+    std::declval<const BuildContext&>()));
+  // using WidgetT = std::result_of_t<decltype (
+  //   &Derived::build)(const Derived, AppContext&, const BuildContext&)>;
 
 public:
   StatelessRenderObject(const Derived& widget)
