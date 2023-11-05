@@ -14,6 +14,8 @@ using namespace rmlib;
 
 namespace {
 
+constexpr std::array static_app_paths = { "/opt/etc/draft", "/etc/draft" };
+
 #ifndef KEY_POWER
 #define KEY_POWER 116
 #endif
@@ -193,7 +195,7 @@ class LauncherState;
 
 class LauncherWidget : public StatefulWidget<LauncherWidget> {
 public:
-  static LauncherState createState() ;
+  static LauncherState createState();
 };
 
 constexpr auto default_sleep_timeout = 10;
@@ -254,13 +256,14 @@ public:
       if (sleepCountdown > 0) {
         return Button(
           "Stop", [this] { setState([](auto& self) { self.stopTimer(); }); });
-      } if (sleepCountdown == 0) {
+      }
+      if (sleepCountdown == 0) {
         // TODO: make hideable?
         return Button("...", [] {});
-      }         return Button("Sleep", [this, &context] {
-          setState([&context](auto& self) { self.startTimer(context, 0); });
-        });
-     
+      }
+      return Button("Sleep", [this, &context] {
+        setState([&context](auto& self) { self.startTimer(context, 0); });
+      });
     }();
 
     return Center(Padding(
@@ -348,10 +351,9 @@ private:
 
         // If there is no irq it must be the user which pressed the button:
         return true;
-
-      }         std::cout << "Reason for wake irq: " << *irq << std::endl;
-        return false;
-     
+      }
+      std::cout << "Reason for wake irq: " << *irq << std::endl;
+      return false;
     }
 
     return false;
@@ -501,16 +503,27 @@ private:
   }
 
   void readApps() {
-#ifdef EMULATE
-    const auto apps_path = [] {
-      const auto* home = getenv("HOME");
-      return std::string(home) + "/.config/draft";
-    }();
-#else
-    constexpr auto apps_path = "/etc/draft";
-#endif
+    const static auto app_paths = [] {
+      std::vector<std::string> paths;
+      std::transform(static_app_paths.begin(),
+                     static_app_paths.end(),
+                     std::back_inserter(paths),
+                     [](const auto* str) { return std::string(str); });
 
-    auto appDescriptions = readAppFiles(apps_path);
+      if (const auto* home = getenv("HOME"); home != nullptr) {
+        paths.push_back(std::string(home) + "/.config/draft");
+      }
+
+      return paths;
+    }();
+
+    std::vector<AppDescription> appDescriptions;
+    for (const auto& appsPath : app_paths) {
+      auto decriptions = readAppFiles(appsPath);
+      std::move(decriptions.begin(),
+                decriptions.end(),
+                std::back_inserter(appDescriptions));
+    }
 
     // Update known apps.
     for (auto appIt = apps.begin(); appIt != apps.end();) {
@@ -526,9 +539,11 @@ private:
         if (!appIt->isRunning()) {
           appIt = apps.erase(appIt);
           continue;
-        }           // Defer removing until exit.
-          appIt->runInfo->shouldRemove = true;
-       
+        }
+
+        // Defer removing until exit.
+        appIt->runInfo->shouldRemove = true;
+
       } else {
 
         // Update existing apps.
