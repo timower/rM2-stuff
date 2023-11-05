@@ -3,7 +3,7 @@ add_subdirectory(unit)
 if (COVERAGE)
   set(COVERAGE_OUT "${CMAKE_BINARY_DIR}/coverage")
 
-  set(IGNORE_REGEX "'build/|stb_.*|test/unit/|tilem/emu|libYaft'")
+  set(IGNORE_REGEX "'build/|stb_.*|test/unit/|tilem/emu|vendor/'")
 
   set(OBJECTS "$<TARGET_FILE:unit-tests>")
 

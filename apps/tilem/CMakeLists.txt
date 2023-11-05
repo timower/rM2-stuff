@@ -1,7 +1,5 @@
 project(tilem)
 
-add_subdirectory(emu)
-
 add_library(tilem_lib OBJECT
    KeyPad.cpp Screen.cpp Dialog.cpp Calculator.cpp)
 add_library(tilem::lib ALIAS tilem_lib)
