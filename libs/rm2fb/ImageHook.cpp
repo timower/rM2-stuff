@@ -3,7 +3,7 @@
 #include <dlfcn.h>
 #include <iostream>
 
-SharedFB fb(DEFAULT_FB_NAME);
+SharedFB fb(default_fb_name);
 
 extern "C" {
 

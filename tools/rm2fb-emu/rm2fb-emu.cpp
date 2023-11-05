@@ -1,22 +1,24 @@
-#include "Messages.h"
 #include "Socket.h"
+
+// rm2fb
+#include <Message.h>
+#include <uinput.h>
 
 #include <unistdpp/socket.h>
 
 #include <FrameBuffer.h>
 #include <Input.h>
 
-#include <vector>
-
 #include <arpa/inet.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <netdb.h>
 #include <netinet/in.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <vector>
 
 using namespace unistdpp;
 using namespace rmlib::input;
@@ -88,7 +90,7 @@ main(int argc, char* argv[]) {
       continue;
     }
 
-    auto msgOrErr = sock->readAll<Params>();
+    auto msgOrErr = sock->readAll<UpdateParams>();
     if (!msgOrErr) {
       std::cerr << "Error reading: " << toString(msgOrErr.error()) << "\n";
       break;

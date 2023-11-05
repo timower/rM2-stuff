@@ -7,8 +7,9 @@ constexpr int fb_height = 1872;
 constexpr int fb_pixel_size = sizeof(uint16_t);
 constexpr int fb_size = fb_width * fb_height * fb_pixel_size;
 
-#define DEFAULT_FB_NAME "/rm2fb.01"
+constexpr auto default_fb_name = "/rm2fb.01";
 
+// TODO: use unistdpp
 struct SharedFB {
   int fd = -1;
   uint16_t* mem = nullptr;
@@ -19,6 +20,6 @@ struct SharedFB {
   SharedFB(const SharedFB& other) = delete;
   SharedFB& operator=(const SharedFB& other) = delete;
 
-  SharedFB(SharedFB&& other);
-  SharedFB& operator=(SharedFB&& other);
+  SharedFB(SharedFB&& other) noexcept;
+  SharedFB& operator=(SharedFB&& other) noexcept;
 };

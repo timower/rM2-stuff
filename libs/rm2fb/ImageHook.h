@@ -2,4 +2,4 @@
 
 #include "SharedBuffer.h"
 
-extern SharedFB fb;
+extern SharedFB fb; // NOLINT

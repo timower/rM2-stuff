@@ -2,11 +2,6 @@
 
 #include "Message.h"
 
-#include <cstdint>
-#include <optional>
-#include <string_view>
-#include <variant>
-
 class AddressInfoBase {
 public:
   using UpdateFn = bool(const UpdateParams&);
@@ -17,6 +12,8 @@ public:
 
   // Client API:
   virtual bool installHooks(UpdateFn* newUpdate) const = 0;
+
+  virtual ~AddressInfoBase() = default;
 };
 
 const AddressInfoBase*

@@ -128,7 +128,7 @@ __libc_start_main(int (*_main)(int, char**, char**),
     std::cout << "No rm2fb socket\n";
     return EXIT_FAILURE;
   }
-  if (!clientSock.connect(DEFAULT_SOCK_ADDR)) {
+  if (!clientSock.connect(default_sock_addr.data())) {
     std::cout << "No rm2fb socket\n";
     return EXIT_FAILURE;
   }

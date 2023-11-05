@@ -7,10 +7,8 @@
 #include <sys/stat.h> /* For mode constants */
 #include <unistd.h>
 
-SharedFB::SharedFB(const char* path) {
-  errno = 0;
-
-  fd = shm_open(path, O_RDWR | O_CREAT, 0755);
+SharedFB::SharedFB(const char* path)
+  : fd(shm_open(path, O_RDWR | O_CREAT, 0755)) {
 
   if (fd == -1 && errno == EACCES) {
     fd = shm_open(path, O_RDWR | O_CREAT, 0755);
@@ -22,7 +20,7 @@ SharedFB::SharedFB(const char* path) {
   }
 
   ftruncate(fd, fb_size);
-  mem = (uint16_t*)mmap(NULL, fb_size, PROT_WRITE, MAP_SHARED, fd, 0);
+  mem = (uint16_t*)mmap(nullptr, fb_size, PROT_WRITE, MAP_SHARED, fd, 0);
 }
 
 SharedFB::~SharedFB() {
@@ -31,13 +29,13 @@ SharedFB::~SharedFB() {
   }
 }
 
-SharedFB::SharedFB(SharedFB&& other) : fd(other.fd), mem(other.mem) {
+SharedFB::SharedFB(SharedFB&& other) noexcept : fd(other.fd), mem(other.mem) {
   other.fd = -1;
   other.mem = nullptr;
 }
 
 SharedFB&
-SharedFB::operator=(SharedFB&& other) {
+SharedFB::operator=(SharedFB&& other) noexcept {
   // TODO: release
   this->fd = other.fd;
   this->mem = other.mem;

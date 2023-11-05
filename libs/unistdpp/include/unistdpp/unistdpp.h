@@ -48,7 +48,7 @@ struct FD {
   template<typename T,
            typename = std::enable_if_t<std::is_trivially_copyable_v<T>>>
   [[nodiscard]] Result<T> readAll() const {
-    T result;
+    T result{};
     return readAll(&result, sizeof(T))
       .and_then([&result](auto size) -> Result<T> {
         if (size != sizeof(T)) {
