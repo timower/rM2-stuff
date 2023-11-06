@@ -1,5 +1,7 @@
 #include "unistdpp/unistdpp.h"
 
+#include "unistdpp/file.h"
+
 namespace unistdpp {
 
 Result<int>
@@ -37,4 +39,12 @@ FD::writeAll(const void* buf, std::size_t size) const {
 
   return {};
 }
+
+Result<void>
+setNonBlocking(const FD& fd) {
+  auto flags = TRY(fcntl<>(fd, F_GETFL));
+  TRY(fcntl<int>(fd, F_SETFL, flags | O_NONBLOCK));
+  return {};
+}
+
 } // namespace unistdpp

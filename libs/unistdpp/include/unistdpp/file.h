@@ -14,6 +14,10 @@ constexpr auto lseek =
 constexpr auto ftruncate =
   FnWrapper<::ftruncate, Result<void>(const FD&, off_t)>{};
 
+template<typename... ExtraArgs>
+constexpr auto fcntl =
+  FnWrapper<::fcntl, Result<int>(const FD&, int, ExtraArgs...)>{};
+
 Result<std::string>
 readFile(const std::filesystem::path& path);
 

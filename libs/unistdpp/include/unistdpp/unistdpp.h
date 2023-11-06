@@ -82,4 +82,7 @@ struct WrapperTraits<Result<FD>> {
   }
 };
 
+Result<void>
+setNonBlocking(const FD&);
+
 } // namespace unistdpp
