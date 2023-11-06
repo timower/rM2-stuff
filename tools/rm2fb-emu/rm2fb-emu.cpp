@@ -1,4 +1,5 @@
 #include "Messages.h"
+#include "Socket.h"
 
 #include <unistdpp/socket.h>
 
@@ -23,14 +24,6 @@ using namespace rmlib::input;
 namespace {
 
 bool running = true;
-
-Result<FD>
-getClientSock(const char* host, int port) {
-  auto addr = TRY(Address::fromHostPort(host, port));
-  auto sock = TRY(unistdpp::socket(AF_INET, SOCK_STREAM, 0));
-  TRY(unistdpp::connect(sock, addr));
-  return sock;
-}
 
 } // namespace
 

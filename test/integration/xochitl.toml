@@ -1,0 +1,13 @@
+# Command to run on startup.
+command = "/usr/bin/xochitl"
+
+# Timeout for the whole test.
+timeout = 15
+
+[[actions]]
+do = "wait"
+time = 5
+
+[[actions]]
+do = "screenshot"
+name = "xochitl-startup.png"

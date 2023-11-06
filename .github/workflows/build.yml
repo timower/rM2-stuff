@@ -44,7 +44,7 @@ jobs:
           lfs: 'true'
 
       - name: Install Deps
-        run: sudo apt-get install -y ninja-build libsdl2-dev xxd llvm
+        run: sudo apt-get install -y ninja-build libsdl2-dev xxd llvm libevdev-dev
 
       - name: Configure CMake
         run: cmake --preset dev-host
@@ -80,7 +80,7 @@ jobs:
           path: packages/
 
       - name: Integration Tests
-        run: ./test/integration/test.sh ${{ env.IMAGE_NAME }} ./packages/
+        run: ./test/integration/test.sh ${{ env.IMAGE_NAME }} ./packages/ ./build/host
 
   release:
     runs-on: ubuntu-latest
