@@ -11,7 +11,9 @@ if (COVERAGE)
     COMMAND rm -rf "${COVERAGE_OUT}"
     COMMAND mkdir "${COVERAGE_OUT}"
 
-    COMMAND env LLVM_PROFILE_FILE="${COVERAGE_OUT}/%m.profraw" ctest
+    COMMAND env LLVM_PROFILE_FILE="${COVERAGE_OUT}/%m.profraw"
+              ctest --output-on-failure
+
     COMMAND llvm-profdata merge -o merged.profdata "${COVERAGE_OUT}"
 
     COMMAND llvm-cov show

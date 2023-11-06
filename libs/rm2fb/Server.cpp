@@ -112,7 +112,7 @@ doTCPUpdate(unistdpp::FD& fd, const UpdateParams& params) {
 
 template<typename Fn>
 void
-handleControlMessage(ControlSocket& serverSock, Fn&& fn) {
+readControlMessage(ControlSocket& serverSock, Fn&& fn) {
   serverSock.recvfrom<UpdateParams>()
     .and_then(std::forward<Fn>(fn))
     .or_else([](auto err) {
@@ -201,7 +201,7 @@ serverMain(int argc, char* argv[], char** envp) { // NOLINT
 
     // Check control socket.
     if (canRead(pollfds.front())) {
-      handleControlMessage(serverSock, [&](auto msgAndAddr) {
+      readControlMessage(serverSock, [&](auto msgAndAddr) {
         auto [msg, addr] = msgAndAddr;
 
         bool res = false;
@@ -227,11 +227,18 @@ serverMain(int argc, char* argv[], char** envp) { // NOLINT
     }
 
     if (canRead(pollfds[1])) {
+      std::cout << "Accepting new client!\n";
+
       unistdpp::accept(*tcpFd, nullptr, nullptr)
         .transform([&](auto client) {
-          std::cout << "Got new client!\n";
           tcpClients.emplace_back(std::move(client));
-          pollfds.push_back(waitFor(tcpClients.back(), Wait::Read));
+          doTCPUpdate(tcpClients.back(),
+                      { .y1 = 0,
+                        .x1 = 0,
+                        .y2 = fb_height - 1,
+                        .x2 = fb_width - 1,
+                        .flags = 0,
+                        .waveform = 0 });
         })
         .or_else([](auto err) {
           std::cerr << "Client accept errror: " << toString(err) << "\n";
@@ -242,6 +249,7 @@ serverMain(int argc, char* argv[], char** envp) { // NOLINT
       if (!canRead(pollfds[idx])) {
         continue;
       }
+
       auto& clientSock = tcpClients[idx - fixedFdNum];
       clientSock.readAll<Input>()
         .map([&](auto input) {

@@ -79,6 +79,10 @@ main(int argc, char* argv[]) {
         return 0;
       }();
 
+      if (type != 0) {
+        std::cout << "Touch @ " << touchEv.location << "\n";
+      }
+
       auto input = Input{ touchEv.location.x, touchEv.location.y, type };
       auto res = sock->writeAll(&input, sizeof(Input));
       if (!res) {
@@ -116,6 +120,10 @@ main(int argc, char* argv[]) {
       break;
     }
 
+    rmlib::Rect region = { .topLeft = { msg.x1, msg.y1 },
+                           .bottomRight = { msg.x2, msg.y2 } };
+    assert(fb->canvas.rect().contains(region));
+
     uint16_t* mem = (uint16_t*)fb->canvas.getMemory();
     for (int row = 0; row < height; row++) {
       int fbRow = row + msg.y1;
@@ -124,10 +132,9 @@ main(int argc, char* argv[]) {
              width * sizeof(uint16_t));
     }
 
-    fb->doUpdate(
-      { .topLeft = { msg.x1, msg.y1 }, .bottomRight = { msg.x2, msg.y2 } },
-      (rmlib::fb::Waveform)msg.waveform,
-      (rmlib::fb::UpdateFlags)msg.flags);
+    fb->doUpdate(region,
+                 (rmlib::fb::Waveform)msg.waveform,
+                 (rmlib::fb::UpdateFlags)msg.flags);
   }
 
   return 0;

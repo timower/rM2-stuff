@@ -57,6 +57,7 @@ jobs:
 
       - name: Upload Coverage
         uses: codecov/codecov-action@v3
+        continue-on-error: true
         with:
           files: ./build/host/report.lcov
           fail_ci_if_error: true # optional (default = false)
@@ -66,6 +67,12 @@ jobs:
         with:
           jobs: 'build'
 
+      - name: Download package
+        uses: actions/download-artifact@v2
+        with:
+          name: package
+          path: packages/
+
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -73,14 +80,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download package
-        uses: actions/download-artifact@v2
-        with:
-          name: package
-          path: packages/
-
       - name: Integration Tests
-        run: ./test/integration/test.sh ${{ env.IMAGE_NAME }} ./packages/ ./build/host
+        id: intest
+        run: mkdir ./tmp && ./test/integration/test.sh ${{ env.IMAGE_NAME }} ./packages/ ./build/host ./tmp
+
+      - name: Upload test results
+        if:  ${{ failure() && steps.intest.conclusion == 'failure' }}
+        uses: actions/upload-artifact@v2
+        with:
+          name: test_failures
+          path: ./tmp
+
 
   release:
     runs-on: ubuntu-latest

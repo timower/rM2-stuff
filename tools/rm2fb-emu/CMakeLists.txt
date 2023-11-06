@@ -20,4 +20,4 @@ target_link_libraries(${PROJECT_NAME}
   PRIVATE
     unistdpp
     rMlib
-    tomlplusplus::tomlplusplus)
+    rm2fb_headers)
