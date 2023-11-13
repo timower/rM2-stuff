@@ -4,7 +4,7 @@ set -eux
 
 DOCKER_IMAGE=$1
 IPKS_PATH=$(readlink -f "$2")
-HOST_BUILD_PATH=$(readlink -f "$3")
+TEST_BINARY=$(readlink -f "$3")
 
 
 TEST_DIR=$(dirname -- "$(readlink -f -- "$0")")
@@ -28,8 +28,7 @@ check_screenshot() {
   NAME="$1"
   SH_PATH="${TMP_DIR}/${NAME}"
 
-  "$HOST_BUILD_PATH"/tools/rm2fb-emu/rm2fb-test \
-    127.0.0.1 8888 screenshot "${SH_PATH}"
+  "$TEST_BINARY" 127.0.0.1 8888 screenshot "${SH_PATH}"
 
   for matches in "$@"
   do
@@ -45,8 +44,7 @@ check_screenshot() {
 }
 
 tap_at() {
-  "$HOST_BUILD_PATH"/tools/rm2fb-emu/rm2fb-test \
-    127.0.0.1 8888 touch "$1" "$2"
+  "$TEST_BINARY" 127.0.0.1 8888 touch "$1" "$2"
 }
 
 image=$(docker run --name rm-docker --rm -d -p 2222:22 -p 8888:8888 "$DOCKER_IMAGE")
@@ -62,9 +60,9 @@ scp -P 2222 "$IPKS_PATH"/*.ipk root@localhost:
 # Update & install display to make sure rm2fb.ipa replaces it.
 do_ssh systemctl restart systemd-timesyncd
 do_ssh opkg update
-# do_ssh opkg install display || true # This fails as rm2fb fails to start.
 
-do_ssh opkg install ./*.ipk
+# Xochitl fails to install on 3.5 :(
+do_ssh opkg install ./*.ipk || true
 do_ssh systemctl daemon-reload
 
 do_ssh systemctl start rm2fb
