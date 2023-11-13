@@ -1,9 +1,10 @@
-#include "Address.h"
 #include "ControlSocket.h"
 #include "ImageHook.h"
 #include "Message.h"
+#include "Versions/Version.h"
 #include "uinput.h"
 
+#include <unistdpp/file.h>
 #include <unistdpp/poll.h>
 #include <unistdpp/socket.h>
 #include <unistdpp/unistdpp.h>
@@ -12,7 +13,6 @@
 #include <csignal>
 #include <cstring>
 #include <dlfcn.h>
-#include <filesystem>
 #include <iostream>
 #include <unistd.h>
 
@@ -127,7 +127,7 @@ serverMain(int argc, char* argv[], char** envp) { // NOLINT
 
   const bool debugMode = checkDebugMode();
   const char* socketAddr = default_sock_addr.data();
-  const bool inQemu = !std::filesystem::exists("/dev/fb0");
+  const bool inQemu = !unistdpp::open("/dev/fb0", O_RDONLY).has_value();
 
   // Make uinput devices
   AllUinputDevices devices;
@@ -166,10 +166,12 @@ serverMain(int argc, char* argv[], char** envp) { // NOLINT
   if (fb.mem == nullptr) {
     return EXIT_FAILURE;
   }
+  std::cerr << "Setting mem\n";
   memset(fb.mem, UINT8_MAX, fb_size);
 
   // Call the get or create Instance function.
   if (!inQemu) {
+    std::cerr << "SWTCON calling init\n";
     addrs->initThreads();
     std::cout << "SWTCON initalized!\n";
   } else {

@@ -12,15 +12,15 @@ endif()
 find_package(PkgConfig)
 pkg_check_modules(LIBEVDEV libevdev REQUIRED)
 
-set(COMMON_SRC
-  Address.cpp
+# Library used for the (socket) testing tool
+add_library(rm2fb_lib STATIC
   SharedBuffer.cpp
   ControlSocket.cpp
   ImageHook.cpp
-  uinput.cpp)
-
-# Library used for the (socket) testing tool
-add_library(rm2fb_lib STATIC ${COMMON_SRC})
+  uinput.cpp
+  Versions/Version.cpp
+  Versions/Version2.15.cpp
+  Versions/Version3.5.cpp)
 
 target_include_directories(rm2fb_lib
   PRIVATE ${LIBEVDEV_INCLUDE_DIRS}

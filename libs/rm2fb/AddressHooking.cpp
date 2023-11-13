@@ -4,7 +4,7 @@
 #include <iostream>
 
 bool
-SimpleFunction::hook(void* replacement) {
+SimpleFunction::hook(void* replacement) const {
   std::cerr << "Hooking " << address << " with " << (uintptr_t)replacement
             << "\n";
 
@@ -21,7 +21,7 @@ SimpleFunction::hook(void* replacement) {
 }
 
 bool
-InlinedFunction::hook(void* replacement) {
+InlinedFunction::hook(void* replacement) const {
   std::cerr << "Hooking " << hookStart << " - " << hookEnd << " with "
             << (uintptr_t)replacement << "\n";
 

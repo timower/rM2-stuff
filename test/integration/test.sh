@@ -31,11 +31,17 @@ check_screenshot() {
   "$HOST_BUILD_PATH"/tools/rm2fb-emu/rm2fb-test \
     127.0.0.1 8888 screenshot "${SH_PATH}"
 
-  if ! diff "${SH_PATH}" "${ASSETS_DIR}/$NAME"
-  then
-    echo "Unmatching screenshot $NAME"
-    exit 1
-  fi
+  for matches in "$@"
+  do
+    if diff "${SH_PATH}" "${ASSETS_DIR}/$matches"
+    then
+      return
+    else
+      echo "Unmatching screenshot $matches"
+    fi
+  done
+
+  exit 1
 }
 
 tap_at() {
@@ -59,6 +65,7 @@ do_ssh opkg update
 # do_ssh opkg install display || true # This fails as rm2fb fails to start.
 
 do_ssh opkg install ./*.ipk
+do_ssh systemctl daemon-reload
 
 do_ssh systemctl start rm2fb
 sleep 1
@@ -87,8 +94,11 @@ check_screenshot "startup.png"
 
 # Xochitl
 tap_at 628 1060
-sleep 30
-check_screenshot "xochitl.png"
+sleep 60
 
+check_screenshot \
+  "xochitl_2.15.png" \
+  "xochitl_3.3.png" \
+  "xochitl_3.5.png"
 
 echo "ALL OK"

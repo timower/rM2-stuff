@@ -3,15 +3,15 @@
 #include "IOCTL.h"
 #include "ImageHook.h"
 
-#include "Address.h"
 #include "ControlSocket.h"
+#include "Versions/Version.h"
 
 #include "frida-gum.h"
 
 #include <dlfcn.h>
 
+#include <cstring>
 #include <iostream>
-#include <string.h>
 #include <unistd.h>
 
 namespace {
@@ -21,7 +21,7 @@ bool inXochitl = false;
 
 int
 setupHooks() {
-  auto addrs = getAddresses();
+  const auto* addrs = getAddresses();
   if (!addrs) {
     return EXIT_FAILURE;
   }

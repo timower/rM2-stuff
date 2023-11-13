@@ -1,6 +1,5 @@
 #pragma once
 
-#include "Address.h"
 #include "Message.h"
 
 bool
