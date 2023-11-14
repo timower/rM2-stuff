@@ -8,6 +8,17 @@ Collection of reMarkable related apps, utilities and libraries.
 Projects
 --------
 
+### rm2fb
+[![2.15: supported](https://img.shields.io/badge/2.15-supported-green)](https://support.remarkable.com/s/article/Software-release-2-15-October-2022)
+[![3.3: supported](https://img.shields.io/badge/3.3-supported-green)](https://support.remarkable.com/s/article/Software-release-3-3)
+[![3.5: supported](https://img.shields.io/badge/3.5-supported-green)](https://support.remarkable.com/s/article/Software-release-3-5)
+
+Custom implementation for [reMarkable 2 framebuffer](https://github.com/ddvk/remarkable2-framebuffer).
+The differences are:
+ * Lower level hooking, removing the Qt dependence.
+ * Uses UNIX sockets instead of message queues. Makes it easier to implement synchronized updates.
+ * Supports less but newer xochitl versions
+
 ### [Yaft](apps/yaft)
 
 A fast framebuffer terminal emulator.
@@ -43,12 +54,6 @@ If you already have a ROM file, you can pass it as an argument on the command li
 Library for writing remarkable apps.
 Includes an extensive declarative UI framework based on Flutter.
 
-### rm2fb
-
-Custom implementation for [reMarkable 2 framebuffer](https://github.com/ddvk/remarkable2-framebuffer),
-latest version only tested on xochitl 3.5.
-Relies on lower level hooking in order to support newer xochitl versions. Also
-does not depend on the QT framework.
 
 ### SWTCON
 
@@ -63,22 +68,19 @@ Building
 
 Building for the remarkable can either use the [toltec toolchain](https://github.com/toltec-dev/toolchain)
 or the reMarkable one:
-```lang=bash
-$ mkdir build && cd build
-
+```bash
 # For toltec:
-$ cmake -DCMAKE_TOOLCHAIN_FILE="/usr/share/cmake/$CHOST.cmake" ..
+$ cmake --preset dev-toltec
 # For remarkable:
-$ source /opt/codex/rm11x/3.1.2/environment-setup-cortexa7hf-neon-remarkable-linux-gnueabi
-$ cmake ..
+$ cmake --preset dev 
 
 # To build everything:
-$ cmake --build .
+$ cmake --build build/dev
 # Or to build a specific app:
-$ cmake --build . --target yaft
+$ cmake --build build/dev --target yaft
 
 # To create an ipk file:
-$ cpack .
+$ cmake --build build/dev --target package
 ```
 
 Emulating
@@ -88,8 +90,8 @@ For faster development an `EMULATE` mode is supported by rMlib. This allows
 running most apps on a desktop using SDL to emulate the remarkable screen.
 To enable it pass `-DEMULATE=ON` to the cmake configure command, without using
 the reMarkable toolchain of course.
-```lang=bash
-$ cmake -DEMULATE=ON ..
-$ cmake --build . --target yaft
-$ ./apps/yaft/yaft # Should launch Yaft with an emulated screen in a separete window.
+```bash
+$ cmake --preset dev-host
+$ cmake --build build/host --target yaft
+$ ./build/host/apps/yaft/yaft # Should launch Yaft with an emulated screen in a separete window.
 ```
