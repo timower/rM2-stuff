@@ -38,7 +38,10 @@ struct AddressInfo : public AddressInfoBase {
     , shutdownFn(shutdownFn)
     , waitForStart(waitForStart) {}
 
-  void initThreads() const final { createThreads.call<int, void*>(fb.mem); }
+  void initThreads() const final {
+    createThreads.call<int, void*>(fb.mem);
+    waitForStart.call<void>();
+  }
 
   bool doUpdate(const UpdateParams& params) const final {
     // 3.3 introduced the extra args. They shouldn't hurt on updates without
