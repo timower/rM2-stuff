@@ -22,4 +22,4 @@ extern const AddressInfoBase* const version_3_3_2;
 extern const AddressInfoBase* const version_3_5_2;
 
 const AddressInfoBase*
-getAddresses(const char* path = nullptr);
+getAddresses();
