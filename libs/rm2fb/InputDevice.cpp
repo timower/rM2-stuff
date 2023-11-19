@@ -1,4 +1,4 @@
-#include "uinput.h"
+#include "InputDevice.h"
 
 #include <libevdev/libevdev-uinput.h>
 

@@ -1,8 +1,8 @@
 #include "ControlSocket.h"
 #include "ImageHook.h"
+#include "InputDevice.h"
 #include "Message.h"
 #include "Versions/Version.h"
-#include "uinput.h"
 
 #include <unistdpp/file.h>
 #include <unistdpp/poll.h>
@@ -232,16 +232,8 @@ serverMain(int argc, char* argv[], char** envp) { // NOLINT
       std::cout << "Accepting new client!\n";
 
       unistdpp::accept(*tcpFd, nullptr, nullptr)
-        .transform([&](auto client) {
-          tcpClients.emplace_back(std::move(client));
-          doTCPUpdate(tcpClients.back(),
-                      { .y1 = 0,
-                        .x1 = 0,
-                        .y2 = fb_height - 1,
-                        .x2 = fb_width - 1,
-                        .flags = 0,
-                        .waveform = 0 });
-        })
+        .transform(
+          [&](auto client) { tcpClients.emplace_back(std::move(client)); })
         .or_else([](auto err) {
           std::cerr << "Client accept errror: " << toString(err) << "\n";
         });
@@ -253,10 +245,20 @@ serverMain(int argc, char* argv[], char** envp) { // NOLINT
       }
 
       auto& clientSock = tcpClients[idx - fixedFdNum];
-      clientSock.readAll<Input>()
-        .map([&](auto input) {
+      recvMessage<ClientMsg>(clientSock)
+        .map([&](const auto& msg) {
+          if (std::holds_alternative<GetUpdate>(msg)) {
+            doTCPUpdate(tcpClients.back(),
+                        { .y1 = 0,
+                          .x1 = 0,
+                          .y2 = fb_height - 1,
+                          .x2 = fb_width - 1,
+                          .flags = 0,
+                          .waveform = 0 });
+            return;
+          }
           if (devices.wacom) {
-            sendInput(input, *devices.wacom);
+            sendInput(std::get<Input>(msg), *devices.wacom);
           }
         })
         .or_else([&](auto err) {

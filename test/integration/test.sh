@@ -83,7 +83,7 @@ check_screenshot "startup.png"
 
 # Yaft2
 tap_at 930 1060
-sleep 2
+sleep 3
 check_screenshot "yaft2.png"
 tap_at 76 1832
 tap_at 324, 1704

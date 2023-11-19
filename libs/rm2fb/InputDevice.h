@@ -1,17 +1,10 @@
 #pragma once
 
-#include <cstdint>
+#include "Message.h"
+
 #include <memory>
 
 struct libevdev_uinput;
-
-struct Input {
-  int32_t x;
-  int32_t y;
-  int32_t type; // 1 = down, 2 = up
-};
-
-static_assert(sizeof(Input) == 3 * 4, "Input message has unexpected size");
 
 struct UinputDeleter {
   void operator()(libevdev_uinput*);

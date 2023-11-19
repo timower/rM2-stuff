@@ -17,7 +17,7 @@ add_library(rm2fb_lib STATIC
   SharedBuffer.cpp
   ControlSocket.cpp
   ImageHook.cpp
-  uinput.cpp
+  InputDevice.cpp
   Versions/Version.cpp
   Versions/Version2.15.cpp
   Versions/Version3.5.cpp)

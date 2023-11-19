@@ -2,7 +2,6 @@
 
 // rm2fb
 #include <Message.h>
-#include <uinput.h>
 
 #include <unistdpp/socket.h>
 
@@ -42,6 +41,8 @@ main(int argc, char* argv[]) {
     std::cout << "Couldn't get tcp socket: " << toString(sock.error()) << "\n";
     return EXIT_FAILURE;
   }
+
+  sendMessage(*sock, ClientMsg(GetUpdate{}));
 
   auto fb = rmlib::fb::FrameBuffer::open();
   if (!fb.has_value()) {
@@ -83,8 +84,8 @@ main(int argc, char* argv[]) {
         std::cout << "Touch @ " << touchEv.location << "\n";
       }
 
-      auto input = Input{ touchEv.location.x, touchEv.location.y, type };
-      auto res = sock->writeAll(&input, sizeof(Input));
+      ClientMsg input = Input{ touchEv.location.x, touchEv.location.y, type };
+      auto res = sendMessage(*sock, input);
       if (!res) {
         std::cerr << "Error writing: " << toString(res.error()) << "\n";
       }

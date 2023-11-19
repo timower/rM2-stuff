@@ -2,7 +2,6 @@
 
 // rm2fb
 #include <Message.h>
-#include <uinput.h>
 
 // rMlib
 #include <Canvas.h>
@@ -15,11 +14,11 @@
 using namespace unistdpp;
 
 namespace {
-constexpr auto tap_wait = 1000;           // us
-constexpr auto post_tap_wait = 1'000'000; // us
+constexpr auto tap_wait = 1000; // us
 
 bool
 doScreenshot(unistdpp::FD& sock, std::vector<std::string_view> args) {
+  sendMessage(sock, ClientMsg(GetUpdate{}));
   auto msgOrErr = sock.readAll<UpdateParams>();
   if (!msgOrErr) {
     std::cerr << "Error reading: " << toString(msgOrErr.error()) << "\n";
@@ -67,12 +66,12 @@ doTouch(unistdpp::FD& sock, std::vector<std::string_view> args) {
     .type = 1,
   };
 
-  fatalOnError(sock.writeAll(input));
+  fatalOnError(sendMessage(sock, ClientMsg(input)));
   usleep(tap_wait);
 
   input.type = 2;
-  fatalOnError(sock.writeAll(input));
-  usleep(post_tap_wait);
+  fatalOnError(sendMessage(sock, ClientMsg(input)));
+  usleep(tap_wait);
 
   return true;
 }
