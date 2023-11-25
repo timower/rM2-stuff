@@ -134,9 +134,9 @@ __libc_start_main(int (*_main)(int, char**, char**),
   }
 
   char pathBuffer[PATH_MAX];
-  readlink("/proc/self/exe", pathBuffer, PATH_MAX);
+  auto size = readlink("/proc/self/exe", pathBuffer, PATH_MAX);
 
-  if (std::string_view(pathBuffer) == "/usr/bin/xochitl") {
+  if (std::string_view(pathBuffer, size) == "/usr/bin/xochitl") {
     inXochitl = true;
     if (setupHooks() != EXIT_SUCCESS) {
       return EXIT_FAILURE;

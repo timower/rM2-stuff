@@ -187,9 +187,9 @@ __libc_start_main(int (*_main)(int, char**, char**),
                   void* stack_end) {
 
   char pathBuffer[PATH_MAX];
-  readlink("/proc/self/exe", pathBuffer, PATH_MAX);
+  auto size = readlink("/proc/self/exe", pathBuffer, PATH_MAX);
 
-  if (std::string_view(pathBuffer) == "/usr/bin/xochitl") {
+  if (std::string_view(pathBuffer, size) == "/usr/bin/xochitl") {
     inXochitl = true;
     std::cout << "In xochitl!\n";
   } else {

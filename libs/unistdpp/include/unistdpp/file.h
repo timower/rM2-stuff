@@ -14,4 +14,7 @@ constexpr auto lseek =
 Result<std::string>
 readFile(const std::filesystem::path& path);
 
+Result<std::string>
+readlink(const std::filesystem::path& path);
+
 } // namespace unistdpp

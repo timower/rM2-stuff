@@ -101,27 +101,27 @@ FrameBuffer::doUpdate(Rect region, Waveform waveform, UpdateFlags flags) const {
   update.update_region.width = region.width();
   update.update_region.height = region.height();
 
+  update.waveform_mode = [&] {
+    switch (waveform) {
+      case Waveform::DU:
+        return WAVEFORM_MODE_DU;
+      case Waveform::A2:
+        return WAVEFORM_MODE_A2;
+      default:
+      case Waveform::GC16:
+        return WAVEFORM_MODE_GC16;
+      case Waveform::GC16Fast:
+        return WAVEFORM_MODE_GL16;
+    }
+  }();
+
   if (type == rM2Stuff) {
     update.update_mode = RM2_UPDATE_MODE;
     update.flags = static_cast<int>(flags);
-    update.waveform_mode = static_cast<int>(waveform);
   } else {
     update.update_mode = (flags & UpdateFlags::FullRefresh) != 0
                            ? UPDATE_MODE_FULL
                            : UPDATE_MODE_PARTIAL;
-
-    update.waveform_mode = [&] {
-      switch (waveform) {
-        case Waveform::DU:
-        case Waveform::A2:
-          return WAVEFORM_MODE_DU;
-        default:
-        case Waveform::GC16:
-          return WAVEFORM_MODE_GC16;
-        case Waveform::GC16Fast:
-          return WAVEFORM_MODE_GL16;
-      }
-    }();
 
     constexpr auto temp_use_remarkable_draw = 0x0018;
     constexpr auto epdc_flag_exp1 = 0x270ce20;

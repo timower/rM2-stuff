@@ -18,6 +18,8 @@ int
 handleUpdate(const mxcfb_update_data& data) {
   const auto& rect = data.update_region;
 
+  const int waveform = data.waveform_mode | UpdateParams::ioctl_waveform_flag;
+
   if (data.update_mode == RM2_UPDATE_MODE) {
     UpdateParams params;
     params.x1 = rect.left;
@@ -25,7 +27,7 @@ handleUpdate(const mxcfb_update_data& data) {
     params.x2 = rect.left + rect.width - 1;
     params.y2 = rect.top + rect.height - 1;
 
-    params.waveform = data.waveform_mode;
+    params.waveform = waveform;
     params.flags = data.flags;
 
     return sendUpdate(params);
@@ -41,34 +43,6 @@ handleUpdate(const mxcfb_update_data& data) {
 
   // full = 1, partial = 0
   int flags = data.update_mode == UPDATE_MODE_FULL ? 0x1 : 0x0;
-
-  // mappings of different xochitls:
-  // mxcfb | 2.15 | 3.3 | 3.5
-  // ------+------+-----+----
-  // 0 INIT| 2    | 2   | 2
-  // 1 DU  | 0    | 0   | 0
-  // 2 GC16| 1    | 3   | 3
-  // 3 GL16| 2    | 2   | 2
-  // 4 A2  | /    | 0/8 | 0/8
-  // 5 GC? | /    | 1   | 1
-  // 6 Pan | 3    | 0   | 0
-  // 7 ?   | /    | 0   | 0
-  // 8 ?   | 1    | 0   | 0
-  int waveform = [&] {
-    switch (data.waveform_mode) {
-      case WAVEFORM_MODE_INIT:
-        return 1;
-      case WAVEFORM_MODE_DU:
-      default:
-        return 0;
-      case WAVEFORM_MODE_GC16:
-        return 1;
-      case WAVEFORM_MODE_GL16:
-        return 2;
-      case WAVEFORM_MODE_A2:
-        return 3;
-    }
-  }();
 
   // TODO: Get sync from client (wait for second ioctl? or look at stack?)
   // There are only two occasions when the original rm1 library sets sync to

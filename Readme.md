@@ -9,9 +9,10 @@ Projects
 --------
 
 ### rm2fb
-[![2.15: supported](https://img.shields.io/badge/2.15-supported-green)](https://support.remarkable.com/s/article/Software-release-2-15-October-2022)
-[![3.3: supported](https://img.shields.io/badge/3.3-supported-green)](https://support.remarkable.com/s/article/Software-release-3-3)
-[![3.5: supported](https://img.shields.io/badge/3.5-supported-green)](https://support.remarkable.com/s/article/Software-release-3-5)
+[![2.15: supported](https://img.shields.io/badge/2.15-supported-brightgreen)](https://support.remarkable.com/s/article/Software-release-2-15-October-2022)
+[![3.3: supported](https://img.shields.io/badge/3.3-supported-brightgreen)](https://support.remarkable.com/s/article/Software-release-3-3)
+[![3.5: supported](https://img.shields.io/badge/3.5-supported-brightgreen)](https://support.remarkable.com/s/article/Software-release-3-5)
+[![3.8: experimental](https://img.shields.io/badge/3.8-experimental-orange)](https://support.remarkable.com/s/article/Software-release-3-8)
 
 Custom implementation for [reMarkable 2 framebuffer](https://github.com/ddvk/remarkable2-framebuffer).
 The differences are:
@@ -72,7 +73,7 @@ or the reMarkable one:
 # For toltec:
 $ cmake --preset dev-toltec
 # For remarkable:
-$ cmake --preset dev 
+$ cmake --preset dev
 
 # To build everything:
 $ cmake --build build/dev

@@ -4,6 +4,7 @@
 
 #include <tl/expected.hpp>
 
+#include <iostream>
 #include <system_error>
 
 namespace error_details {

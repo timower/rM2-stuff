@@ -20,7 +20,8 @@ add_library(rm2fb_lib STATIC
   InputDevice.cpp
   Versions/Version.cpp
   Versions/Version2.15.cpp
-  Versions/Version3.5.cpp)
+  Versions/Version3.5.cpp
+  Versions/Version3.6.cpp)
 
 target_include_directories(rm2fb_lib
   PRIVATE ${LIBEVDEV_INCLUDE_DIRS}
@@ -28,6 +29,7 @@ target_include_directories(rm2fb_lib
 
 target_link_libraries(rm2fb_lib
   PUBLIC
+    linux::mxcfb
     rt
     dl
     unistdpp
@@ -43,7 +45,6 @@ add_library(rm2fb_client SHARED
 
 target_link_libraries(rm2fb_client
   PRIVATE
-    linux::mxcfb
     Frida::Gum
     rm2fb_lib)
 

@@ -3,6 +3,8 @@
 #include "AddressHooking.h"
 #include "ImageHook.h"
 
+#include <rm2.h>
+
 namespace {
 
 void
@@ -44,10 +46,13 @@ struct AddressInfo : public AddressInfoBase {
   }
 
   bool doUpdate(const UpdateParams& params) const final {
+    UpdateParams mappedParams = params;
+    mappedParams.waveform = mapWaveform(params.waveform);
+
     // 3.3 introduced the extra args. They shouldn't hurt on updates without
     // them.
     return update.call<bool, const UpdateParams*, int*, int>(
-      &params, nullptr, 0);
+      &mappedParams, nullptr, 0);
   }
   void shutdownThreads() const final { shutdownFn.call<void>(); }
 

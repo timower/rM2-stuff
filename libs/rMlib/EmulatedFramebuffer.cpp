@@ -141,7 +141,7 @@ updateEmulatedCanvas(const Canvas& canvas, Rect region) {
   SDL_UpdateWindowSurfaceRects(window, &rect, 1);
 }
 
-const char*
+std::string
 getStr(Waveform wave) {
   switch (wave) {
     case Waveform::DU:
@@ -152,6 +152,8 @@ getStr(Waveform wave) {
       return "GC16Fast";
     case Waveform::A2:
       return "A2";
+    default:
+      return "Unknown (" + std::to_string(int(wave)) + ")";
   }
 }
 

@@ -86,6 +86,7 @@ tap_at 930 1060
 sleep 3
 check_screenshot "yaft2.png"
 tap_at 76 1832
+sleep 1
 tap_at 324, 1704
 sleep 2
 check_screenshot "startup.png"
@@ -97,6 +98,7 @@ sleep 60
 check_screenshot \
   "xochitl_2.15.png" \
   "xochitl_3.3.png" \
-  "xochitl_3.5.png"
+  "xochitl_3.5.png" \
+  "xochitl_3.8.png"
 
 echo "ALL OK"

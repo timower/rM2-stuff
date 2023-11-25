@@ -2,13 +2,7 @@
 
 #include <unistdpp/error.h>
 
-#include <cassert>
-#include <cstdlib>
-#include <cstring>
-
-#include <iostream>
 #include <string>
-#include <variant>
 
 #include <tl/expected.hpp>
 
@@ -34,7 +28,7 @@ using ErrorOr = tl::expected<T, E>;
 template<typename E = Error>
 using OptError = tl::expected<void, E>;
 
-template<typename T, typename E = Error>
+template<typename T, typename E>
 T
 fatalOnError(tl::expected<T, E> error) {
   if (!error.has_value()) {

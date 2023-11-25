@@ -7,6 +7,8 @@
 #include <variant>
 
 struct UpdateParams {
+  static constexpr auto ioctl_waveform_flag = 0xf000;
+
   int y1;
   int x1;
   int y2;

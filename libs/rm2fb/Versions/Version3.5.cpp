@@ -1,6 +1,8 @@
 #include "AddressHooking.h"
 #include "Version.h"
 
+#include <rm2.h>
+
 namespace {
 
 void
@@ -27,7 +29,9 @@ struct AddressInfo : public AddressInfoBase {
   void initThreads() const final { createThreads.call<void*>(); }
 
   bool doUpdate(const UpdateParams& params) const final {
-    return update.call<bool, const UpdateParams*>(&params);
+    UpdateParams mappedParams = params;
+    mappedParams.waveform = mapWaveform(params.waveform);
+    return update.call<bool, const UpdateParams*>(&mappedParams);
   }
   void shutdownThreads() const final { shutdownFn.call<void>(); }
 

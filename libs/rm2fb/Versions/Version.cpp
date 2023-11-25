@@ -24,6 +24,11 @@ getAddresses(BuildId version) {
     { { 0x2e, 0xe6, 0x56, 0xd2, 0x5e, 0x17, 0xaf, 0x73, 0x96, 0x44,
         0x18, 0x0c, 0xf4, 0x7c, 0x0a, 0xd2, 0xf1, 0xd0, 0x3a, 0xe1 },
       version_3_5_2 },
+
+    { { 0x31, 0xf4, 0xe9, 0xe8, 0x52, 0xaf, 0x39, 0x38, 0x15, 0xd8,
+        0x14, 0xcd, 0xd3, 0xac, 0xb6, 0xdf, 0xbd, 0xc8, 0xb5, 0x67 },
+      version_3_8_2 },
+
   };
 
   auto it = addresses.find(version);
@@ -38,16 +43,19 @@ getAddresses(BuildId version) {
 
 const AddressInfoBase*
 getAddresses() {
-  BuildId id;
+  static const AddressInfoBase* result = [] {
+    BuildId id;
 
-  // NOLINTNEXTLINE
-  memcpy(id.data(), reinterpret_cast<const char*>(0x10180), id.size());
+    // NOLINTNEXTLINE
+    memcpy(id.data(), reinterpret_cast<const char*>(0x10180), id.size());
 
-  std::cerr << "Build ID: ";
-  for (unsigned char c : id) {
-    std::cerr << "0x" << std::hex << std::setfill('0') << std::setw(2) << int(c)
-              << " ";
-  }
-  std::cerr << "\n";
-  return getAddresses(id);
+    std::cerr << "Build ID: ";
+    for (unsigned char c : id) {
+      std::cerr << "0x" << std::hex << std::setfill('0') << std::setw(2)
+                << int(c) << " ";
+    }
+    std::cerr << "\n";
+    return getAddresses(id);
+  }();
+  return result;
 }
