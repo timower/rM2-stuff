@@ -61,8 +61,10 @@ scp -P 2222 "$IPKS_PATH"/*.ipk root@localhost:
 do_ssh systemctl restart systemd-timesyncd
 do_ssh opkg update
 
-# Xochitl fails to install on 3.5 :(
-do_ssh opkg install ./*.ipk || true
+do_ssh opkg install ./*.ipk
+
+do_ssh opkg install xochitl || true # TODO: xochitl doesn't configure for 3.5+
+
 do_ssh systemctl daemon-reload
 
 do_ssh systemctl start rm2fb

@@ -56,10 +56,18 @@ set_target_properties(rm2fb_client PROPERTIES
 add_custom_target(rm2fb DEPENDS rm2fb_client rm2fb_server)
 
 install(TARGETS rm2fb_client rm2fb_server
-  COMPONENT rm2fb
+  COMPONENT rm2display
   DESTINATION opt/lib)
+
+# Make a symlink in /usr/lib to librm2fb_client.so.1
+execute_process(
+  COMMAND ln -s /opt/lib/librm2fb_client.so.1 "${CMAKE_BINARY_DIR}/librm2fb_client.so.1")
+install(FILES "${CMAKE_BINARY_DIR}/librm2fb_client.so.1"
+  DESTINATION usr/lib
+  COMPONENT rm2display)
+
 install(FILES rm2fb.service
-  COMPONENT rm2fb
+  COMPONENT rm2display
   DESTINATION lib/systemd/system)
 
 add_deploy(rm2fb_client)
