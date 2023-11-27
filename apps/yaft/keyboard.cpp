@@ -1,19 +1,13 @@
 #include "keyboard.h"
 
-#include "terminal.h"
+#include "layout.h"
 
-#include <Device.h>
-#include <Input.h>
-
-#include <unistd.h>
-
-#include <algorithm>
-#include <iostream>
+#include "yaft.h"
 
 using namespace rmlib;
-using namespace rmlib::input;
 
 namespace {
+
 constexpr auto pen_slot = 0x1000;
 constexpr char esc_char = '\x1b';
 
@@ -23,265 +17,10 @@ const std::vector<std::pair<std::string_view, std::string_view>> print_names = {
   { ":left", "<" },        { ":right", ">" },
 };
 
-enum SpecialKeys {
-  Escape = 0x1000000,
-  Tab,
-  Backspace,
-  Enter,
-  Del,
-  Home,
-  End,
-
-  Left,
-  Up,
-  Right,
-  Down,
-
-  PageUp,
-  PageDown,
-
-  F1,
-  F2,
-  F3,
-  F4,
-  F5,
-  F6,
-  F7,
-  F8,
-  F9,
-  F10,
-  F11,
-  F12,
-};
-
-enum ModifierKeys {
-  Shift = 0x2000000,
-  Ctrl = 0x4000000,
-  Alt = 0x8000000,
-};
-
 constexpr bool
 isModifier(int scancode) {
   return scancode == Shift || scancode == Ctrl || scancode == Alt;
 }
-
-const std::vector<std::vector<KeyInfo>> layout = {
-  { { "esc", Escape },
-    { ">", 0x3e, "<", 0x3c },
-    { "|", 0x7c, "&", 0x26 },
-    { "!", 0x21, "?", 0x3f },
-    { "\"", 0x22, "$", 0x24 },
-    { "'", 0x27, "`", 0x60 },
-    { "_", 0x5f, "@", 0x40 },
-    { "=", 0x3d, "~", 0x7e },
-    { "/", 0x2f, "\\", 0x5c },
-    { "*", 0x2a, "del", Del },
-    { ":backspace", Backspace } },
-
-  { { ":tab", Tab },
-    { "1", 0x31, "+", 0x2b },
-    { "2", 0x32, "^", 0x5e },
-    { "3", 0x33, "#", 0x23 },
-    { "4", 0x34, "%", 0x25 },
-    { "5", 0x35, "(", 0x28 },
-    { "6", 0x36, ")", 0x29 },
-    { "7", 0x37, "[", 0x5b },
-    { "8", 0x38, "]", 0x5d },
-    { "9", 0x39, "{", 0x7b },
-    { "0", 0x30, "}", 0x7d } },
-
-  { { "q", 0x51 },
-    { "w", 0x57 },
-    { "e", 0x45 },
-    { "r", 0x52 },
-    { "t", 0x54 },
-    { "y", 0x59 },
-    { "u", 0x55 },
-    { "i", 0x49 },
-    { "o", 0x4f },
-    { "p", 0x50 },
-    { ":enter", Enter } },
-
-  { { "a", 0x41 },
-    { "s", 0x53 },
-    { "d", 0x44 },
-    { "f", 0x46 },
-    { "g", 0x47 },
-    { "h", 0x48 },
-    { "j", 0x4a },
-    { "k", 0x4b },
-    { "l", 0x4c },
-    { ":", 0x3a },
-    { "pgup", PageUp, "home", Home } },
-
-  { { ":shift", Shift },
-    { "z", 0x5a },
-    { "x", 0x58 },
-    { "c", 0x43 },
-    { "v", 0x56 },
-    { "b", 0x42 },
-    { "n", 0x4e },
-    { "m", 0x4d },
-    { ";", 0x3b },
-    { ":up", Up },
-    { "pgdn", PageDown, "end", End } },
-
-  { { "ctrl", Ctrl },
-    { "alt", Alt },
-    { "-", 0x2d },
-    { ",", 0x2c },
-    { " ", 0x20, "", 0x0, /* width */ 3 },
-    { ".", 0x2e },
-    { ":left", Left },
-    { ":down", Down },
-    { ":right", Right } },
-};
-
-const std::vector<std::vector<KeyInfo>> hidden_layout = {
-  { { "esc", Escape },
-    { "pgup", PageUp },
-    { "pgdn", PageDown },
-    { "home", Home },
-    { "end", End },
-    { "<", Left },
-    { "v", Down },
-    { "^", Up },
-    { ">", Right },
-    { "ctrl-c", 0x3 },
-    { "\\n", Enter } }
-};
-
-#if 0 // C++ 20
-static_assert(layout.size() == num_rows);
-static_assert(
-  std::max_element(layout.begin(), layout.end(), [](auto& a, auto& b) {
-    return a.size() < b.size();
-  })->size() == row_size);
-#endif
-
-const std::vector<EvKeyInfo> keymap = {
-  { KEY_ESC, Escape },
-  { KEY_1, '1', '!' },
-  { KEY_2, '2', '@' },
-  { KEY_3, '3', '#' },
-  { KEY_4, '4', '$' },
-  { KEY_5, '5', '%' },
-  { KEY_6, '6', '^' },
-  { KEY_7, '7', '&' },
-  { KEY_8, '8', '*' },
-  { KEY_9, '9', '(' },
-  { KEY_0, '0', ')' },
-  { KEY_MINUS, '-', '_' },
-  { KEY_EQUAL, '=', '+' },
-  { KEY_BACKSPACE, Backspace },
-  { KEY_TAB, Tab },
-  { KEY_Q, 'Q' },
-  { KEY_W, 'W' },
-  { KEY_E, 'E' },
-  { KEY_R, 'R' },
-  { KEY_T, 'T' },
-  { KEY_Y, 'Y' },
-  { KEY_U, 'U' },
-  { KEY_I, 'I' },
-  { KEY_O, 'O' },
-  { KEY_P, 'P' },
-  { KEY_LEFTBRACE, '[', '{' },
-  { KEY_RIGHTBRACE, ']', '}' },
-  { KEY_ENTER, Enter },
-  { KEY_LEFTCTRL, Ctrl },
-  { KEY_A, 'A' },
-  { KEY_S, 'S' },
-  { KEY_D, 'D' },
-  { KEY_F, 'F' },
-  { KEY_G, 'G' },
-  { KEY_H, 'H' },
-  { KEY_J, 'J' },
-  { KEY_K, 'K' },
-  { KEY_L, 'L' },
-  { KEY_SEMICOLON, ';', ':' },
-  { KEY_APOSTROPHE, '\'', '"' },
-  { KEY_GRAVE, '`', '~' },
-  { KEY_LEFTSHIFT, Shift },
-  { KEY_BACKSLASH, '\\', '|' },
-  { KEY_Z, 'Z' },
-  { KEY_X, 'X' },
-  { KEY_C, 'C' },
-  { KEY_V, 'V' },
-  { KEY_B, 'B' },
-  { KEY_N, 'N' },
-  { KEY_M, 'M' },
-  { KEY_COMMA, ',', '<' },
-  { KEY_DOT, '.', '>' },
-  { KEY_SLASH, '/', '?' },
-  { KEY_RIGHTSHIFT, Shift },
-  { KEY_KPASTERISK, '*' },
-  { KEY_LEFTALT, Alt },
-  { KEY_SPACE, ' ' },
-  // { KEY_CAPSLOCK
-  { KEY_F1, F1 },
-  { KEY_F2, F2 },
-  { KEY_F3, F3 },
-  { KEY_F4, F4 },
-  { KEY_F5, F5 },
-  { KEY_F6, F6 },
-  { KEY_F7, F7 },
-  { KEY_F8, F8 },
-  { KEY_F9, F9 },
-  { KEY_F10, F10 },
-  // { KEY_NUMLOCK 69
-  // { KEY_SCROLLLOCK 70
-  { KEY_KP7, '7' },
-  { KEY_KP8, '8' },
-  { KEY_KP9, '9' },
-  { KEY_KPMINUS, '-' },
-  { KEY_KP4, '4' },
-  { KEY_KP5, '5' },
-  { KEY_KP6, '6' },
-  { KEY_KPPLUS, '+' },
-  { KEY_KP1, '1' },
-  { KEY_KP2, '2' },
-  { KEY_KP3, '3' },
-  { KEY_KP0, '0' },
-  { KEY_KPDOT, '.' },
-
-  // { KEY_ZENKAKUHANKAKU 85
-  // { KEY_102ND 86
-  { KEY_F11, F11 },
-  { KEY_F12, F12 },
-  // { KEY_RO 89
-  // { KEY_KATAKANA 90
-  // { KEY_HIRAGANA 91
-  // { KEY_HENKAN 92
-  // { KEY_KATAKANAHIRAGANA 93
-  // { KEY_MUHENKAN 94
-  // { KEY_KPJPCOMMA 95
-  { KEY_KPENTER, Enter },
-  { KEY_RIGHTCTRL, Ctrl },
-  { KEY_KPSLASH, '/' },
-  // { KEY_SYSRQ 99
-  { KEY_RIGHTALT, Alt },
-  { KEY_LINEFEED, Enter },
-  { KEY_HOME, Home },
-  { KEY_UP, Up },
-  { KEY_PAGEUP, PageUp },
-  { KEY_LEFT, Left },
-  { KEY_RIGHT, Right },
-  { KEY_END, End },
-  { KEY_DOWN, Down },
-  { KEY_PAGEDOWN, PageDown },
-  // { KEY_INSERT 110
-  { KEY_DELETE, Del },
-  // { KEY_MACRO 112
-  // { KEY_MUTE 113
-  // { KEY_VOLUMEDOWN 114
-  // { KEY_VOLUMEUP 115
-  // { KEY_POWER 116 /* SC System Power Down */
-  { KEY_KPEQUAL, '=' },
-  { KEY_KPPLUSMINUS, '+', '-' },
-  // { KEY_PAUSE 119
-  // { KEY_SCALE 120 /* AL Compiz Scale (Expose) */
-
-};
 
 const char*
 getKeyCodeStr(int scancode, bool shift, bool alt, bool ctrl, bool appCursor) {
@@ -293,22 +32,6 @@ getKeyCodeStr(int scancode, bool shift, bool alt, bool ctrl, bool appCursor) {
     buf[2] = code;
     buf[3] = '~';
     buf[4] = 0;
-  };
-
-  constexpr auto write_ss3 = [](char code) {
-    buf[0] = esc_char;
-    buf[1] = 'O';
-    buf[2] = code;
-    buf[3] = 0;
-  };
-
-  constexpr auto write_hi_vt_code = [](char a, char b) {
-    buf[0] = esc_char;
-    buf[1] = '[';
-    buf[2] = a;
-    buf[3] = b;
-    buf[4] = '~';
-    buf[5] = 0;
   };
 
   constexpr auto write_xt_code = [](char code, bool appCursor) {
@@ -366,43 +89,6 @@ getKeyCodeStr(int scancode, bool shift, bool alt, bool ctrl, bool appCursor) {
       case PageDown:
         write_vt_code('6');
         return buf.data();
-
-      case F1:
-        write_ss3('P');
-        return buf.data();
-      case F2:
-        write_ss3('Q');
-        return buf.data();
-      case F3:
-        write_ss3('R');
-        return buf.data();
-      case F4:
-        write_ss3('S');
-        return buf.data();
-      case F5:
-        write_hi_vt_code('1', '5');
-        return buf.data();
-      case F6:
-        write_hi_vt_code('1', '7');
-        return buf.data();
-      case F7:
-        write_hi_vt_code('1', '8');
-        return buf.data();
-      case F8:
-        write_hi_vt_code('1', '9');
-        return buf.data();
-      case F9:
-        write_hi_vt_code('2', '0');
-        return buf.data();
-      case F10:
-        write_hi_vt_code('2', '1');
-        return buf.data();
-      case F11:
-        write_hi_vt_code('2', '3');
-        return buf.data();
-      case F12:
-        write_hi_vt_code('2', '4');
-        return buf.data();
     }
 
     return nullptr;
@@ -430,7 +116,7 @@ getKeyCodeStr(int scancode, bool shift, bool alt, bool ctrl, bool appCursor) {
       buf[1] = 0;
     }
     return buf.data();
-  } else if (scancode == 0x3) {
+  } if (scancode == 0x3) {
     buf[0] = char(scancode);
     buf[1] = 0;
     return buf.data();
@@ -439,197 +125,202 @@ getKeyCodeStr(int scancode, bool shift, bool alt, bool ctrl, bool appCursor) {
   return nullptr;
 }
 
+template<typename Ev>
+static int
+getSlot(const Ev& ev) {
+  return ev.slot;
+}
+
+template<>
+int
+getSlot<input::PenEvent>(const input::PenEvent& ev) {
+  return pen_slot;
+}
 } // namespace
 
-Keyboard::Key::Key(const KeyInfo& info, rmlib::Rect rect)
-  : info(info), keyRect(rect) {}
+std::unique_ptr<rmlib::RenderObject>
+Keyboard::createRenderObject() const {
+  return std::make_unique<KeyboardRenderObject>(*this);
+}
 
-OptError<>
-Keyboard::init(rmlib::fb::FrameBuffer& fb, terminal_t& term, bool isLandscape) {
-  this->term = &term;
-  this->fb = &fb;
-  this->isLandscape = isLandscape;
-
-  TRY(input.openAll());
-
-  initKeyMap();
-  return {};
+KeyboardRenderObject::KeyboardRenderObject(const Keyboard& keyboard)
+  : LeafRenderObject(keyboard) {
+  updateLayout();
+  markNeedsRebuild();
 }
 
 void
-Keyboard::initKeyMap() {
-  // do physical keys:
-  for (const auto& keyInfo : keymap) {
-    physicalKeys.emplace(keyInfo.code, PhysicalKey{ keyInfo });
+KeyboardRenderObject::update(const Keyboard& keyboard) {
+  bool needsReLayout = &keyboard.params.layout != &widget->params.layout;
+  widget = &keyboard;
+
+  if (needsReLayout) {
+    updateLayout();
+    markNeedsLayout();
+  }
+}
+
+void
+KeyboardRenderObject::doRebuild(rmlib::AppContext& ctx,
+                                const rmlib::BuildContext& /*buildContext*/) {
+  const auto duration = getWidget().params.repeatTime / 10;
+  repeatTimer = ctx.addTimer(
+    duration, [this]() { updateRepeat(); }, duration);
+}
+
+rmlib::Size
+KeyboardRenderObject::doLayout(const rmlib::Constraints& constraints) {
+  const auto numRows = widget->params.layout.numRows();
+  const auto numCols = widget->params.layout.numCols();
+
+  if (constraints.isBounded() && numRows != 0 && numCols != 0) {
+    keyHeight = float(constraints.max.height) / numRows;
+    keyWidth = float(constraints.max.width) / numCols;
+    return constraints.max;
   }
 
-  // calculate valid screen region
-  if (isLandscape) {
-    startHeight = fb->canvas.width() - 1;
-  } else {
-    startHeight = fb->canvas.height() -
-                  (hidden ? hidden_keyboard_height : keyboard_height) - 1;
+  if (constraints.hasBoundedHeight() && numRows != 0) {
+    keyHeight = float(constraints.max.height) / numRows;
+    keyWidth = keyHeight / Keyboard::key_height * Keyboard::key_width;
+    return Size{ int(keyWidth * numCols), int(keyHeight * numRows) };
   }
 
-  this->screenRect = Rect{ { term->marginLeft, term->marginTop },
-                           { term->width - term->marginLeft - 1,
-                             startHeight - term->marginTop } };
-
-  // skip virtual keys if in landscape mode
-  if (isLandscape) {
-    term_resize(
-      term, fb->canvas.height(), fb->canvas.width(), /* report */ true);
-    return;
+  if (constraints.hasBoundedWidth() && numCols != 0) {
+    keyWidth = float(constraints.max.width) / numCols;
+    keyHeight = keyWidth / Keyboard::key_width * Keyboard::key_height;
+    return Size{ int(keyWidth * numCols), int(keyHeight * numRows) };
   }
 
-  baseKeyWidth = fb->canvas.width() / row_size;
+  keyHeight = Keyboard::key_height;
+  keyWidth = Keyboard::key_width;
+  return constraints.min;
+}
 
-  // Resize the terminal to make place for the keyboard.
-  term_resize(term,
-              fb->canvas.width(),
-              startHeight,
-              /* report */ true);
+rmlib::UpdateRegion
+KeyboardRenderObject::doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) {
+  Point pos = rect.topLeft;
 
-  // Setup the keymap.
-  keys.clear();
+  UpdateRegion result;
+  for (const auto& row : widget->params.layout.rows) {
+    pos.x = rect.topLeft.x;
 
-  shiftKey = -1;
-  altKey = -1;
-  ctrlKey = -1;
-
-  int y = startHeight;
-
-  const auto& currentLayout = hidden ? hidden_layout : layout;
-
-  for (const auto& row : currentLayout) {
-    int x = (fb->canvas.width() - row_size * baseKeyWidth) / 2;
     for (const auto& key : row) {
-      const auto keyWidth = baseKeyWidth * key.width;
+      result |= drawKey(pos, key, canvas);
 
-      // Store the modifier keys for later.
-      if (key.code == Shift) {
-        shiftKey = keys.size();
-      } else if (key.code == Alt) {
-        altKey = keys.size();
-      } else if (key.code == Ctrl) {
-        ctrlKey = keys.size();
+      pos.x += key.width * int(keyWidth);
+    }
+
+    pos.y += keyHeight;
+  }
+
+  if (!isPartialDraw()) {
+    result.waveform = fb::Waveform::GC16Fast;
+  }
+
+  return result;
+}
+
+void
+KeyboardRenderObject::handleInput(const rmlib::input::Event& ev) {
+  std::visit(
+    [this](const auto& ev) {
+      if constexpr (rmlib::input::is_pointer_event<
+                      std::decay_t<decltype(ev)>>) {
+        if (getRect().contains(ev.location) || ev.isUp()) {
+          handleTouchEvent(ev);
+        }
+      } else {
+        handleKeyEvent(ev);
+      }
+    },
+    ev);
+}
+
+void
+KeyboardRenderObject::updateRepeat() {
+  const auto time = TimeSource::now();
+  const auto repeatTime = getWidget().params.repeatTime;
+
+  for (auto& [key, state] : keyState) {
+    if (state.slot == -1) {
+      continue;
+    }
+
+    if (time > state.nextRepeat) {
+      // If a modifier is long pressed, stick it.
+      if (isModifier(key->code) && !state.held) {
+        state.held = true;
+        state.dirty = true;
+        markNeedsDraw(/* full */ false);
+      } else {
+        sendKeyDown(*key, /* repeat */ true);
       }
 
-      keys.emplace_back(
-        key, Rect{ { x, y }, { x + keyWidth - 1, y + key_height - 1 } });
-
-      x += keyWidth;
+      // Don't continue to repeat keys with special actions on longpress
+      if (key->longPressCode == 0) {
+        state.nextRepeat += repeatTime;
+      } else {
+        state.nextRepeat += std::chrono::hours(5);
+      }
     }
-
-    y += key_height;
-  }
-}
-
-void
-Keyboard::drawKey(const Key& key) const {
-  const auto keyWidth = key.keyRect.width();
-
-  fb->canvas.set(key.keyRect, white);
-
-  fb->canvas.drawLine(
-    key.keyRect.topLeft, key.keyRect.topLeft + Point{ keyWidth - 1, 0 }, black);
-  fb->canvas.drawLine(key.keyRect.topLeft,
-                      key.keyRect.topLeft + Point{ 0, key_height - 1 },
-                      black);
-
-  const auto printName = [&key = key.info] {
-    if (key.name[0] != ':' || key.name.size() == 1) {
-      return key.name;
-    }
-    const auto it =
-      std::find_if(print_names.begin(),
-                   print_names.end(),
-                   [&key](const auto& pair) { return pair.first == key.name; });
-    if (it == print_names.end()) {
-      return std::string_view("?");
-    }
-    return it->second;
-  }();
-
-  auto textSize = Canvas::getTextSize(printName, 32);
-  fb->canvas.drawText(
-    printName,
-    { key.keyRect.topLeft.x + keyWidth / 2 - textSize.x / 2,
-      key.keyRect.topLeft.y + key_height / 2 - textSize.y / 2 },
-    32);
-
-  if (!key.info.altName.empty()) {
-    auto altTextSize = Canvas::getTextSize(key.info.altName, 26);
-    fb->canvas.drawText(key.info.altName,
-                        { key.keyRect.topLeft.x + keyWidth - altTextSize.x - 4,
-                          key.keyRect.topLeft.y + 3 },
-                        26);
   }
 
-  // draw extra border
-  if (key.isDown()) {
-    auto a = key.keyRect.topLeft + Point{ 2, 2 };
-    auto b = key.keyRect.bottomRight - Point{ 1, 1 };
-    fb->canvas.drawLine(a, { a.x, b.y }, 0x0);
-    fb->canvas.drawLine(b, { b.x, a.y }, 0x0);
+  for (auto& [key, state] : physKeyState) {
+    if (!state.down) {
+      continue;
+    }
 
-    if (key.held) {
-      fb->canvas.drawLine(a, { b.x, a.y }, 0x0);
-      fb->canvas.drawLine(b, { a.x, b.y }, 0x0);
+    if (time > state.nextRepeat) {
+      if (!isModifier(key->scancode)) {
+        sendKeyDown(*key, /* repeat */ true);
+      }
+
+      state.nextRepeat += repeatTime;
     }
   }
 }
 
 void
-Keyboard::draw() const {
-  if (isLandscape) {
+KeyboardRenderObject::updateLayout() {
+  keyState.clear();
+  physKeyState.clear();
+
+  altKey = nullptr;
+  ctrlKey = nullptr;
+  shiftKey = nullptr;
+
+  for (const auto& row : widget->params.layout.rows) {
+    for (const auto& key : row) {
+      if (key.code == ModifierKeys::Alt) {
+        assert(altKey == nullptr);
+        altKey = &key;
+      } else if (key.code == ModifierKeys::Ctrl) {
+        assert(ctrlKey == nullptr);
+        ctrlKey = &key;
+      } else if (key.code == ModifierKeys::Shift) {
+        assert(shiftKey == nullptr);
+        shiftKey = &key;
+      }
+    }
+  }
+}
+
+void
+KeyboardRenderObject::sendKeyDown(int scancode,
+                                  bool shift,
+                                  bool alt,
+                                  bool ctrl) {
+  if (isCallback(scancode)) {
+    if (widget->callback) {
+      widget->callback(getCallback(scancode));
+    }
     return;
   }
 
-  Rect keyboardRect = { { 0, startHeight },
-                        { fb->canvas.width() - 1, fb->canvas.height() - 1 } };
-
-  for (const auto& key : keys) {
-    drawKey(key);
-  }
-
-  fb->doUpdate(keyboardRect, fb::Waveform::GC16Fast, fb::UpdateFlags::None);
-}
-
-Keyboard::Key*
-Keyboard::getKey(Point location) {
-
-  for (auto& key : keys) {
-    if (key.keyRect.contains(location)) {
-      return &key;
-    }
-  }
-
-  return nullptr;
-}
-
-void
-Keyboard::sendKeyDown(const Key& key) const {
-
-  // No code for modifiers.
-  if (isModifier(key.info.code)) {
-    return;
-  }
-
-  // Lookup modifier state.
-  bool shift = shiftKey == -1 ? false : keys.at(shiftKey).isDown();
-  bool alt = altKey == -1 ? false : keys.at(altKey).isDown();
-  bool ctrl = ctrlKey == -1 ? false : keys.at(ctrlKey).isDown();
-
-  bool appCursor = (term->mode & MODE_APP_CURSOR) != 0;
-
-  // scancode, use alt code if shift is pressed.
-  auto scancode =
-    (key.info.altCode != 0 && shift) ? key.info.altCode : key.info.code;
-
+  bool appCursor = (widget->term->mode & MODE_APP_CURSOR) != 0;
   const auto* code = getKeyCodeStr(scancode, shift, alt, ctrl, appCursor);
   if (code != nullptr) {
-    write(term->fd, code, strlen(code));
+    write(widget->term->fd, code, strlen(code));
   } else {
     std::cerr << "unknown key combo: " << scancode << " shift " << shift
               << " ctrl " << ctrl << " alt " << alt << std::endl;
@@ -637,16 +328,34 @@ Keyboard::sendKeyDown(const Key& key) const {
 }
 
 void
-Keyboard::sendKeyDown(const PhysicalKey& key) const {
-  if (isModifier(key.info.scancode)) {
+KeyboardRenderObject::sendKeyDown(const KeyInfo& key, bool repeat) {
+  if (isModifier(key.code)) {
+    return;
+  }
+
+  // Lookup modifier state.
+  bool shift = shiftKey == nullptr ? false : keyState[shiftKey].isDown();
+  bool alt = altKey == nullptr ? false : keyState[altKey].isDown();
+  bool ctrl = ctrlKey == nullptr ? false : keyState[ctrlKey].isDown();
+
+  // scancode, use alt code if shift is pressed.
+  auto scancode = (key.altCode != 0 && shift) ? key.altCode : key.code;
+  if (repeat && key.longPressCode != 0) {
+    scancode = key.longPressCode;
+  }
+  sendKeyDown(scancode, shift, alt, ctrl);
+}
+void
+KeyboardRenderObject::sendKeyDown(const EvKeyInfo& key, bool repeat) {
+  if (isModifier(key.scancode)) {
     return;
   }
 
   const auto anyKeyDown = [this](int scancode) {
-    return std::any_of(physicalKeys.begin(),
-                       physicalKeys.end(),
+    return std::any_of(physKeyState.begin(),
+                       physKeyState.end(),
                        [scancode](const auto& codeAndKey) {
-                         return codeAndKey.second.info.scancode == scancode &&
+                         return codeAndKey.first->scancode == scancode &&
                                 codeAndKey.second.down;
                        });
   };
@@ -654,294 +363,187 @@ Keyboard::sendKeyDown(const PhysicalKey& key) const {
   bool shift = anyKeyDown(Shift);
   bool alt = anyKeyDown(Alt);
   bool ctrl = anyKeyDown(Ctrl);
+  bool mod1 = anyKeyDown(Mod1);
+  bool mod2 = anyKeyDown(Mod2);
 
-  bool appCursor = (term->mode & MODE_APP_CURSOR) != 0;
+  auto scancode = [&] {
+    if (key.mod1Scancode != 0 && mod1) {
+      return key.mod1Scancode;
+    }
+    if (key.mod2Scancode != 0 && mod2) {
+      return key.mod2Scancode;
+    }
+    if (key.shfitScancode != 0 && shift) {
+      return key.shfitScancode;
+    }
 
-  auto scancode = (key.info.altscancode != 0 && shift) ? key.info.altscancode
-                                                       : key.info.scancode;
-
-  const auto* code = getKeyCodeStr(scancode, shift, alt, ctrl, appCursor);
-  if (code != nullptr) {
-    write(term->fd, code, strlen(code));
-  } else {
-    std::cerr << "unknown key combo: " << scancode << " shift " << shift
-              << " ctrl " << ctrl << " alt " << alt << std::endl;
-  }
+    return key.scancode;
+  }();
+  sendKeyDown(scancode, shift, alt, ctrl);
 }
 
-namespace {
-template<typename Event>
-struct event_traits;
-
-template<>
-struct event_traits<TouchEvent> {
-  constexpr static auto up_type = TouchEvent::Up;
-  constexpr static auto down_type = TouchEvent::Down;
-
-  constexpr static auto getSlot(const TouchEvent& ev) { return ev.slot; }
-};
-
-template<>
-struct event_traits<PenEvent> {
-  constexpr static auto up_type = PenEvent::TouchUp;
-  constexpr static auto down_type = PenEvent::TouchDown;
-
-  constexpr static auto getSlot(const PenEvent& ev) { return pen_slot; }
-};
-
-void
-initMouseBuf(std::array<char, 6>& buf, Point loc) {
-  loc.x /= CELL_WIDTH;
-  loc.y /= CELL_HEIGHT;
-
-  char cx = 33 + loc.x;
-  char cy = 33 + loc.y;
-  buf = { esc_char, '[', 'M', 32, cx, cy };
-}
-
-template<typename Event>
-void
-handleScreenEvent(Keyboard& kb, const Event& ev, const Point loc) {
-  if ((kb.term->mode & ALL_MOUSE_MODES) == 0) {
-    return;
+const KeyInfo*
+KeyboardRenderObject::getKey(const rmlib::Point& point) {
+  if (!getRect().contains(point)) {
+    return nullptr;
   }
 
-  const auto slot = event_traits<Event>::getSlot(ev);
-  const auto scaled_loc = loc - kb.screenRect.topLeft;
-  std::array<char, 6> buf;
-  initMouseBuf(buf, scaled_loc);
+  const auto rowIdx = int((point.y - getRect().topLeft.y) / keyHeight);
+  const auto columnIdx = int((point.x - getRect().topLeft.x) / keyWidth);
+  const auto& row = widget->params.layout.rows[rowIdx];
 
-  // Mouse down on first finger if mouse is not down.
-  if (ev.type == event_traits<Event>::down_type && kb.mouseSlot == -1) {
-    kb.mouseSlot = slot;
-
-    // Send mouse down code
-    buf[3] += 0; // mouse button 1
-    write(kb.term->fd, buf.data(), buf.size());
-
-  } else if ((ev.type == event_traits<Event>::up_type &&
-              slot == kb.mouseSlot)) {
-    // Mouse up after finger lift or second finger down (for scrolling).
-
-    kb.mouseSlot = -1;
-
-    // Send mouse up code
-    buf[3] += 3; // mouse release
-    write(kb.term->fd, buf.data(), buf.size());
-  } else if (kb.mouseSlot == slot && kb.lastMousePos != scaled_loc &&
-             (kb.term->mode & MODE_MOUSE_MOVE) != 0) {
-    buf[3] += 32; // mouse move
-    write(kb.term->fd, buf.data(), buf.size());
+  int keyCounter = 0;
+  for (const auto& key : row) {
+    if (keyCounter <= columnIdx && columnIdx < keyCounter + key.width) {
+      return &key;
+    }
+    keyCounter += key.width;
   }
-  kb.lastMousePos = scaled_loc;
+  return nullptr;
 }
 
-template<typename Event>
 void
-handleKeyEvent(Keyboard& kb, const Event& ev, const Point loc) {
-  if (ev.type == event_traits<Event>::down_type) {
-    // lookup key, skip if outside
-    auto* key = kb.getKey(loc);
+KeyboardRenderObject::clearSticky() {
+  for (const auto* key : { shiftKey, altKey, ctrlKey }) {
     if (key == nullptr) {
-      return;
+      continue;
     }
 
-    std::cerr << "key down: " << key->info.name << std::endl;
+    auto& state = keyState[key];
 
-    key->slot = event_traits<Event>::getSlot(ev);
-    key->nextRepeat = time_source::now() + repeat_delay;
+    // Prevent key being held when multi touch typing.
+    state.nextRepeat = TimeSource::now() + getWidget().params.repeatDelay;
 
-    kb.sendKeyDown(*key);
-
-    // Clear sticky keys.
-    if (!isModifier(key->info.code)) {
-      for (auto keyIdx : { kb.shiftKey, kb.altKey, kb.ctrlKey }) {
-        if (keyIdx == -1) {
-          continue;
-        }
-
-        auto& key = kb.keys[keyIdx];
-
-        key.nextRepeat = time_source::now() + repeat_delay;
-        if (key.stuck) {
-          key.stuck = false;
-          kb.drawKey(key);
-          kb.fb->doUpdate(
-            key.keyRect, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::None);
-        }
-      }
-    } else {
-      if (!key->held) {
-        key->stuck = !key->stuck;
-      }
-      key->held = false;
+    if (state.stuck) {
+      state.stuck = false;
+      state.dirty = true;
     }
-
-    kb.drawKey(*key);
-    kb.fb->doUpdate(
-      key->keyRect, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::None);
-
-  } else if (ev.type == event_traits<Event>::up_type) {
-    const auto slot = event_traits<Event>::getSlot(ev);
-    auto keyIt =
-      std::find_if(kb.keys.begin(), kb.keys.end(), [slot](const auto& key) {
-        return key.slot == slot;
-      });
-
-    if (keyIt == kb.keys.end()) {
-      return;
-    }
-
-    keyIt->slot = -1;
-    kb.drawKey(*keyIt);
-    kb.fb->doUpdate(
-      keyIt->keyRect, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::None);
   }
 }
 
 template<typename Ev>
-bool
-isKeyRelease(const Keyboard& kb, const Ev& ev) {
-  if (event_traits<Ev>::up_type != ev.type) {
-    return false;
-  }
+void
+KeyboardRenderObject::handleTouchEvent(const Ev& ev) {
+  if (ev.isDown()) {
+    auto* key = getKey(ev.location);
+    if (key == nullptr) {
+      return;
+    }
 
-  auto slot = event_traits<Ev>::getSlot(ev);
-  return std::any_of(kb.keys.begin(), kb.keys.end(), [slot](const auto& key) {
-    return key.slot == slot;
-  });
+    sendKeyDown(*key);
+
+    auto& state = keyState[key];
+    state.dirty = true;
+    state.slot = getSlot(ev);
+    state.nextRepeat = TimeSource::now() + getWidget().params.repeatDelay;
+
+    if (isModifier(key->code)) {
+      if (!state.held) {
+        state.stuck = !state.stuck;
+      }
+      state.held = false;
+    } else {
+      clearSticky();
+    }
+
+    markNeedsDraw(/* full */ false);
+  } else if (ev.isUp()) {
+    auto keyIt = std::find_if(
+      keyState.begin(), keyState.end(), [slot = getSlot(ev)](const auto& pair) {
+        return pair.second.slot == slot;
+      });
+    if (keyIt == keyState.end()) {
+      return;
+    }
+
+    keyIt->second.dirty = true;
+    keyIt->second.slot = -1;
+    markNeedsDraw(/* full */ false);
+  }
 }
 
 void
-handlePhysicalKeyEvent(Keyboard& kb, const KeyEvent& ev) {
-  auto it = kb.physicalKeys.find(ev.keyCode);
-  if (it == kb.physicalKeys.end()) {
+KeyboardRenderObject::handleKeyEvent(const rmlib::input::KeyEvent& ev) {
+  const auto& keymap = widget->params.keymap;
+
+  auto it = keymap.find(ev.keyCode);
+  if (it == keymap.end()) {
     std::cout << "Unknown physical key: " << ev.keyCode << "\n";
     return;
   }
-  auto& key = it->second;
+  const auto& key = it->second;
+  auto& state = physKeyState[&key];
 
-  if (ev.type == KeyEvent::Press) {
-    key.down = true;
-    key.nextRepeat = time_source::now() + repeat_delay;
-    kb.sendKeyDown(key);
-  } else if (ev.type == KeyEvent::Release) {
-    key.down = false;
+  if (ev.type == input::KeyEvent::Press) {
+    state.down = true;
+    state.nextRepeat = TimeSource::now() + getWidget().params.repeatDelay;
+    sendKeyDown(key);
+  } else if (ev.type == input::KeyEvent::Release) {
+    state.down = false;
   }
 }
 
-} // namespace
-
-void
-Keyboard::handleEvents(const std::vector<rmlib::input::Event>& events) {
-  for (const auto& event : events) {
-    std::visit(
-      [this](const auto& ev) {
-        if constexpr (!std::is_same_v<std::decay_t<decltype(ev)>, KeyEvent>) {
-
-          // If the event is not on the screen or it's a release event of a
-          // previously pressed key, handle it as a keyboard event. Otherwise
-          // handle it as a screen (mouse) event.
-          auto loc = ev.location;
-          if (isLandscape) {
-            loc = Point{
-              loc.y,
-              term->height - loc.x,
-            };
-          }
-          if (!screenRect.contains(loc) || isKeyRelease(*this, ev)) {
-            handleKeyEvent(*this, ev, loc);
-          } else {
-            handleScreenEvent(*this, ev, loc);
-          }
-        } else {
-          handlePhysicalKeyEvent(*this, ev);
-        }
-      },
-      event);
+rmlib::UpdateRegion
+KeyboardRenderObject::drawKey(rmlib::Point pos,
+                              const KeyInfo& key,
+                              rmlib::Canvas& canvas) {
+  auto& state = keyState[&key];
+  if (isPartialDraw() && !state.dirty) {
+    return {};
   }
-}
 
-void
-Keyboard::updateRepeat() {
-  const auto time = time_source::now();
+  const auto keyWidth = int(this->keyWidth) * key.width;
+  const auto keyHeight = int(this->keyHeight);
+  const auto keyRect =
+    Rect{ .topLeft = pos,
+          .bottomRight = pos + Point{ keyWidth - 1, keyHeight - 1 } };
 
-  // handle repeat of physical keys
-  for (auto& [_, key] : physicalKeys) {
-    (void)_;
+  canvas.set(keyRect, white);
+  canvas.drawLine(pos, pos + Point{ keyWidth - 1, 0 }, black);
+  canvas.drawLine(pos, pos + Point{ 0, keyHeight - 1 }, black);
 
-    if (!key.down) {
-      continue;
+  const auto printName = [&key] {
+    if (key.name[0] != ':' || key.name.size() == 1) {
+      return key.name;
     }
 
-    if (time > key.nextRepeat) {
-      if (!isModifier(key.info.scancode)) {
-        sendKeyDown(key);
-      }
+    const auto it =
+      std::find_if(print_names.begin(),
+                   print_names.end(),
+                   [&key](const auto& pair) { return pair.first == key.name; });
 
-      key.nextRepeat += repeat_time;
+    if (it == print_names.end()) {
+      return std::string_view("?");
+    }
+    return it->second;
+  }();
+
+  const auto textSize = Canvas::getTextSize(printName, 32);
+  canvas.drawText(printName,
+                  { keyRect.topLeft.x + keyWidth / 2 - textSize.x / 2,
+                    keyRect.topLeft.y + keyHeight / 2 - textSize.y / 2 },
+                  32);
+
+  if (!key.altName.empty()) {
+    const auto altTextSize = Canvas::getTextSize(key.altName, 26);
+    canvas.drawText(key.altName,
+                    { keyRect.topLeft.x + keyWidth - altTextSize.x - 4,
+                      keyRect.topLeft.y + 3 },
+                    26);
+  }
+
+  if (state.isDown()) {
+    const auto a = keyRect.topLeft + Point{ 2, 2 };
+    const auto b = keyRect.bottomRight - Point{ 1, 1 };
+    canvas.drawLine(a, { a.x, b.y }, 0x0);
+    canvas.drawLine(b, { b.x, a.y }, 0x0);
+
+    if (state.held) {
+      canvas.drawLine(a, { b.x, a.y }, 0x0);
+      canvas.drawLine(b, { a.x, b.y }, 0x0);
     }
   }
 
-  // skip virtual keys if in landscape mode
-  if (isLandscape) {
-    return;
-  }
-
-  // handle repeat of virtual keys
-  for (auto& key : keys) {
-    if (key.slot == -1) {
-      continue;
-    }
-
-    if (time > key.nextRepeat) {
-      // If a modifier is long pressed, stick it.
-      if (isModifier(key.info.code)) {
-        key.held = true;
-
-        drawKey(key);
-        fb->doUpdate(
-          key.keyRect, rmlib::fb::Waveform::DU, rmlib::fb::UpdateFlags::None);
-
-        // if escape is long pressed, toggle visibility
-      } else if (key.info.code == Escape) {
-        if (hidden) {
-          show();
-        } else {
-          hide();
-        }
-        break;
-
-        // otherwise, fire the key
-      } else {
-        sendKeyDown(key);
-      }
-
-      key.nextRepeat += repeat_time;
-    }
-  }
-}
-
-void
-Keyboard::hide() {
-  if (hidden) {
-    return;
-  }
-
-  hidden = true;
-
-  initKeyMap();
-  draw();
-}
-
-void
-Keyboard::show() {
-  if (!hidden) {
-    return;
-  }
-
-  hidden = false;
-
-  initKeyMap();
-  draw();
+  state.dirty = false;
+  return {keyRect, fb::Waveform::DU, fb::UpdateFlags::Priority};
 }

@@ -1,109 +1,117 @@
 #pragma once
 
-#include "yaft.h"
-#include <FrameBuffer.h>
-#include <Input.h>
+#include <UI.h>
 
-#include <chrono>
+#include "keymap.h"
 
-constexpr int row_size = 11;
-constexpr int num_rows = 6;
+struct KeyInfo;
+struct EvKeyInfo;
+struct terminal_t;
 
-// key width = screen width / row_size
-// key height = ??
-constexpr int key_height = 64;
-constexpr int keyboard_height = key_height * num_rows;
-constexpr int hidden_keyboard_height = key_height;
+struct Layout;
 
-struct KeyInfo {
-  std::string_view name;
-  int code;
+class KeyboardRenderObject;
 
-  std::string_view altName = "";
-  int altCode = 0;
+using KeyboardCallback = std::function<void(int)>;
 
-  int width = 1;
+struct KeyboardParams {
+  const Layout& layout;
+  const KeyMap& keymap;
+
+  std::chrono::milliseconds repeatDelay = std::chrono::seconds(1);
+  std::chrono::milliseconds repeatTime = std::chrono::milliseconds(100);
 };
 
-struct EvKeyInfo {
-  int code;
-  int scancode;
-  int altscancode = 0; // Code when pressed with shift.
+/// Keyboard widget, displays a virtual keyboard of the given layout.
+/// Also interprets physical key presses.
+class Keyboard : public rmlib::Widget<KeyboardRenderObject> {
+public:
+  // default size:
+  constexpr static int key_height = 64;
+  constexpr static int key_width = 128;
+
+  Keyboard(struct terminal_t* term, KeyboardParams params, KeyboardCallback cb)
+    : term(term), params(params), callback(std::move(cb)) {}
+
+  std::unique_ptr<rmlib::RenderObject> createRenderObject() const;
+
+private:
+  friend class KeyboardRenderObject;
+
+  struct terminal_t* term;
+  KeyboardParams params;
+  KeyboardCallback callback;
 };
 
-using time_source = std::chrono::steady_clock;
+/// Keyboard render object
+///
+///
+class KeyboardRenderObject : public rmlib::LeafRenderObject<Keyboard> {
+  using TimeSource = std::chrono::steady_clock;
 
-constexpr auto repeat_delay = std::chrono::seconds(1);
-constexpr auto repeat_time = std::chrono::milliseconds(100);
+public:
+  KeyboardRenderObject(const Keyboard& keyboard);
 
-struct Keyboard {
+  void update(const Keyboard& keyboard);
 
-  struct Key {
-    Key(const KeyInfo& info, rmlib::Rect rect);
-    const KeyInfo& info;
-    rmlib::Rect keyRect;
+protected:
+  void doRebuild(rmlib::AppContext& ctx,
+                 const rmlib::BuildContext& /*buildContext*/) final;
 
+  rmlib::Size doLayout(const rmlib::Constraints& constraints) final;
+  rmlib::UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) final;
+
+  void handleInput(const rmlib::input::Event& ev) final;
+
+private:
+  void updateRepeat();
+
+  void updateLayout();
+
+  void sendKeyDown(const KeyInfo& key, bool repeat = false);
+  void sendKeyDown(const EvKeyInfo& key, bool repeat = false);
+  void sendKeyDown(int scancode, bool shift, bool alt, bool ctrl);
+
+  const KeyInfo* getKey(const rmlib::Point& point);
+
+  void clearSticky();
+
+  template<typename Ev>
+  void handleTouchEvent(const Ev& ev);
+
+  void handleKeyEvent(const rmlib::input::KeyEvent& ev);
+
+  rmlib::UpdateRegion drawKey(rmlib::Point pos,
+                              const KeyInfo& key,
+                              rmlib::Canvas& canvas);
+
+  // fields
+  float keyWidth{};
+  float keyHeight{};
+
+  struct KeyState {
     int slot = -1;
 
     bool stuck = false; // Used for mod keys, get stuck after tap.
     bool held = false;  // Used for mod keys, held down after long press.
 
+    bool dirty = false;
+
     bool isDown() const { return slot != -1 || stuck || held; }
 
-    time_source::time_point nextRepeat;
+    TimeSource::time_point nextRepeat;
   };
 
-  struct PhysicalKey {
-    const EvKeyInfo& info;
+  const KeyInfo* shiftKey = nullptr;
+  const KeyInfo* ctrlKey = nullptr;
+  const KeyInfo* altKey = nullptr;
+  std::unordered_map<const KeyInfo*, KeyState> keyState;
+
+  struct PhysKeyState {
     bool down = false;
-
-    time_source::time_point nextRepeat = {};
+    TimeSource::time_point nextRepeat;
   };
+  std::unordered_map<const EvKeyInfo*, PhysKeyState> physKeyState;
 
-  OptError<> init(rmlib::fb::FrameBuffer& fb,
-                  terminal_t& term,
-                  bool isLandscape);
-  void initKeyMap();
-
-  void draw() const;
-
-  void handleEvents(const std::vector<rmlib::input::Event>& events);
-  void updateRepeat();
-
-  void drawKey(const Key& key) const;
-
-  Key* getKey(rmlib::Point location);
-
-  void sendKeyDown(const Key& key) const;
-  void sendKeyDown(const PhysicalKey& key) const;
-
-  void hide();
-  void show();
-
-  // members
-  int baseKeyWidth;
-  int startHeight;
-  rmlib::Rect screenRect;
-
-  rmlib::input::InputManager input;
-  rmlib::fb::FrameBuffer* fb;
-  terminal_t* term;
-
-  int mouseSlot = -1;
-  rmlib::Point lastMousePos;
-
-  // Pointers for tracking modifier state.
-  int shiftKey = -1;
-  int altKey = -1;
-  int ctrlKey = -1;
-
-  std::vector<Key> keys;
-
-  // Map from evdev key code to PhysicalKey.
-  std::unordered_map<int, PhysicalKey> physicalKeys;
-
-  bool hidden = false;
-
-  // True if the pogo keyboard is connected.
-  bool isLandscape = false;
+  rmlib::TimerHandle repeatTimer;
 };

@@ -71,17 +71,17 @@ sleep 2
 check_screenshot "startup.png"
 
 # tilem
-tap_at 458 1062
+tap_at 538 1050
 sleep 2
 check_screenshot "tilem.png"
 tap_at 840 962
 sleep 2
 check_screenshot "startup.png"
 
-# Yaft2
-tap_at 930 1060
+# Yaft
+tap_at 860 1042
 sleep 3
-check_screenshot "yaft2.png"
+check_screenshot "yaft.png"
 tap_at 76 1832
 sleep 1
 tap_at 324, 1704
@@ -89,7 +89,7 @@ sleep 2
 check_screenshot "startup.png"
 
 # Xochitl
-tap_at 628 1060
+tap_at 710 1086
 sleep 60
 
 check_screenshot \
