@@ -110,7 +110,7 @@ jobs:
           chmod +x ./tools/rm2fb-test
           mkdir ./tmp
           ./test/integration/test.sh \
-            ${{ env.IMAGE_NAME }}${{ matrix.fw_version }} \
+            ${{ env.IMAGE_NAME }}-${{ matrix.fw_version }} \
             ./packages/ \
             ./tools/rm2fb-test \
             ./tmp
