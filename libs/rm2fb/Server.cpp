@@ -16,6 +16,8 @@
 #include <iostream>
 #include <unistd.h>
 
+#include <systemd/sd-daemon.h>
+
 using namespace unistdpp;
 
 namespace {
@@ -59,6 +61,54 @@ checkDebugMode() {
     std::cerr << "Debug Mode!\n";
   }
   return debug_mode;
+}
+
+struct Sockets {
+  std::optional<ControlSocket> controlSock = std::nullopt;
+  std::optional<FD> tcpSock = std::nullopt;
+};
+
+Sockets
+getSystemdSockets() {
+  auto n = sd_listen_fds(1);
+  if (n < 0) {
+    std::cerr << "Error getting systemd sockets: " << strerror(-n) << "\n";
+    return {};
+  }
+  if (n == 0) {
+    return {};
+  }
+  std::cout << "Got " << n << " Sockets from systemd\n";
+
+  Sockets result;
+  for (int fd = SD_LISTEN_FDS_START; fd < SD_LISTEN_FDS_START + n; fd++) {
+
+    // Check if it's the unix control socket.
+    auto res = sd_is_socket(fd, AF_UNIX, SOCK_DGRAM, /* listening */ -1);
+    if (res < 0) {
+      std::cerr << "Error getting systemd socket: " << strerror(-res) << "\n";
+      continue;
+    }
+    if (res == 1) {
+      std::cout << "Got control socket from systemd\n";
+      result.controlSock = ControlSocket{ FD{ fd } };
+      continue;
+    }
+
+    // Check if it's the TCP debug socket.
+    res = sd_is_socket(fd, AF_UNSPEC, SOCK_STREAM, /* listening */ 1);
+    if (res < 0) {
+      std::cerr << "Error getting systemd socket: " << strerror(-res) << "\n";
+      continue;
+    }
+    if (res == 1) {
+      std::cout << "Got TCP socket from systemd\n";
+      result.tcpSock = FD{ fd };
+      continue;
+    }
+  }
+
+  return result;
 }
 
 // Starts a tcp server socket
@@ -128,6 +178,7 @@ serverMain(int argc, char* argv[], char** envp) { // NOLINT
   const bool debugMode = checkDebugMode();
   const char* socketAddr = default_sock_addr.data();
   const bool inQemu = !unistdpp::open("/dev/fb0", O_RDONLY).has_value();
+  auto systemdSockets = getSystemdSockets();
 
   // Make uinput devices
   AllUinputDevices devices;
@@ -138,21 +189,34 @@ serverMain(int argc, char* argv[], char** envp) { // NOLINT
     devices.wacom = makeWacomDevice();
   }
 
-  // Setup server socket.
-  if (unlink(socketAddr) != 0) {
-    perror("Socket unlink");
-  }
+  auto serverSock = [&] {
+    if (systemdSockets.controlSock.has_value()) {
+      std::cout << "Using control socket from systemd\n";
+      return std::move(*systemdSockets.controlSock);
+    }
+    // Setup server socket.
+    if (unlink(socketAddr) != 0) {
+      perror("Socket unlink");
+    }
+    ControlSocket serverSock;
+    if (!serverSock.init(socketAddr)) {
+      std::exit(EXIT_FAILURE);
+    }
+    return serverSock;
+  }();
 
-  ControlSocket serverSock;
-  if (!serverSock.init(socketAddr)) {
-    return EXIT_FAILURE;
-  }
-
-  auto tcpFd = getTcpSocket(tcp_port);
+  auto tcpFd = [&]() -> Result<FD> {
+    if (systemdSockets.tcpSock.has_value()) {
+      std::cout << "Using TCP socket from systemd\n";
+      return std::move(*systemdSockets.tcpSock);
+    }
+    return getTcpSocket(tcp_port);
+  }();
   if (!tcpFd) {
     std::cerr << "Unable to start TCP listener: " << toString(tcpFd.error())
               << "\n";
   }
+
   std::vector<unistdpp::FD> tcpClients;
 
   // Get addresses
@@ -162,12 +226,10 @@ serverMain(int argc, char* argv[], char** envp) { // NOLINT
     return EXIT_FAILURE;
   }
 
-  // Open shared memory
+  // Check shared memory
   if (fb.mem == nullptr) {
     return EXIT_FAILURE;
   }
-  std::cerr << "Setting mem\n";
-  memset(fb.mem, UINT8_MAX, fb_size);
 
   // Call the get or create Instance function.
   if (!inQemu) {

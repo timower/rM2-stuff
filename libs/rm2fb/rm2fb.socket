@@ -1,0 +1,9 @@
+[Unit]
+Description=rm2 framebuffer server sockets
+
+[Socket]
+ListenDatagram=/var/run/rm2fb.sock
+ListenStream=8888
+
+[Install]
+WantedBy=sockets.target
