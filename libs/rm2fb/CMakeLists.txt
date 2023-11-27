@@ -72,5 +72,9 @@ install(FILES rm2fb.service rm2fb.socket
   COMPONENT rm2display
   DESTINATION lib/systemd/system)
 
+install(FILES opkg/rm2fb-preload.env
+  COMPONENT rm2display
+  DESTINATION opt/etc/xochitl.env.d)
+
 add_deploy(rm2fb_client)
 add_deploy(rm2fb_server)

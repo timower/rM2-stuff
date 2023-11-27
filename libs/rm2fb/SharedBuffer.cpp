@@ -1,14 +1,20 @@
 #include "SharedBuffer.h"
 
+#include <cerrno>
 #include <cstdio>
-#include <errno.h>
+#include <cstring>
 #include <fcntl.h> /* For O_* constants */
 #include <sys/mman.h>
 #include <sys/stat.h> /* For mode constants */
 #include <unistd.h>
 
-SharedFB::SharedFB(const char* path)
-  : fd(shm_open(path, O_RDWR | O_CREAT, 0755)) {
+SharedFB::SharedFB(const char* path) : fd(shm_open(path, O_RDWR, 0755)) {
+
+  bool clear = false;
+  if (fd == -1 && errno == ENOENT) {
+    fd = shm_open(path, O_RDWR | O_CREAT, 0755);
+    clear = true;
+  }
 
   if (fd == -1 && errno == EACCES) {
     fd = shm_open(path, O_RDWR | O_CREAT, 0755);
@@ -21,6 +27,9 @@ SharedFB::SharedFB(const char* path)
 
   ftruncate(fd, fb_size);
   mem = (uint16_t*)mmap(nullptr, fb_size, PROT_WRITE, MAP_SHARED, fd, 0);
+  if (clear) {
+    memset(mem, UINT8_MAX, fb_size);
+  }
 }
 
 SharedFB::~SharedFB() {

@@ -61,14 +61,9 @@ scp -P 2222 "$IPKS_PATH"/*.ipk root@localhost:
 do_ssh systemctl restart systemd-timesyncd
 do_ssh opkg update
 
-do_ssh opkg install ./*.ipk
+do_ssh opkg install ./*.ipk || true # TODO: xochitl doesn't configure for 3.5+
 
-do_ssh opkg install xochitl || true # TODO: xochitl doesn't configure for 3.5+
-
-do_ssh systemctl daemon-reload
-
-do_ssh systemctl start rm2fb
-sleep 1
+# Start rocket, which should trigger the rm2fb socket and start the service.
 do_ssh systemctl start rocket
 
 # rocket

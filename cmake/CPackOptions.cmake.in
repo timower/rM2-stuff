@@ -17,11 +17,13 @@ set(CPACK_DEBIAN_ARCHIVE_TYPE "gnutar")
 set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "rmall")
 
 # rm2fb stuff
-# TODO: Xochitl fails to install on 3.5 :(
-# set(CPACK_DEBIAN_RM2DISPLAY_PACKAGE_DEPENDS "xochitl")
+set(CPACK_DEBIAN_RM2DISPLAY_PACKAGE_DEPENDS "xochitl")
 set(CPACK_DEBIAN_RM2DISPLAY_PACKAGE_PROVIDES "display, rm2fb-client")
 set(CPACK_DEBIAN_RM2DISPLAY_PACKAGE_CONFLICTS "display, rm2fb-client, rm2fb")
 set(CPACK_DEBIAN_RM2DISPLAY_PACKAGE_REPLACES "display, rm2fb-client, rm2fb")
+set(CPACK_DEBIAN_RM2DISPLAY_PACKAGE_CONTROL_EXTRA
+  "@CMAKE_SOURCE_DIR@/libs/rm2fb/opkg/postinst;@CMAKE_SOURCE_DIR@/libs/rm2fb/opkg/prerm")
+
 
 # yaft2 and yaft term files conflict.
 set(CPACK_DEBIAN_YAFT2_PACKAGE_REPLACES "yaft")

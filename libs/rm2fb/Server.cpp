@@ -234,7 +234,17 @@ serverMain(int argc, char* argv[], char** envp) { // NOLINT
   // Call the get or create Instance function.
   if (!inQemu) {
     std::cerr << "SWTCON calling init\n";
+
+    // NOLINTNEXTLINE
+    auto copyBuffer = std::make_unique<uint16_t[]>(fb_width * fb_height);
+
+    // The init threads does a memset to 0xff. But if we're activated by a
+    // systemd socket the shared memory already has some content. So make a
+    // backup and preserve it.
+    memcpy(copyBuffer.get(), fb.mem, fb_size);
     addrs->initThreads();
+    memcpy(fb.mem, copyBuffer.get(), fb_size);
+
     std::cout << "SWTCON initalized!\n";
   } else {
     std::cout << "In QEMU, not starting SWTCON\n";

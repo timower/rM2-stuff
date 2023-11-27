@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+
+# Enable the rm2fb socket
+systemctl daemon-reload
+systemctl enable --now rm2fb.socket
