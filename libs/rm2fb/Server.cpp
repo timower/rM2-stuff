@@ -131,7 +131,7 @@ getTcpSocket(int port) {
 bool
 doTCPUpdate(unistdpp::FD& fd, const UpdateParams& params) {
   if (auto res = fd.writeAll(params); !res) {
-    std::cerr << "Error writing: " << toString(res.error()) << "\n";
+    std::cerr << "Error writing: " << to_string(res.error()) << "\n";
     fd.close();
     return false;
   }
@@ -152,7 +152,7 @@ doTCPUpdate(unistdpp::FD& fd, const UpdateParams& params) {
   const auto writeSize = size * sizeof(uint16_t);
   auto res = fd.writeAll(buffer.data(), writeSize);
   if (!res) {
-    std::cerr << "Error writing: " << toString(res.error()) << "\n";
+    std::cerr << "Error writing: " << to_string(res.error()) << "\n";
     fd.close();
     return false;
   }
@@ -166,7 +166,7 @@ readControlMessage(ControlSocket& serverSock, Fn&& fn) {
   serverSock.recvfrom<UpdateParams>()
     .and_then(std::forward<Fn>(fn))
     .or_else([](auto err) {
-      std::cerr << "Recvfrom fail: " << unistdpp::toString(err) << "\n";
+      std::cerr << "Recvfrom fail: " << to_string(err) << "\n";
     });
 }
 
@@ -213,7 +213,7 @@ serverMain(int argc, char* argv[], char** envp) { // NOLINT
     return getTcpSocket(tcp_port);
   }();
   if (!tcpFd) {
-    std::cerr << "Unable to start TCP listener: " << toString(tcpFd.error())
+    std::cerr << "Unable to start TCP listener: " << to_string(tcpFd.error())
               << "\n";
   }
 
@@ -269,7 +269,7 @@ serverMain(int argc, char* argv[], char** envp) { // NOLINT
       [](const auto& client) { return waitFor(client, Wait::Read); });
 
     if (auto res = unistdpp::poll(pollfds); !res) {
-      std::cerr << "Poll error: " << toString(res.error()) << "\n";
+      std::cerr << "Poll error: " << to_string(res.error()) << "\n";
       break;
     }
 
@@ -307,7 +307,7 @@ serverMain(int argc, char* argv[], char** envp) { // NOLINT
         .transform(
           [&](auto client) { tcpClients.emplace_back(std::move(client)); })
         .or_else([](auto err) {
-          std::cerr << "Client accept errror: " << toString(err) << "\n";
+          std::cerr << "Client accept errror: " << to_string(err) << "\n";
         });
     }
 
@@ -334,7 +334,7 @@ serverMain(int argc, char* argv[], char** envp) { // NOLINT
           }
         })
         .or_else([&](auto err) {
-          std::cerr << "Reading input: " << toString(err) << "\n";
+          std::cerr << "Reading input: " << to_string(err) << "\n";
           if (err == unistdpp::FD::eof_error) {
             clientSock.close();
           }

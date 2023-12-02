@@ -346,8 +346,8 @@ private:
       // Get the reason
       auto irq = unistdpp::readFile("/sys/power/pm_wakeup_irq");
       if (!irq.has_value()) {
-        std::cout << "Error getting reason: " << unistdpp::toString(irq.error())
-                  << std::endl;
+        std::cout << "Error getting reason: "
+                  << unistdpp::to_string(irq.error()) << std::endl;
 
         // If there is no irq it must be the user which pressed the button:
         return true;
@@ -596,7 +596,7 @@ main(int argc, char* argv[]) {
 
   std::signal(SIGCHLD, cleanup);
 
-  fatalOnError(runApp(LauncherWidget()));
+  unistdpp::fatalOnError(runApp(LauncherWidget()));
 
   auto fb = fb::FrameBuffer::open();
   if (fb.has_value()) {

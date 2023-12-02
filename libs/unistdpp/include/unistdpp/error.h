@@ -40,8 +40,24 @@ getErrno() {
 }
 
 inline std::string
-toString(std::errc error) {
+to_string(std::errc error) { // NOLINT
   return std::make_error_code(error).message();
+}
+
+template<typename T, typename E>
+T
+fatalOnError(tl::expected<T, E> error, std::string_view msg = "") {
+  if (!error.has_value()) {
+    using namespace std;
+    std::cerr << "FATAL: " << msg << to_string(error.error()) << std::endl;
+    std::abort();
+  }
+
+  if constexpr (std::is_void_v<T>) {
+    return;
+  } else {
+    return *error;
+  }
 }
 
 template<typename T>
