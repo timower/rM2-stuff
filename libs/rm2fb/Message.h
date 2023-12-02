@@ -53,6 +53,7 @@ template<typename Variant, auto idx = 0>
 unistdpp::Result<Variant>
 read(const unistdpp::FD& fd, int32_t index) {
   if constexpr (idx >= std::variant_size_v<Variant>) {
+    (void)index;
     return tl::unexpected(std::errc::bad_message);
   } else {
     if (idx == index) {

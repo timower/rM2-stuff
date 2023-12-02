@@ -15,7 +15,7 @@ int
 main(int argc, char* argv[]) {
   const auto* calcName = argc > 1 ? argv[1] : calc_default_rom;
 
-  fatalOnError(runApp(Navigator(tilem::Calculator(calcName))));
+  unistdpp::fatalOnError(runApp(Navigator(tilem::Calculator(calcName))));
 
   return EXIT_SUCCESS;
 }

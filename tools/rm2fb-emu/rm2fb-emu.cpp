@@ -38,7 +38,7 @@ main(int argc, char* argv[]) {
   int port = atoi(argv[2]);
   auto sock = getClientSock(argv[1], port);
   if (!sock.has_value()) {
-    std::cout << "Couldn't get tcp socket: " << toString(sock.error()) << "\n";
+    std::cout << "Couldn't get tcp socket: " << to_string(sock.error()) << "\n";
     return EXIT_FAILURE;
   }
 
@@ -87,7 +87,7 @@ main(int argc, char* argv[]) {
       ClientMsg input = Input{ touchEv.location.x, touchEv.location.y, type };
       auto res = sendMessage(*sock, input);
       if (!res) {
-        std::cerr << "Error writing: " << toString(res.error()) << "\n";
+        std::cerr << "Error writing: " << to_string(res.error()) << "\n";
       }
     }
 
@@ -97,7 +97,7 @@ main(int argc, char* argv[]) {
 
     auto msgOrErr = sock->readAll<UpdateParams>();
     if (!msgOrErr) {
-      std::cerr << "Error reading: " << toString(msgOrErr.error()) << "\n";
+      std::cerr << "Error reading: " << to_string(msgOrErr.error()) << "\n";
       break;
     }
     auto msg = *msgOrErr;
@@ -117,7 +117,7 @@ main(int argc, char* argv[]) {
     int readSize = bufSize * sizeof(uint16_t);
     auto res = sock->readAll(buffer.data(), readSize);
     if (!res) {
-      std::cerr << "Error reading: " << toString(res.error()) << "\n";
+      std::cerr << "Error reading: " << to_string(res.error()) << "\n";
       break;
     }
 

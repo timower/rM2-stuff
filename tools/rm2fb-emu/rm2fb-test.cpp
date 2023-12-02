@@ -21,7 +21,7 @@ doScreenshot(unistdpp::FD& sock, std::vector<std::string_view> args) {
   sendMessage(sock, ClientMsg(GetUpdate{}));
   auto msgOrErr = sock.readAll<UpdateParams>();
   if (!msgOrErr) {
-    std::cerr << "Error reading: " << toString(msgOrErr.error()) << "\n";
+    std::cerr << "Error reading: " << to_string(msgOrErr.error()) << "\n";
     return false;
   }
   auto msg = *msgOrErr;
@@ -40,7 +40,7 @@ doScreenshot(unistdpp::FD& sock, std::vector<std::string_view> args) {
 
   auto res = sock.readAll(buffer.data(), bufSize);
   if (!res) {
-    std::cerr << "Error reading: " << toString(res.error()) << "\n";
+    std::cerr << "Error reading: " << to_string(res.error()) << "\n";
     return false;
   }
 
@@ -102,7 +102,7 @@ main(int argc, char* argv[]) {
   int port = atoi(argv[2]);                 // NOLINT
   auto sock = getClientSock(argv[1], port); // NOLINT
   if (!sock.has_value()) {
-    std::cout << "Couldn't get tcp socket: " << toString(sock.error()) << "\n";
+    std::cout << "Couldn't get tcp socket: " << to_string(sock.error()) << "\n";
     return EXIT_FAILURE;
   }
 
@@ -111,7 +111,5 @@ main(int argc, char* argv[]) {
     args.emplace_back(argv[i]); // NOLINT
   }
 
-  actionFn(*sock, std::move(args));
-
-  return EXIT_SUCCESS;
+  return actionFn(*sock, std::move(args)) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -38,7 +38,7 @@ main(int argc, char* argv[]) {
 
   auto cfg = loadConfigOrMakeDefault();
 
-  fatalOnError(runApp(Yaft(cmd, args, std::move(cfg))));
+  unistdpp::fatalOnError(runApp(Yaft(cmd, args, std::move(cfg))));
 
   return 0;
 }

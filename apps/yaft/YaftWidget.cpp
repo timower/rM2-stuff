@@ -33,7 +33,7 @@ void
 initSignalHandler(AppContext& ctx) {
   globalCtx = &ctx;
 
-  struct sigaction sigact{};
+  struct sigaction sigact {};
   memset(&sigact, 0, sizeof(struct sigaction));
   sigact.sa_handler = sigHandler;
   sigact.sa_flags = SA_RESTART;
@@ -42,12 +42,12 @@ initSignalHandler(AppContext& ctx) {
 
 bool
 forkAndExec(int* master,
-              const char* cmd,
-              char* const argv[],
-              int lines,
-              int cols) {
+            const char* cmd,
+            char* const argv[],
+            int lines,
+            int cols) {
   pid_t pid = 0;
-  struct winsize ws{};
+  struct winsize ws {};
   ws.ws_row = lines;
   ws.ws_col = cols;
   /* XXX: this variables are UNUSED (man tty_ioctl),
@@ -58,7 +58,8 @@ forkAndExec(int* master,
   pid = eforkpty(master, nullptr, nullptr, &ws);
   if (pid < 0) {
     return false;
-  } if (pid == 0) { /* child */
+  }
+  if (pid == 0) { /* child */
     setenv("TERM", termName, 1);
     execvp(cmd, argv);
     /* never reach here */
@@ -98,10 +99,10 @@ YaftState::init(rmlib::AppContext& ctx, const rmlib::BuildContext& /*unused*/) {
   initSignalHandler(ctx);
 
   if (!forkAndExec(&term->fd,
-                     getWidget().cmd,
-                     getWidget().argv,
-                     term->lines,
-                     term->cols)) {
+                   getWidget().cmd,
+                   getWidget().argv,
+                   term->lines,
+                   term->cols)) {
     puts("Failed to fork!");
     std::exit(EXIT_FAILURE);
   }
@@ -112,7 +113,7 @@ YaftState::init(rmlib::AppContext& ctx, const rmlib::BuildContext& /*unused*/) {
 
     // Only update if the buffer isn't full. Otherwise more data is comming
     // probably.
-    if (size != buf.size()) {
+    if (size != int(buf.size())) {
       setState([&](auto& self) {
         parse(self.term.get(), reinterpret_cast<uint8_t*>(buf.data()), size);
       });

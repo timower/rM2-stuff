@@ -30,7 +30,7 @@ struct FakeInputDevice : public InputDeviceBase {
 
     pipes = unistdpp::pipe()
               .or_else([](auto err) {
-                std::cerr << unistdpp::toString(err) << "\n";
+                std::cerr << unistdpp::to_string(err) << "\n";
                 std::exit(EXIT_FAILURE);
               })
               .value();
@@ -83,7 +83,7 @@ InputManager::waitForInput(std::vector<pollfd>& extraFds,
 
     auto ret = unistdpp::poll(extraFds, timeout);
     if (!ret) {
-      std::cerr << "Poll failure: " << unistdpp::toString(ret.error()) << "\n";
+      std::cerr << "Poll failure: " << unistdpp::to_string(ret.error()) << "\n";
       return;
     }
 

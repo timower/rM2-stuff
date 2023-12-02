@@ -18,19 +18,19 @@ template<typename T>
 struct StringMaker<Result<T>> {
   static std::string convert(const Result<T>& value) {
     return value.has_value() ? StringMaker<T>::convert(*value)
-                             : "Error: " + toString(value.error());
+                             : "Error: " + to_string(value.error());
   }
 };
 template<>
 struct StringMaker<Result<void>> {
   static std::string convert(const Result<void>& value) {
-    return value.has_value() ? "OK" : "Error: " + toString(value.error());
+    return value.has_value() ? "OK" : "Error: " + to_string(value.error());
   }
 };
 } // namespace Catch
 
 TEST_CASE("error", "[unistdpp]") {
-  REQUIRE(toString(std::errc::invalid_argument) == "Invalid argument");
+  REQUIRE(to_string(std::errc::invalid_argument) == "Invalid argument");
 }
 
 TEST_CASE("open", "[unistdpp]") {
