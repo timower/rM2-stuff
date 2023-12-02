@@ -1,7 +1,7 @@
 #include "ControlSocket.h"
-#include "ImageHook.h"
 #include "InputDevice.h"
 #include "Message.h"
+#include "SharedBuffer.h"
 #include "Versions/Version.h"
 
 #include <unistdpp/file.h>
@@ -129,7 +129,7 @@ getTcpSocket(int port) {
 }
 
 bool
-doTCPUpdate(unistdpp::FD& fd, const UpdateParams& params) {
+doTCPUpdate(unistdpp::FD& fd, const SharedFB& fb, const UpdateParams& params) {
   if (auto res = fd.writeAll(params); !res) {
     std::cerr << "Error writing: " << to_string(res.error()) << "\n";
     fd.close();
@@ -145,7 +145,8 @@ doTCPUpdate(unistdpp::FD& fd, const UpdateParams& params) {
     int fbRow = row + params.y1;
 
     memcpy(&buffer[row * width],
-           fb.mem + fbRow * fb_width + params.x1, // NOLINT
+           // NOLINTNEXTLINE
+           static_cast<uint16_t*>(fb.mem.get()) + fbRow * fb_width + params.x1,
            width * sizeof(uint16_t));
   }
 
@@ -227,9 +228,8 @@ serverMain(int argc, char* argv[], char** envp) { // NOLINT
   }
 
   // Check shared memory
-  if (fb.mem == nullptr) {
-    return EXIT_FAILURE;
-  }
+  const auto& fb =
+    fatalOnError(SharedFB::getInstance(), "Error creating shared FB");
 
   // Call the get or create Instance function.
   if (!inQemu) {
@@ -241,9 +241,9 @@ serverMain(int argc, char* argv[], char** envp) { // NOLINT
     // The init threads does a memset to 0xff. But if we're activated by a
     // systemd socket the shared memory already has some content. So make a
     // backup and preserve it.
-    memcpy(copyBuffer.get(), fb.mem, fb_size);
+    memcpy(copyBuffer.get(), fb.mem.get(), fb_size);
     addrs->initThreads();
-    memcpy(fb.mem, copyBuffer.get(), fb_size);
+    memcpy(fb.mem.get(), copyBuffer.get(), fb_size);
 
     std::cout << "SWTCON initalized!\n";
   } else {
@@ -283,7 +283,7 @@ serverMain(int argc, char* argv[], char** envp) { // NOLINT
           res = addrs->doUpdate(msg);
         }
         for (auto& client : tcpClients) {
-          doTCPUpdate(client, msg);
+          doTCPUpdate(client, fb, msg);
         }
 
         // Don't log Stroke updates, unless debug mode is on.
@@ -321,6 +321,7 @@ serverMain(int argc, char* argv[], char** envp) { // NOLINT
         .map([&](const auto& msg) {
           if (std::holds_alternative<GetUpdate>(msg)) {
             doTCPUpdate(tcpClients.back(),
+                        fb,
                         { .y1 = 0,
                           .x1 = 0,
                           .y2 = fb_height - 1,

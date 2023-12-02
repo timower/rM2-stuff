@@ -5,7 +5,8 @@ add_library(${PROJECT_NAME} STATIC
   file.cpp
   pipe.cpp
   poll.cpp
-  socket.cpp)
+  socket.cpp
+  mmap.cpp)
 
 target_include_directories(${PROJECT_NAME}
   PUBLIC

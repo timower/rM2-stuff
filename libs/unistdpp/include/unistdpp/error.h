@@ -45,8 +45,20 @@ to_string(std::errc error) { // NOLINT
 }
 
 template<typename T, typename E>
+const T&
+fatalOnError(const tl::expected<T, E>& error, std::string_view msg = "") {
+  if (!error.has_value()) {
+    using namespace std;
+    std::cerr << "FATAL: " << msg << to_string(error.error()) << std::endl;
+    std::abort();
+  }
+
+  return *error;
+}
+
+template<typename T, typename E>
 T
-fatalOnError(tl::expected<T, E> error, std::string_view msg = "") {
+fatalOnError(tl::expected<T, E>&& error, std::string_view msg = "") {
   if (!error.has_value()) {
     using namespace std;
     std::cerr << "FATAL: " << msg << to_string(error.error()) << std::endl;
@@ -56,7 +68,7 @@ fatalOnError(tl::expected<T, E> error, std::string_view msg = "") {
   if constexpr (std::is_void_v<T>) {
     return;
   } else {
-    return *error;
+    return std::move(*error);
   }
 }
 

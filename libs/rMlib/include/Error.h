@@ -2,6 +2,7 @@
 
 #include <unistdpp/error.h>
 
+#include <iostream>
 #include <string>
 
 #include <tl/expected.hpp>
