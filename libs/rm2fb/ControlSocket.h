@@ -16,7 +16,8 @@ struct ControlSocket {
 
   template<typename T,
            typename = std::enable_if_t<std::is_trivially_copyable_v<T>>>
-  [[nodiscard]] unistdpp::Result<std::pair<T, unistdpp::Address>> recvfrom() {
+  [[nodiscard]] unistdpp::Result<std::pair<T, unistdpp::Address>> recvfrom()
+    const {
     T t{};
     unistdpp::Address addr;
     return unistdpp::recvfrom(sock, &t, sizeof(T), 0, &addr).map([&](auto _) {
@@ -28,7 +29,7 @@ struct ControlSocket {
            typename = std::enable_if_t<std::is_trivially_copyable_v<T>>>
   [[nodiscard]] unistdpp::Result<ssize_t> sendto(
     const T& t,
-    std::optional<unistdpp::Address> dest = std::nullopt) {
+    std::optional<unistdpp::Address> dest = std::nullopt) const {
     return unistdpp::sendto(
       sock, &t, sizeof(T), 0, dest.has_value() ? &*dest : nullptr);
   }

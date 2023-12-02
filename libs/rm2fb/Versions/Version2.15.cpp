@@ -1,7 +1,7 @@
 #include "Version.h"
 
 #include "AddressHooking.h"
-#include "ImageHook.h"
+#include "SharedBuffer.h"
 
 #include <rm2.h>
 
@@ -41,7 +41,11 @@ struct AddressInfo : public AddressInfoBase {
     , waitForStart(waitForStart) {}
 
   void initThreads() const final {
-    createThreads.call<int, void*>(fb.mem);
+    const auto& fb = SharedFB::getInstance();
+    if (!fb.has_value()) {
+      return;
+    }
+    createThreads.call<int, void*>(fb->mem.get());
     waitForStart.call<void>();
   }
 

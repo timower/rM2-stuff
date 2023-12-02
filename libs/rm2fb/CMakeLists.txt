@@ -17,7 +17,6 @@ pkg_check_modules(SYSTEMD libsystemd REQUIRED)
 add_library(rm2fb_lib STATIC
   SharedBuffer.cpp
   ControlSocket.cpp
-  ImageHook.cpp
   InputDevice.cpp
   Versions/Version.cpp
   Versions/Version2.15.cpp
@@ -36,13 +35,14 @@ target_link_libraries(rm2fb_lib
     unistdpp
     ${LIBEVDEV_LIBRARIES})
 
-add_library(rm2fb_server SHARED Server.cpp)
+add_library(rm2fb_server SHARED Server.cpp ImageHook.cpp)
 target_link_libraries(rm2fb_server PRIVATE rm2fb_lib ${SYSTEMD_LIBRARIES})
 target_include_directories(rm2fb_server PRIVATE ${SYSTEMD_INCLUDE_DIRS})
 
 add_library(rm2fb_client SHARED
   Client.cpp
   IOCTL.cpp
+  ImageHook.cpp
   AddressHooking.cpp)
 
 target_link_libraries(rm2fb_client

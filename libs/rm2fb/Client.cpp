@@ -1,9 +1,8 @@
 #include "Client.h"
 
-#include "IOCTL.h"
-#include "ImageHook.h"
-
 #include "ControlSocket.h"
+#include "IOCTL.h"
+#include "SharedBuffer.h"
 #include "Versions/Version.h"
 
 #include "frida-gum.h"
@@ -11,18 +10,28 @@
 #include <dlfcn.h>
 
 #include <cstring>
-#include <iostream>
 #include <unistd.h>
 
 namespace {
 
-ControlSocket clientSock;
 bool inXochitl = false;
+
+const unistdpp::Result<ControlSocket>&
+getControlSocket() {
+  static auto socket = []() -> unistdpp::Result<ControlSocket> {
+    ControlSocket res;
+    TRY(res.init(nullptr));
+    TRY(res.connect(default_sock_addr.data()));
+    return res;
+  }();
+
+  return socket;
+}
 
 int
 setupHooks() {
   const auto* addrs = getAddresses();
-  if (!addrs) {
+  if (addrs == nullptr) {
     return EXIT_FAILURE;
   }
 
@@ -36,8 +45,10 @@ setupHooks() {
 
 bool
 sendUpdate(const UpdateParams& params) {
+  const auto& clientSock = unistdpp::fatalOnError(getControlSocket());
+
   return clientSock.sendto(params)
-    .and_then([](auto _) {
+    .and_then([&](auto _) {
       return clientSock.recvfrom<bool>().map(
         [](auto pair) { return pair.first; });
     })
@@ -49,7 +60,8 @@ extern "C" {
 int
 open64(const char* pathname, int flags, mode_t mode = 0) {
   if (!inXochitl && pathname == std::string("/dev/fb0")) {
-    return fb.fd;
+    const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
+    return fb.fd.fd;
   }
 
   static const auto func_open =
@@ -61,7 +73,8 @@ open64(const char* pathname, int flags, mode_t mode = 0) {
 int
 open(const char* pathname, int flags, mode_t mode = 0) {
   if (!inXochitl && pathname == std::string("/dev/fb0")) {
-    return fb.fd;
+    const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
+    return fb.fd.fd;
   }
 
   static const auto func_open =
@@ -72,7 +85,8 @@ open(const char* pathname, int flags, mode_t mode = 0) {
 
 int
 close(int fd) {
-  if (fd == fb.fd) {
+  if (const auto& fb = SharedFB::getInstance();
+      fb.has_value() && fd == fb->fd.fd) {
     return 0;
   }
 
@@ -82,7 +96,8 @@ close(int fd) {
 
 int
 ioctl(int fd, unsigned long request, char* ptr) {
-  if (!inXochitl && fd == fb.fd) {
+  if (const auto& fb = SharedFB::getInstance();
+      !inXochitl && fb.has_value() && fd == fb->fd.fd) {
     return handleIOCTL(request, ptr);
   }
 
@@ -124,25 +139,15 @@ __libc_start_main(int (*_main)(int, char**, char**),
     setenv("RM2FB_ACTIVE", "1", true);
   }
 
-  if (fb.mem == nullptr) {
-    std::cout << "No rm2fb shared memory\n";
-    return EXIT_FAILURE;
-  }
-
-  if (!clientSock.init(nullptr)) {
-    std::cout << "No rm2fb socket\n";
-    return EXIT_FAILURE;
-  }
-  if (!clientSock.connect(default_sock_addr.data())) {
-    std::cout << "No rm2fb socket\n";
-    return EXIT_FAILURE;
-  }
-
   char pathBuffer[PATH_MAX];
   auto size = readlink("/proc/self/exe", pathBuffer, PATH_MAX);
 
   if (std::string_view(pathBuffer, size) == "/usr/bin/xochitl") {
     inXochitl = true;
+
+    unistdpp::fatalOnError(SharedFB::getInstance(), "Error making shared FB");
+    unistdpp::fatalOnError(getControlSocket(), "Error creating control socket");
+
     if (setupHooks() != EXIT_SUCCESS) {
       return EXIT_FAILURE;
     }

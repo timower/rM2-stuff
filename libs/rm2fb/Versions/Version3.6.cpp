@@ -1,5 +1,5 @@
-#include "../ImageHook.h"
 #include "AddressHooking.h"
+#include "SharedBuffer.h"
 #include "Version.h"
 
 #include <dlfcn.h>
@@ -36,12 +36,13 @@ static_assert(sizeof(ExtendedUpdateParams) == 0x20);
 int
 createThreadsHook(ImageInfo* info) {
   puts("HOOK: Create threads called!");
+  const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
   info->width = fb_width;
   info->height = fb_height;
   info->stride = fb_width;
   info->zero1 = 0;
   info->zero2 = 0;
-  info->data = fb.mem;
+  info->data = static_cast<uint16_t*>(fb.mem.get());
   return 0;
 }
 
@@ -125,7 +126,10 @@ struct AddressInfo : public AddressInfoBase {
     hook_first_malloc = true;
     ImageInfo info{};
     createThreads.call<void*, ImageInfo*>(&info);
-    assert(info.data == fb.mem && "Malloc wasn't hooked?");
+    assert([&] {
+      const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
+      return info.data == fb.mem.get();
+    }() && "Malloc wasn't hooked?");
     waitForInit();
   }
 
@@ -211,8 +215,9 @@ usleep(useconds_t micros) {
 void*
 malloc(size_t size) {
   if (size == 0x503580 && hook_first_malloc) {
+    const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
     hook_first_malloc = false;
-    return fb.mem;
+    return fb.mem.get();
   }
 
   static auto funcMalloc = (void* (*)(size_t))dlsym(RTLD_NEXT, "malloc");

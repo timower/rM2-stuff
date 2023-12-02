@@ -1,56 +1,50 @@
 #include "SharedBuffer.h"
 
-#include <cerrno>
-#include <cstdio>
+#include <unistdpp/file.h>
+#include <unistdpp/shared_mem.h>
+
 #include <cstring>
 #include <fcntl.h> /* For O_* constants */
 #include <sys/mman.h>
 #include <sys/stat.h> /* For mode constants */
 #include <unistd.h>
 
-SharedFB::SharedFB(const char* path) : fd(shm_open(path, O_RDWR, 0755)) {
+using namespace unistdpp;
+
+namespace {
+constexpr mode_t shm_mode = 0755;
+}
+
+Result<SharedFB>
+SharedFB::open(const char* path) {
+  auto fd = unistdpp::shm_open(path, O_RDWR, shm_mode);
 
   bool clear = false;
-  if (fd == -1 && errno == ENOENT) {
-    fd = shm_open(path, O_RDWR | O_CREAT, 0755);
+  if (!fd.has_value() && fd.error() == std::errc::no_such_file_or_directory) {
+    fd = unistdpp::shm_open(path, O_RDWR | O_CREAT, shm_mode);
     clear = true;
   }
 
-  if (fd == -1 && errno == EACCES) {
-    fd = shm_open(path, O_RDWR | O_CREAT, 0755);
+  if (!fd.has_value() && fd.error() == std::errc::permission_denied) {
+    fd = unistdpp::shm_open(path, O_RDWR | O_CREAT, shm_mode);
   }
 
-  if (fd < 0) {
-    perror("Can't open shm");
-    return;
+  if (!fd.has_value()) {
+    return tl::unexpected(fd.error());
   }
 
-  ftruncate(fd, fb_size);
-  mem = (uint16_t*)mmap(nullptr, fb_size, PROT_WRITE, MAP_SHARED, fd, 0);
+  TRY(unistdpp::ftruncate(*fd, fb_size));
+  auto mem =
+    TRY(unistdpp::mmap(nullptr, fb_size, PROT_WRITE, MAP_SHARED, *fd, 0));
   if (clear) {
-    memset(mem, UINT8_MAX, fb_size);
+    memset(mem.get(), UINT8_MAX, fb_size);
   }
+
+  return SharedFB{ .fd = std::move(*fd), .mem = std::move(mem) };
 }
 
-SharedFB::~SharedFB() {
-  if (mem != nullptr) {
-    munmap(mem, fb_size);
-  }
-}
-
-SharedFB::SharedFB(SharedFB&& other) noexcept : fd(other.fd), mem(other.mem) {
-  other.fd = -1;
-  other.mem = nullptr;
-}
-
-SharedFB&
-SharedFB::operator=(SharedFB&& other) noexcept {
-  // TODO: release
-  this->fd = other.fd;
-  this->mem = other.mem;
-
-  other.fd = -1;
-  other.mem = nullptr;
-
-  return *this;
+const Result<SharedFB>&
+SharedFB::getInstance() {
+  static auto instance = SharedFB::open(default_fb_name);
+  return instance;
 }
