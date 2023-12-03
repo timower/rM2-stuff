@@ -3,46 +3,78 @@
 // rm2fb
 #include <Message.h>
 
+// unistdpp
 #include <unistdpp/socket.h>
 
+// rmlib
 #include <FrameBuffer.h>
 #include <Input.h>
+#include <UI/Util.h>
 
 #include <arpa/inet.h>
-#include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <vector>
 
 using namespace unistdpp;
 using namespace rmlib::input;
 
 namespace {
 
-bool running = true;
+int
+getType(const PenEvent& touchEv) {
+  if (touchEv.isDown()) {
+    return 1;
+  }
+  if (touchEv.isUp()) {
+    return 2;
+  }
+  return 0;
+}
+
+Result<std::pair<rmlib::UpdateRegion, rmlib::MemoryCanvas>>
+readUpdate(const FD& sock) {
+  auto msg = TRY(sock.readAll<UpdateParams>());
+  if ((msg.flags & 4) == 0) {
+    std::cout << "Got msg: "
+              << "{ { " << msg.x1 << ", " << msg.y1 << "; " << msg.x2 << ", "
+              << msg.y2 << " }, wave: " << msg.waveform
+              << " flags: " << msg.flags << " }\n";
+  }
+
+  rmlib::Rect region = { .topLeft = { msg.x1, msg.y1 },
+                         .bottomRight = { msg.x2, msg.y2 } };
+  rmlib::MemoryCanvas memCanvas(
+    region.width(), region.height(), sizeof(uint16_t));
+
+  TRY(sock.readAll(memCanvas.memory.get(), memCanvas.canvas.totalSize()));
+
+  return std::pair{ rmlib::UpdateRegion(region,
+                                        (rmlib::fb::Waveform)msg.waveform,
+                                        (rmlib::fb::UpdateFlags)msg.flags),
+                    std::move(memCanvas) };
+}
 
 } // namespace
 
 int
 main(int argc, char* argv[]) {
+  const char* programName = argv[0]; // NOLINT
   if (argc != 3) {
-    printf("\n Usage: %s <ip of server> <port> \n", argv[0]);
+    std::cout << "Usage: " << programName << " <ip of server> <port> \n";
     return 1;
   }
+  const char* portArg = argv[2]; // NOLINT
+  const char* addrArg = argv[1]; // NOLINT
 
-  int port = atoi(argv[2]);
-  auto sock = getClientSock(argv[1], port);
-  if (!sock.has_value()) {
-    std::cout << "Couldn't get tcp socket: " << to_string(sock.error()) << "\n";
-    return EXIT_FAILURE;
-  }
+  int port = atoi(portArg);
+  auto sock =
+    fatalOnError(getClientSock(addrArg, port), "Couldn't get tcp socket: ");
 
-  sendMessage(*sock, ClientMsg(GetUpdate{}));
+  sendMessage(sock, ClientMsg(GetUpdate{}));
 
   auto fb = rmlib::fb::FrameBuffer::open();
   if (!fb.has_value()) {
@@ -55,8 +87,9 @@ main(int argc, char* argv[]) {
 
   fb->clear();
 
+  bool running = true;
   while (running) {
-    auto fdsOrErr = input.waitForInput(std::nullopt, *sock);
+    auto fdsOrErr = input.waitForInput(std::nullopt, sock);
     if (!fdsOrErr.has_value()) {
       std::cerr << "Error input: " << fdsOrErr.error().msg;
       break;
@@ -70,22 +103,13 @@ main(int argc, char* argv[]) {
       }
 
       const auto& touchEv = std::get<PenEvent>(event);
-      const auto type = [&] {
-        if (touchEv.isDown()) {
-          return 1;
-        }
-        if (touchEv.isUp()) {
-          return 2;
-        }
-        return 0;
-      }();
-
+      const auto type = getType(touchEv);
       if (type != 0) {
         std::cout << "Touch @ " << touchEv.location << "\n";
       }
 
       ClientMsg input = Input{ touchEv.location.x, touchEv.location.y, type };
-      auto res = sendMessage(*sock, input);
+      auto res = sendMessage(sock, input);
       if (!res) {
         std::cerr << "Error writing: " << to_string(res.error()) << "\n";
       }
@@ -95,47 +119,20 @@ main(int argc, char* argv[]) {
       continue;
     }
 
-    auto msgOrErr = sock->readAll<UpdateParams>();
-    if (!msgOrErr) {
-      std::cerr << "Error reading: " << to_string(msgOrErr.error()) << "\n";
-      break;
+    auto msgOrErr = readUpdate(sock);
+    if (!msgOrErr.has_value()) {
+      std::cerr << "Error reading update: " << to_string(msgOrErr.error())
+                << "\n";
+      continue;
     }
-    auto msg = *msgOrErr;
+    auto [update, memCanvas] = std::move(*msgOrErr);
+    assert(fb->canvas.rect().contains(update.region));
 
-    if ((msg.flags & 4) == 0) {
-      std::cout << "Got msg: "
-                << "{ { " << msg.x1 << ", " << msg.y1 << "; " << msg.x2 << ", "
-                << msg.y2 << " }, wave: " << msg.waveform
-                << " flags: " << msg.flags << " }\n";
-    }
-
-    int width = msg.x2 - msg.x1 + 1;
-    int height = msg.y2 - msg.y1 + 1;
-    int bufSize = width * height;
-    std::vector<uint16_t> buffer(bufSize);
-
-    int readSize = bufSize * sizeof(uint16_t);
-    auto res = sock->readAll(buffer.data(), readSize);
-    if (!res) {
-      std::cerr << "Error reading: " << to_string(res.error()) << "\n";
-      break;
-    }
-
-    rmlib::Rect region = { .topLeft = { msg.x1, msg.y1 },
-                           .bottomRight = { msg.x2, msg.y2 } };
-    assert(fb->canvas.rect().contains(region));
-
-    uint16_t* mem = (uint16_t*)fb->canvas.getMemory();
-    for (int row = 0; row < height; row++) {
-      int fbRow = row + msg.y1;
-      memcpy(mem + fbRow * fb->canvas.width() + msg.x1,
-             buffer.data() + row * width,
-             width * sizeof(uint16_t));
-    }
-
-    fb->doUpdate(region,
-                 (rmlib::fb::Waveform)msg.waveform,
-                 (rmlib::fb::UpdateFlags)msg.flags);
+    rmlib::copy(fb->canvas,
+                update.region.topLeft,
+                memCanvas.canvas,
+                memCanvas.canvas.rect());
+    fb->doUpdate(update.region, update.waveform, update.flags);
   }
 
   return 0;

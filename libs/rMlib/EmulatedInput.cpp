@@ -67,7 +67,7 @@ InputManager::openAll(bool monitor) {
   return baseDevices;
 }
 
-ErrorOr<std::vector<Event>>
+ErrorOr<std::vector<Event>> // NOLINTNEXTLINE
 InputManager::waitForInput(std::vector<pollfd>& extraFds,
                            std::optional<std::chrono::milliseconds> timeout) {
   static bool down = false;

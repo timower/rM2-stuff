@@ -148,9 +148,9 @@ struct InputManager {
     if constexpr (sizeof...(ExtraFds) == 0) {
       return res;
     } else {
-      std::array<bool, sizeof...(extraFds)> extraResult;
+      std::array<bool, sizeof...(extraFds)> extraResult{};
       for (std::size_t i = 0; i < sizeof...(extraFds); i++) {
-        extraResult[i] = unistdpp::canRead(fds[i]);
+        extraResult[i] = unistdpp::canRead(fds[i]); // NOLINT
       }
 
       return std::pair{ res, extraResult };
