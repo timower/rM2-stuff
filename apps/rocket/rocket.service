@@ -9,7 +9,7 @@ ExecStart=/opt/bin/rocket
 Restart=on-failure
 RestartSec=5
 Environment="HOME=/home/root"
-Environment=LD_PRELOAD=/opt/lib/librm2fb_client.so
+Environment=LD_PRELOAD=/opt/lib/librm2fb_client.so.1
 
 [Install]
 Alias=launcher.service
