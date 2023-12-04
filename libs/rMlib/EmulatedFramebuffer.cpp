@@ -2,13 +2,9 @@
 #include "FrameBuffer.h"
 
 #include <SDL.h>
-#include <array>
-#include <chrono>
 
-#include <atomic>
-#include <csignal>
+#include <array>
 #include <iostream>
-#include <thread>
 
 #if EMULATE_UINPUT
 #include <libevdev/libevdev-uinput.h>
@@ -18,11 +14,8 @@ bool rmlibDisableWindow = false; // NOLINT
 
 namespace rmlib::fb {
 namespace {
-constexpr auto canvas_width = 1404;
-constexpr auto canvas_height = 1872;
+
 constexpr auto canvas_components = 2;
-constexpr auto window_width = canvas_width / EMULATE_SCALE;
-constexpr auto window_height = canvas_height / EMULATE_SCALE;
 
 constexpr int emulated_fd = 1337;
 
@@ -32,7 +25,7 @@ std::unique_ptr<uint8_t[]> emuMem; // NOLINT
 
 void
 putpixel(SDL_Surface* surface, int x, int y, Uint32 pixel) {
-  if (x < 0 || x >= window_width || y < 0 || y >= window_height) {
+  if (x < 0 || x >= surface->w || y < 0 || y >= surface->h) {
     return;
   }
 
@@ -44,7 +37,7 @@ putpixel(SDL_Surface* surface, int x, int y, Uint32 pixel) {
 }
 
 ErrorOr<Canvas>
-makeEmulatedCanvas() {
+makeEmulatedCanvas(Size size) {
   if (!rmlibDisableWindow) {
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
       return Error::make(std::string("could not initialize sdl2:") +
@@ -54,8 +47,8 @@ makeEmulatedCanvas() {
     window = SDL_CreateWindow("rM emulator",
                               SDL_WINDOWPOS_UNDEFINED,
                               SDL_WINDOWPOS_UNDEFINED,
-                              window_width,
-                              window_height,
+                              size.width / EMULATE_SCALE,
+                              size.height / EMULATE_SCALE,
                               SDL_WINDOW_SHOWN);
     if (window == nullptr) {
       return Error::make(std::string("could not create window:") +
@@ -72,10 +65,10 @@ makeEmulatedCanvas() {
   }
 
   constexpr auto clear_color = 0xaa;
-  const auto memSize = canvas_width * canvas_height * canvas_components;
+  const auto memSize = size.width * size.height * canvas_components;
   emuMem = std::make_unique<uint8_t[]>(memSize); // NOLINT
   memset(emuMem.get(), clear_color, memSize);
-  return Canvas(emuMem.get(), canvas_width, canvas_height, canvas_components);
+  return Canvas(emuMem.get(), size.width, size.height, canvas_components);
 }
 
 void
@@ -258,8 +251,12 @@ uinput_thread() {
 } // namespace
 
 ErrorOr<FrameBuffer>
-FrameBuffer::open() {
-  auto canvas = TRY(makeEmulatedCanvas());
+FrameBuffer::open(std::optional<Size> requestedSize) {
+  constexpr auto canvas_width = 1404;
+  constexpr auto canvas_height = 1872;
+
+  auto canvas = TRY(makeEmulatedCanvas(
+    requestedSize.value_or(Size{ canvas_width, canvas_height })));
 
 #if EMULATE_UINPUT
   inputThread = std::thread(uinput_thread);

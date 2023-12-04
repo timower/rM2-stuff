@@ -56,7 +56,7 @@ FrameBuffer::detectType() {
 }
 
 ErrorOr<FrameBuffer>
-FrameBuffer::open() {
+FrameBuffer::open(std::optional<Size> requestedSize) {
   const auto fbType = TRY(detectType());
 
   auto fd = TRY(unistdpp::open(fb_path, O_RDWR));
@@ -67,6 +67,7 @@ FrameBuffer::open() {
   fb_fix_screeninfo fixScreenInfo{};
   TRY(unistdpp::ioctl<fb_fix_screeninfo*>(
     fd, FBIOGET_FSCREENINFO, &fixScreenInfo));
+  // TODO: SET_VSCREENINFO with requested size...
 
   auto components = int(screeninfo.bits_per_pixel / CHAR_BIT);
   auto width = int(screeninfo.xres);

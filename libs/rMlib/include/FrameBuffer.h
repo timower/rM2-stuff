@@ -16,7 +16,7 @@ struct FrameBuffer {
   enum Type { rM1, Shim, rM2Stuff }; // NOLINT
 
   /// Opens the framebuffer.
-  static ErrorOr<FrameBuffer> open();
+  static ErrorOr<FrameBuffer> open(std::optional<Size> requestedSize = {});
 
   FrameBuffer(FrameBuffer&& other) = default;
 
