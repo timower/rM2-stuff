@@ -10,8 +10,8 @@ namespace rmlib {
 
 class AppContext {
 public:
-  static ErrorOr<AppContext> makeContext() {
-    auto fb = TRY(fb::FrameBuffer::open());
+  static ErrorOr<AppContext> makeContext(std::optional<Size> size = {}) {
+    auto fb = TRY(fb::FrameBuffer::open(size));
     auto ctx = AppContext(std::move(fb));
     TRY(ctx.inputManager.openAll());
     return ctx;

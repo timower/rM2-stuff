@@ -41,8 +41,8 @@ stop(int signal) {
 
 template<typename AppWidget>
 OptError<>
-runApp(AppWidget widget) {
-  auto context = TRY(AppContext::makeContext());
+runApp(AppWidget widget, std::optional<Size> size = {}) {
+  auto context = TRY(AppContext::makeContext(size));
   details::currentContext = &context;
 
   // TODO: fix widget lifetime
