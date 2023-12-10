@@ -30,4 +30,10 @@ AllUinputDevices
 makeAllDevices();
 
 void
-sendInput(const Input& input, libevdev_uinput& wacomDevice);
+sendPen(const Input& input, libevdev_uinput& wacomDevice);
+
+void
+sendTouch(const Input& input, libevdev_uinput& touchDevice);
+
+void
+sendButton(bool down, libevdev_uinput& buttonDevice);

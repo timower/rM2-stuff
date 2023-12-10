@@ -54,22 +54,52 @@ doScreenshot(unistdpp::FD& sock, std::vector<std::string_view> args) {
 }
 
 bool
+doInput(unistdpp::FD& sock, int x, int y, bool touch) {
+  auto input = Input{
+    .x = x,
+    .y = y,
+    .type = Input::Down,
+    .touch = touch,
+  };
+
+  fatalOnError(sendMessage(sock, ClientMsg(input)));
+  usleep(tap_wait);
+
+  input.type = Input::Up;
+  fatalOnError(sendMessage(sock, ClientMsg(input)));
+  usleep(tap_wait);
+
+  return true;
+}
+
+bool
 doTouch(unistdpp::FD& sock, std::vector<std::string_view> args) {
   if (args.size() != 2) {
     std::cerr << "Touch requires 2 args, x and y\n";
     return false;
   }
 
-  auto input = Input{
-    .x = atoi(args[0].data()),
-    .y = atoi(args[1].data()),
-    .type = 1,
-  };
+  return doInput(sock, atoi(args[0].data()), atoi(args[1].data()), true);
+}
+
+bool
+doPen(unistdpp::FD& sock, std::vector<std::string_view> args) {
+  if (args.size() != 2) {
+    std::cerr << "Touch requires 2 args, x and y\n";
+    return false;
+  }
+
+  return doInput(sock, atoi(args[0].data()), atoi(args[1].data()), false);
+}
+
+bool
+doPower(unistdpp::FD& sock, std::vector<std::string_view> args) {
+  auto input = PowerButton{ .down = true };
 
   fatalOnError(sendMessage(sock, ClientMsg(input)));
   usleep(tap_wait);
 
-  input.type = 2;
+  input.down = false;
   fatalOnError(sendMessage(sock, ClientMsg(input)));
   usleep(tap_wait);
 
@@ -80,6 +110,8 @@ const std::unordered_map<std::string_view, decltype(&doScreenshot)> actions = {
   {
     { "screenshot", doScreenshot },
     { "touch", doTouch },
+    { "pen", doPen },
+    { "power", doPower },
   }
 };
 } // namespace

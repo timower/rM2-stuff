@@ -27,15 +27,15 @@ using namespace rmlib::input;
 
 namespace {
 
-int
+Input::Action
 getType(const PenEvent& touchEv) {
   if (touchEv.isDown()) {
-    return 1;
+    return Input::Down;
   }
   if (touchEv.isUp()) {
-    return 2;
+    return Input::Up;
   }
-  return 0;
+  return Input::Move;
 }
 
 struct UpdateMsg {
@@ -197,7 +197,8 @@ public:
         std::cout << "Touch @ " << ev.location << "\n";
       }
 
-      ClientMsg input = Input{ ev.location.x, ev.location.y, type };
+      ClientMsg input =
+        Input{ ev.location.x, ev.location.y, type, /* touch */ true };
       auto res = sendMessage(socket, input);
       if (!res) {
         std::cerr << "Error writing: " << to_string(res.error()) << "\n";

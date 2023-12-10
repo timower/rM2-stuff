@@ -172,6 +172,44 @@ readControlMessage(ControlSocket& serverSock, Fn&& fn) {
     });
 }
 
+void
+handleMsg(const SharedFB& fb,
+          unistdpp::FD& fd,
+          const AllUinputDevices& devs,
+          GetUpdate msg) {
+  doTCPUpdate(fd,
+              fb,
+              { .y1 = 0,
+                .x1 = 0,
+                .y2 = fb_height - 1,
+                .x2 = fb_width - 1,
+                .flags = 0,
+                .waveform = 0 });
+}
+
+void
+handleMsg(const SharedFB& fb,
+          unistdpp::FD& fd,
+          const AllUinputDevices& devs,
+          const Input& msg) {
+  if (!msg.touch && devs.wacom) {
+    sendPen(msg, *devs.wacom);
+  }
+  if (msg.touch && devs.touch) {
+    sendTouch(msg, *devs.touch);
+  }
+}
+
+void
+handleMsg(const SharedFB& fb,
+          unistdpp::FD& fd,
+          const AllUinputDevices& devs,
+          const PowerButton& msg) {
+  if (devs.button) {
+    sendButton(msg.down, *devs.button);
+  }
+}
+
 int
 serverMain(int argc, char* argv[], char** envp) { // NOLINT
   setupExitHandler();
@@ -183,13 +221,7 @@ serverMain(int argc, char* argv[], char** envp) { // NOLINT
   auto systemdSockets = getSystemdSockets();
 
   // Make uinput devices
-  AllUinputDevices devices;
-  if (inQemu) {
-    devices = makeAllDevices();
-  } else {
-    // Only make the wacom device, used for faking input from tcp clients.
-    devices.wacom = makeWacomDevice();
-  }
+  auto devices = makeAllDevices();
 
   auto serverSock = [&] {
     if (systemdSockets.controlSock.has_value()) {
@@ -320,20 +352,8 @@ serverMain(int argc, char* argv[], char** envp) { // NOLINT
       auto& clientSock = tcpClients[idx - fixedFdNum];
       recvMessage<ClientMsg>(clientSock)
         .map([&](const auto& msg) {
-          if (std::holds_alternative<GetUpdate>(msg)) {
-            doTCPUpdate(tcpClients.back(),
-                        fb,
-                        { .y1 = 0,
-                          .x1 = 0,
-                          .y2 = fb_height - 1,
-                          .x2 = fb_width - 1,
-                          .flags = 0,
-                          .waveform = 0 });
-            return;
-          }
-          if (devices.wacom) {
-            sendInput(std::get<Input>(msg), *devices.wacom);
-          }
+          std::visit([&](auto msg) { handleMsg(fb, clientSock, devices, msg); },
+                     msg);
         })
         .or_else([&](auto err) {
           std::cerr << "Reading input: " << to_string(err) << "\n";

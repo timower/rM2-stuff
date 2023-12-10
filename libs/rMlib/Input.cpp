@@ -279,8 +279,6 @@ handeDevice(InputManager& mgr, udev_device& dev) {
   }
 
   const auto* action = udev_device_get_action(&dev);
-  std::cout << "action: " << (action == nullptr ? "null" : action) << "\n";
-
   if (action == nullptr || action == std::string_view("add")) {
     mgr.open(devnode);
     return;
@@ -351,6 +349,7 @@ InputManager::open(std::string_view input) {
   auto device = makeDevice(
     std::move(fd), std::move(dev), std::string(input), baseTransform);
   auto* devicePtr = device.get();
+  std::cout << "Got device: " << device->getName() << "\n";
   devices.emplace(devicePtr->path, std::move(device));
   return devicePtr;
 }
