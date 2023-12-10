@@ -4,6 +4,11 @@
 
 #include <iostream>
 
+namespace {
+constexpr auto screen_width = 1404;
+constexpr auto screen_height = 1872;
+} // namespace
+
 void
 UinputDeleter::operator()(libevdev_uinput* device) {
   libevdev_uinput_destroy(device);
@@ -119,6 +124,8 @@ makeTouchDevice() {
   info.maximum = 255;
   libevdev_enable_event_code(dev, EV_ABS, ABS_MT_PRESSURE, &info);
 
+  libevdev_enable_property(dev, INPUT_PROP_DIRECT);
+
   libevdev_uinput* uidev = nullptr;
   auto err = libevdev_uinput_create_from_device(
     dev, LIBEVDEV_UINPUT_OPEN_MANAGED, &uidev);
@@ -139,7 +146,6 @@ makeButtonDevice() {
 
   libevdev_set_name(dev, "30371337.snvs:snvs-powerkey");
   libevdev_enable_event_type(dev, EV_SYN);
-
   libevdev_enable_event_type(dev, EV_KEY);
   libevdev_enable_event_code(dev, EV_KEY, KEY_POWER, nullptr);
 
@@ -169,12 +175,9 @@ makeAllDevices() {
 }
 
 void
-sendInput(const Input& input, libevdev_uinput& wacomDevice) {
+sendPen(const Input& input, libevdev_uinput& wacomDevice) {
   constexpr auto wacom_width = 15725;
   constexpr auto wacom_height = 20967;
-
-  constexpr auto screen_width = 1404;
-  constexpr auto screen_height = 1872;
 
   auto x = int(float(input.x) * wacom_width / screen_width);
   auto y = int(wacom_height - float(input.y) * wacom_height / screen_height);
@@ -182,11 +185,51 @@ sendInput(const Input& input, libevdev_uinput& wacomDevice) {
   libevdev_uinput_write_event(&wacomDevice, EV_ABS, ABS_X, y);
   libevdev_uinput_write_event(&wacomDevice, EV_ABS, ABS_Y, x);
 
-  if (input.type != 0) {
-    const auto value = input.type == 1 ? 1 : 0;
+  if (input.type != Input::Move) {
+    const auto value = input.type == Input::Down ? 1 : 0;
     libevdev_uinput_write_event(&wacomDevice, EV_KEY, BTN_TOOL_PEN, value);
     libevdev_uinput_write_event(&wacomDevice, EV_KEY, BTN_TOUCH, value);
   }
 
   libevdev_uinput_write_event(&wacomDevice, EV_SYN, SYN_REPORT, 0);
+}
+
+void
+sendTouch(const Input& input, libevdev_uinput& touchDevice) {
+  constexpr auto fake_slot = 1;
+  constexpr auto fake_id = 123;
+
+  switch (input.type) {
+    case Input::Move:
+      break;
+    case Input::Down:
+      libevdev_uinput_write_event(&touchDevice, EV_ABS, ABS_MT_SLOT, fake_slot);
+      libevdev_uinput_write_event(
+        &touchDevice, EV_ABS, ABS_MT_TRACKING_ID, fake_id);
+      libevdev_uinput_write_event(&touchDevice, EV_ABS, ABS_MT_PRESSURE, 110);
+      libevdev_uinput_write_event(&touchDevice, EV_ABS, ABS_MT_TOUCH_MAJOR, 26);
+      libevdev_uinput_write_event(&touchDevice, EV_ABS, ABS_MT_TOUCH_MINOR, 26);
+      libevdev_uinput_write_event(&touchDevice, EV_ABS, ABS_MT_ORIENTATION, 4);
+
+      break;
+    case Input::Up:
+      libevdev_uinput_write_event(&touchDevice, EV_ABS, ABS_MT_PRESSURE, 0);
+      libevdev_uinput_write_event(&touchDevice, EV_ABS, ABS_MT_TRACKING_ID, -1);
+      libevdev_uinput_write_event(&touchDevice, EV_ABS, ABS_MT_SLOT, 0);
+      break;
+  }
+
+  libevdev_uinput_write_event(&touchDevice, EV_ABS, ABS_MT_POSITION_X, input.x);
+  libevdev_uinput_write_event(
+    &touchDevice, EV_ABS, ABS_MT_POSITION_Y, screen_height - input.y);
+
+  libevdev_uinput_write_event(&touchDevice, EV_SYN, SYN_REPORT, 0);
+}
+
+void
+sendButton(bool down, libevdev_uinput& buttonDevice) {
+  const auto value = down ? 1 : 0;
+  libevdev_uinput_write_event(&buttonDevice, EV_KEY, KEY_POWER, value);
+
+  libevdev_uinput_write_event(&buttonDevice, EV_SYN, SYN_REPORT, 0);
 }

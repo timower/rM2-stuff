@@ -30,16 +30,21 @@ operator<<(std::ostream& stream, const UpdateParams& msg) {
 }
 
 struct Input {
-  int32_t x;
-  int32_t y;
-  int32_t type; // 1 = down, 2 = up
+  int32_t x = 0;
+  int32_t y = 0;
+  enum Action { Move, Down, Up } type = Move;
+  bool touch = false; // True for touch, false for pen
 };
 
-static_assert(sizeof(Input) == 3 * 4, "Input message has unexpected size");
+static_assert(sizeof(Input) == 4 * 4, "Input message has unexpected size");
 
 struct GetUpdate {};
 
-using ClientMsg = std::variant<Input, GetUpdate>;
+struct PowerButton {
+  bool down;
+};
+
+using ClientMsg = std::variant<Input, GetUpdate, PowerButton>;
 
 template<typename... T>
 unistdpp::Result<void>

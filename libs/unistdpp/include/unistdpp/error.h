@@ -50,7 +50,7 @@ fatalOnError(const tl::expected<T, E>& error, std::string_view msg = "") {
   if (!error.has_value()) {
     using namespace std;
     std::cerr << "FATAL: " << msg << to_string(error.error()) << std::endl;
-    std::abort();
+    std::exit(EXIT_FAILURE);
   }
 
   return *error;
@@ -62,7 +62,7 @@ fatalOnError(tl::expected<T, E>&& error, std::string_view msg = "") {
   if (!error.has_value()) {
     using namespace std;
     std::cerr << "FATAL: " << msg << to_string(error.error()) << std::endl;
-    std::abort();
+    std::exit(EXIT_FAILURE);
   }
 
   if constexpr (std::is_void_v<T>) {
