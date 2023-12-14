@@ -27,6 +27,8 @@ using namespace rmlib::input;
 
 namespace {
 
+constexpr auto header_size = 64;
+
 Input::Action
 getType(const PenEvent& touchEv) {
   if (touchEv.isDown()) {
@@ -65,6 +67,53 @@ readUpdate(const FD& sock) {
                                         (rmlib::fb::UpdateFlags)msg.flags),
                     std::move(memCanvas) };
 }
+
+class BetterButton : public StatefulWidget<BetterButton> {
+  class State : public StateBase<BetterButton> {
+  public:
+    auto build(AppContext& ctx, const BuildContext& buildCtx) const {
+      bool isDown = getWidget().alwaysEnabled || down;
+      return GestureDetector(
+        Padding(Border(Border(Text(getWidget().text),
+                              Insets::all(2),
+                              isDown ? black : white),
+                       Insets::all(2)),
+                Insets::all(2)),
+        Gestures{}
+          .onTouchDown([this](auto pos) {
+            setState([](auto& self) { self.down = true; });
+            if (const auto& widget = getWidget(); widget.onDown) {
+              widget.onDown();
+            }
+          })
+          .onTap([this] {
+            setState([](auto& self) { self.down = false; });
+            getWidget().onClick();
+          }));
+    }
+
+  private:
+    bool down = false;
+  };
+
+public:
+  BetterButton(std::string text,
+               Callback onClick,
+               Callback onDown = {},
+               bool alwaysEnabled = false)
+    : text(std::move(text))
+    , onClick(std::move(onClick))
+    , onDown(std::move(onDown))
+    , alwaysEnabled(alwaysEnabled) {}
+
+  static State createState() { return State{}; }
+
+private:
+  std::string text;
+  Callback onClick;
+  Callback onDown;
+  bool alwaysEnabled;
+};
 
 class FBRenderObject;
 
@@ -136,7 +185,9 @@ protected:
       return;
     }
 
-    getWidget().onInput(touchEv);
+    auto movedEv = touchEv;
+    movedEv.location -= getRect().topLeft;
+    getWidget().onInput(movedEv);
   }
 };
 
@@ -190,27 +241,55 @@ public:
     sendMessage(socket, ClientMsg(GetUpdate{}));
   }
 
-  auto build(AppContext& ctx, const BuildContext& buildCtx) const {
-    auto result = FB(memCanvas.canvas, *pendingUpdates, [this](const auto& ev) {
-      auto type = getType(ev);
-      if (type != 0) {
-        std::cout << "Touch @ " << ev.location << "\n";
-      }
+  void onInput(const PenEvent& ev) const {
+    auto type = getType(ev);
+    if (type != 0) {
+      std::cout << "Touch @ " << ev.location << "\n";
+    }
 
-      ClientMsg input =
-        Input{ ev.location.x, ev.location.y, type, /* touch */ true };
-      auto res = sendMessage(socket, input);
-      if (!res) {
-        std::cerr << "Error writing: " << to_string(res.error()) << "\n";
-      }
-    });
-    return result;
+    ClientMsg input = Input{ ev.location.x, ev.location.y, type, touch };
+    auto res = sendMessage(socket, input);
+    if (!res) {
+      std::cerr << "Error writing: " << to_string(res.error()) << "\n";
+    }
+  }
+
+  auto header() const {
+    return Row(BetterButton(
+                 "X",
+                 [this] {
+                   ClientMsg msg = PowerButton{ .down = false };
+                   fatalOnError(sendMessage(socket, msg));
+                 },
+                 [this] {
+                   ClientMsg msg = PowerButton{ .down = true };
+                   fatalOnError(sendMessage(socket, msg));
+                 }),
+               Expanded(Text("rM2-FB Emulator")),
+               BetterButton(
+                 "Touch",
+                 [this] { setState([](auto& self) { self.touch = true; }); },
+                 {},
+                 touch),
+               BetterButton(
+                 "Pen",
+                 [this] { setState([](auto& self) { self.touch = false; }); },
+                 {},
+                 !touch));
+  }
+
+  auto build(AppContext& ctx, const BuildContext& buildCtx) const {
+    return Column(Sized(header(), std::nullopt, header_size),
+                  FB(memCanvas.canvas, *pendingUpdates, [this](const auto& ev) {
+                    onInput(ev);
+                  }));
   }
 
 private:
   std::unique_ptr<std::vector<UpdateRegion>> pendingUpdates;
   MemoryCanvas memCanvas;
   FD socket;
+  bool touch = true;
 };
 
 Rm2fbState
@@ -232,7 +311,8 @@ main(int argc, char* argv[]) {
 
   int port = atoi(portArg);
 
-  fatalOnError(runApp(Rm2fb(addrArg, port)));
+  fatalOnError(runApp(Cleared(Rm2fb(addrArg, port)),
+                      Size{ fb_width, fb_height + header_size }));
 
   return 0;
 }
