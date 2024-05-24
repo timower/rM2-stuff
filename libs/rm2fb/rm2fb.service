@@ -6,6 +6,7 @@ Before=xochitl.service launcher.service remarkable-reboot.service remarkable-shu
 After=opt.mount
 
 [Service]
+Type=notify
 Restart=on-failure
 RestartSec=5
 ExecStart=/usr/bin/xochitl
