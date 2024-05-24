@@ -4,6 +4,7 @@ StartLimitIntervalSec=600
 StartLimitBurst=4
 Before=xochitl.service launcher.service remarkable-reboot.service remarkable-shutdown.service
 After=opt.mount
+ConditionFileNotEmpty=/opt/lib/librm2fb_server.so
 
 [Service]
 Type=notify
