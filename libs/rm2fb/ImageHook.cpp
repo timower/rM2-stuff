@@ -3,6 +3,9 @@
 #include <dlfcn.h>
 #include <iostream>
 
+// TODO: clean
+extern bool inXochitl;
+
 extern "C" {
 
 void
@@ -15,8 +18,9 @@ _ZN6QImageC1EiiNS_6FormatE(void* that, int x, int y, int f) {
     void*, uint8_t*, int32_t, int32_t, int32_t, int, void (*)(void*), void*))
     dlsym(RTLD_NEXT, "_ZN6QImageC1EPhiiiNS_6FormatEPFvPvES2_");
 
-  if (const auto& fb = SharedFB::getInstance();
-      x == fb_width && y == fb_height && first_alloc && fb.has_value()) {
+  if (const auto& fb = SharedFB::getInstance(); inXochitl && x == fb_width &&
+                                                y == fb_height && first_alloc &&
+                                                fb.has_value()) {
     std::cerr << "REPLACING THE IMAGE with shared memory\n";
     first_alloc = false;
 

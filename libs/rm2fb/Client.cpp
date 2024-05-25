@@ -12,9 +12,9 @@
 #include <cstring>
 #include <unistd.h>
 
-namespace {
-
 bool inXochitl = false;
+
+namespace {
 
 const unistdpp::Result<ControlSocket>&
 getControlSocket() {

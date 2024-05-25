@@ -47,6 +47,10 @@ tap_at() {
   "$TEST_BINARY" 127.0.0.1 8888 touch "$1" "$2"
 }
 
+press_power() {
+  "$TEST_BINARY" 127.0.0.1 8888 power
+}
+
 image=$(docker run --name rm-docker --rm -d -p 2222:22 -p 8888:8888 "$DOCKER_IMAGE")
 trap cleanup EXIT
 
@@ -61,7 +65,7 @@ scp -P 2222 "$IPKS_PATH"/*.ipk root@localhost:
 do_ssh systemctl restart systemd-timesyncd
 do_ssh opkg update
 
-do_ssh opkg install ./*.ipk || true # TODO: xochitl doesn't configure for 3.5+
+do_ssh opkg install ./*.ipk calculator || true # TODO: xochitl doesn't configure for 3.5+
 
 # Start rocket, which should trigger the rm2fb socket and start the service.
 do_ssh systemctl start rocket
@@ -71,7 +75,7 @@ sleep 2
 check_screenshot "startup.png"
 
 # tilem
-tap_at 538 1050
+tap_at 666 1050
 sleep 2
 check_screenshot "tilem.png"
 tap_at 840 962
@@ -79,17 +83,33 @@ sleep 2
 check_screenshot "startup.png"
 
 # Yaft
-tap_at 860 1042
+tap_at 986 1042
 sleep 3
 check_screenshot "yaft.png"
 tap_at 76 1832
 sleep 1
-tap_at 324, 1704
+tap_at 324 1704
 sleep 2
 check_screenshot "startup.png"
 
+# Calculator
+tap_at 484 1054
+sleep 3
+check_screenshot "calculator.png"
+tap_at 826 1440
+sleep 1
+check_screenshot "calculator_3.png"
+
+press_power
+sleep 1
+tap_at 702 718 # Stop sleeping
+sleep 1
+tap_at 824 1124 # Kill calculator
+sleep 1
+check_screenshot "startup.png"
+
 # Xochitl
-tap_at 710 1086
+tap_at 832 1086
 sleep 60
 
 check_screenshot \
