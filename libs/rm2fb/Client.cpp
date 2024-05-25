@@ -118,7 +118,11 @@ __libc_start_main(int (*_main)(int, char**, char**),
 
   setenv("RM2FB_SHIM", "1", true);
   setenv("RM2STUFF_RM2FB", "1", true);
-  setenv("RM2FB_ACTIVE", "1", true);
+  if (getenv("RM2FB_ACTIVE") != nullptr) {
+    setenv("RM2FB_NESTED", "1", true);
+  } else {
+    setenv("RM2FB_ACTIVE", "1", true);
+  }
 
   if (fb.mem == nullptr) {
     std::cout << "No rm2fb shared memory\n";
