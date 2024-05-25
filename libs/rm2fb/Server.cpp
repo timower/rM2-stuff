@@ -9,6 +9,7 @@
 #include <unistdpp/socket.h>
 #include <unistdpp/unistdpp.h>
 
+#include <algorithm>
 #include <atomic>
 #include <csignal>
 #include <cstring>

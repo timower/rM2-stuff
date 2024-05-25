@@ -6,6 +6,8 @@
 #include <UI/TypeID.h>
 #include <UI/Util.h>
 
+#include <algorithm>
+
 namespace rmlib {
 
 class AppContext;
