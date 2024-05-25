@@ -255,27 +255,31 @@ public:
   }
 
   auto header() const {
-    return Row(BetterButton(
-                 "X",
-                 [this] {
-                   ClientMsg msg = PowerButton{ .down = false };
-                   fatalOnError(sendMessage(socket, msg));
-                 },
-                 [this] {
-                   ClientMsg msg = PowerButton{ .down = true };
-                   fatalOnError(sendMessage(socket, msg));
-                 }),
-               Expanded(Text("rM2-FB Emulator")),
-               BetterButton(
-                 "Touch",
-                 [this] { setState([](auto& self) { self.touch = true; }); },
-                 {},
-                 touch),
-               BetterButton(
-                 "Pen",
-                 [this] { setState([](auto& self) { self.touch = false; }); },
-                 {},
-                 !touch));
+    return Row(
+      BetterButton(
+        "X",
+        [this] {
+          ClientMsg msg = PowerButton{ .down = false };
+          fatalOnError(sendMessage(socket, msg));
+        },
+        [this] {
+          ClientMsg msg = PowerButton{ .down = true };
+          fatalOnError(sendMessage(socket, msg));
+        }),
+      Expanded(Text("rM2-FB Emulator")),
+      Button(
+        "Refresh",
+        [this] { fatalOnError(sendMessage(socket, ClientMsg(GetUpdate{}))); }),
+      BetterButton(
+        "Touch",
+        [this] { setState([](auto& self) { self.touch = true; }); },
+        {},
+        touch),
+      BetterButton(
+        "Pen",
+        [this] { setState([](auto& self) { self.touch = false; }); },
+        {},
+        !touch));
   }
 
   auto build(AppContext& ctx, const BuildContext& buildCtx) const {
