@@ -51,7 +51,7 @@ function(add_opkg_targets)
   foreach(comp IN LISTS all_comps)
     add_custom_target(opkg_${comp}
       COMMAND "${SCP}" "${CMAKE_BINARY_DIR}/${comp}.ipk" "${SSH_HOST}:"
-      COMMAND "${SSH}" "${SSH_HOST}" bash -l -c "'opkg install ${comp}.ipk'"
+      COMMAND "${SSH}" "${SSH_HOST}" bash -l -c "'opkg install --force-reinstall ${comp}.ipk'"
       DEPENDS package)
   endforeach()
 

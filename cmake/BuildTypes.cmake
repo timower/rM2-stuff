@@ -37,10 +37,10 @@ endif()
 list(JOIN BASE_OPTS " " BASE_OPTS)
 
 set(CMAKE_C_FLAGS_DEBUG
-  "${BASE_OPTS} -g"
+  "${BASE_OPTS} -g -Og"
   CACHE STRING ""
   FORCE)
 set(CMAKE_CXX_FLAGS_DEBUG
-  "${BASE_OPTS} -g -Wno-c++20-designator"
+  "${BASE_OPTS} -Og -g -Wno-c++20-designator"
   CACHE STRING ""
   FORCE)
