@@ -117,7 +117,7 @@ public:
   /// Has no effect if the shared state already has value.
   template<typename Func>
   auto then(Func&& func) {
-    using Result = std::result_of_t<Func(T)>;
+    using Result = std::invoke_result_t<Func, T>;
 
     if constexpr (details::FutureTraits<Result>::value) {
       using FutResult = typename details::FutureTraits<Result>::ResultType;
@@ -194,7 +194,7 @@ public:
 
   template<typename Func>
   auto then(Func&& func) {
-    using Result = std::result_of_t<Func()>;
+    using Result = std::invoke_result_t<Func>;
     if constexpr (details::FutureTraits<Result>::value) {
       using FutResult = typename details::FutureTraits<Result>::ResultType;
       auto newPromise = Promise<FutResult>();
