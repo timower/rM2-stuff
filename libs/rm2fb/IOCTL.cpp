@@ -14,6 +14,35 @@
 #include <rm2.h>
 
 namespace {
+enum MSG_TYPE { INIT_t = 1, UPDATE_t, XO_t, WAIT_t };
+
+struct xochitl_data {
+  int x1;
+  int y1;
+  int x2;
+  int y2;
+
+  int waveform;
+  int flags;
+};
+
+struct wait_sem_data {
+  char sem_name[512];
+};
+
+struct swtfb_update {
+  long mtype;
+  struct {
+    union {
+      xochitl_data xochitl_update;
+
+      struct mxcfb_update_data update;
+      wait_sem_data wait_update;
+    };
+
+  } mdata;
+};
+
 int
 handleUpdate(const mxcfb_update_data& data) {
   const auto& rect = data.update_region;
@@ -129,4 +158,19 @@ handleIOCTL(unsigned long request, char* ptr) {
     std::cerr << "UNHANDLED IOCTL" << ' ' << request << std::endl;
     return 0;
   }
+}
+
+int
+handleMsgSend(const void* buffer, size_t size) {
+  // NOLINTNEXTLINE
+  const auto* update = reinterpret_cast<const swtfb_update*>(buffer);
+
+  if (update->mtype != UPDATE_t) {
+    std::cerr << "Unsupported msgsnd: " << update->mtype << "\n";
+    return 0;
+  }
+
+  handleUpdate(update->mdata.update);
+
+  return 0;
 }

@@ -106,6 +106,31 @@ ioctl(int fd, unsigned long request, char* ptr) {
 
   return func_ioctl(fd, request, ptr);
 }
+
+constexpr key_t rm2fb_key = 0x2257c;
+static int rm2fb_mqid = -1;
+
+int
+msgget(key_t key, int msgflg) {
+  static auto func_msgsnd = (int (*)(key_t, int))dlsym(RTLD_NEXT, "msgget");
+  int res = func_msgsnd(key, msgflg);
+  if (!inXochitl && key == rm2fb_key) {
+    rm2fb_mqid = res;
+  }
+  return res;
+}
+
+int
+msgsnd(int msqid, const void* msgp, size_t msgsz, int msgflg) {
+  if (!inXochitl && msqid == rm2fb_mqid) {
+    return handleMsgSend(msgp, msgsz);
+  }
+
+  static auto func_msgsnd =
+    (int (*)(int, const void*, size_t, int))dlsym(RTLD_NEXT, "msgsnd");
+
+  return func_msgsnd(msqid, msgp, msgsz, msgflg);
+}
 }
 
 extern "C" {
@@ -138,6 +163,9 @@ __libc_start_main(int (*_main)(int, char**, char**),
   } else {
     setenv("RM2FB_ACTIVE", "1", true);
   }
+
+  // We don't support waiting with semaphores yet
+  setenv("RM2FB_NO_WAIT_IOCTL", "1", true);
 
   char pathBuffer[PATH_MAX];
   auto size = readlink("/proc/self/exe", pathBuffer, PATH_MAX);

@@ -1,3 +1,9 @@
 #pragma once
 
-int handleIOCTL(unsigned long request, char* ptr);
+#include <cstdlib>
+
+int
+handleIOCTL(unsigned long request, char* ptr);
+
+int
+handleMsgSend(const void* buffer, size_t size);

@@ -10,7 +10,7 @@ constexpr int fb_height = 1872;
 constexpr int fb_pixel_size = sizeof(uint16_t);
 constexpr int fb_size = fb_width * fb_height * fb_pixel_size;
 
-constexpr auto default_fb_name = "/rm2fb.01";
+constexpr auto default_fb_name = "/swtfb.01";
 
 struct SharedFB {
   unistdpp::FD fd;
