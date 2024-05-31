@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "TempFiles.h"
 #include "rMLibTestHelper.h"
 
 #include "Calculator.h"
@@ -11,24 +12,9 @@
 using namespace rmlib;
 using namespace tilem;
 
-class TemporaryDirectory {
-public:
-  TemporaryDirectory() : dir("/tmp/tilem") {
-    REQUIRE_NOTHROW(std::filesystem::create_directory(dir));
-  }
-
-  ~TemporaryDirectory() {
-    if (!dir.empty() && std::filesystem::is_directory(dir)) {
-      REQUIRE_NOTHROW(std::filesystem::remove_all(dir));
-    }
-  }
-
-  std::string dir;
-};
-
 TEST_CASE("Tilem", "[tilem][ui]") {
   TemporaryDirectory tmp;
-  const auto romPath = tmp.dir + "/unit_test.rom";
+  const auto romPath = tmp.dir / "unit_test.rom";
 
   auto ctx = TestContext::make();
 
@@ -54,7 +40,8 @@ TEST_CASE("Tilem", "[tilem][ui]") {
 
     // Wait for the download to finish.
     ctx.pump();
-    while (!ctx.findByText("Downloading ROM '" + romPath + "' ...").empty()) {
+    while (!ctx.findByText("Downloading ROM '" + romPath.string() + "' ...")
+              .empty()) {
       ctx.pump();
     }
     ctx.pump(std::chrono::milliseconds(500));
