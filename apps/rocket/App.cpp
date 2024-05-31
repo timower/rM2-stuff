@@ -1,11 +1,15 @@
 #include "App.h"
 
+#include <unistdpp/pipe.h>
+
 #include <Device.h>
 
+#include <algorithm>
 #include <csignal>
 #include <fstream>
 #include <iostream>
 
+#include <sys/wait.h>
 #include <unistd.h>
 
 using namespace rmlib;
@@ -15,6 +19,7 @@ namespace {
 pid_t
 runCommand(std::string_view cmd) {
   pid_t pid = fork();
+
   if (pid == -1) {
     perror("Error launching");
     return -1;
@@ -25,21 +30,28 @@ runCommand(std::string_view cmd) {
     return pid;
   }
 
-  std::cout << "Running: " << cmd << std::endl;
   setpgid(0, 0);
+
+  std::cout << "Running: " << cmd << std::endl;
   execlp("/bin/sh", "/bin/sh", "-c", cmd.data(), nullptr);
   perror("Error running process");
   return -1;
 }
 
-bool
-endsWith(std::string_view a, std::string_view end) {
-  if (a.size() < end.size()) {
-    return false;
+void
+stop(std::shared_ptr<AppRunInfo> runInfo) {
+  const auto pid = runInfo->pid;
+
+  if (runInfo->paused) {
+    kill(-pid, SIGCONT);
   }
 
-  return a.substr(a.size() - end.size()) == end;
+  int res = kill(-pid, SIGTERM);
+  if (res != 0) {
+    perror("Error killing!");
+  }
 }
+
 } // namespace
 
 std::optional<AppDescription>
@@ -76,15 +88,20 @@ AppDescription::read(std::string_view path, std::string_view iconDir) {
   }
 
   if (!result.icon.empty()) {
-    auto iconPath = std::string(iconDir) + '/' + result.icon + ".png";
-    std::cout << "Parsing image from: " << iconPath << std::endl;
-    result.iconImage = ImageCanvas::load(iconPath.c_str());
-    if (result.iconImage.has_value()) {
-      std::cout << result.iconImage->canvas.components() << std::endl;
-    }
+    result.iconPath = std::string(iconDir) + '/' + result.icon + ".png";
   }
 
   return std::optional(std::move(result));
+}
+
+std::optional<ImageCanvas>
+AppDescription::getIcon() const {
+  std::cout << "Parsing image from: " << iconPath << std::endl;
+  auto iconImage = ImageCanvas::load(iconPath.c_str());
+  if (iconImage.has_value()) {
+    std::cout << iconImage->canvas.components() << std::endl;
+  }
+  return iconImage;
 }
 
 std::vector<AppDescription>
@@ -95,11 +112,6 @@ readAppFiles(std::string_view directory) {
   std::vector<AppDescription> result;
 
   for (const auto& path : paths) {
-    if (!endsWith(path, ".draft")) {
-      std::cerr << "skipping non draft file: " << path << std::endl;
-      continue;
-    }
-
     auto appDesc = AppDescription::read(path, iconPath);
     if (!appDesc.has_value()) {
       std::cerr << "error parsing file: " << path << std::endl;
@@ -112,19 +124,30 @@ readAppFiles(std::string_view directory) {
   return result;
 }
 
+void
+App::updateDescription(AppDescription desc) {
+  mDescription = std::move(desc);
+  iconImage = mDescription.getIcon();
+}
+
 bool
 App::launch() {
-  if (runInfo.has_value()) {
+  if (isRunning()) {
     assert(false && "Shouldn't be called if the app is already running");
     return false;
   }
 
-  auto pid = runCommand(description.command);
+  auto pid = runCommand(description().command);
   if (pid == -1) {
     return false;
   }
 
-  runInfo = AppRunInfo{ pid };
+  auto runInfo = std::make_shared<AppRunInfo>();
+  runInfo->pid = pid;
+
+  this->runInfo = runInfo;
+
+  AppManager::getInstance().runInfos.emplace_back(std::move(runInfo));
 
   return true;
 }
@@ -133,19 +156,17 @@ void
 App::stop() {
   assert(isRunning());
 
-  if (isPaused()) {
-    kill(-runInfo->pid, SIGCONT);
-  }
-
-  kill(-runInfo->pid, SIGTERM);
+  ::stop(runInfo.lock());
 }
 
 void
 App::pause(std::optional<MemoryCanvas> screen) {
   assert(isRunning() && !isPaused());
 
-  kill(-runInfo->pid, SIGSTOP);
-  runInfo->paused = true;
+  auto lockedInfo = runInfo.lock();
+
+  kill(-lockedInfo->pid, SIGSTOP);
+  lockedInfo->paused = true;
   savedFb = std::move(screen);
 }
 
@@ -160,6 +181,59 @@ App::resume(rmlib::fb::FrameBuffer* fb) {
     savedFb.reset();
   }
 
-  kill(-runInfo->pid, SIGCONT);
-  runInfo->paused = false;
+  auto lockedInfo = runInfo.lock();
+  kill(-lockedInfo->pid, SIGCONT);
+  lockedInfo->paused = false;
+}
+
+AppManager&
+AppManager::getInstance() {
+  static AppManager instance;
+  return instance;
+}
+
+bool
+AppManager::update() {
+  bool anyKilled = false;
+
+  while (auto res = pipe.readPipe.readAll<pid_t>()) {
+    auto pid = *res;
+    anyKilled = true;
+
+    runInfos.erase(
+      std::remove_if(runInfos.begin(),
+                     runInfos.end(),
+                     [pid](auto& info) { return info->pid == pid; }),
+      runInfos.end());
+  }
+
+  return anyKilled;
+}
+
+void
+AppManager::onSigChild(int sig) {
+  auto& inst = AppManager::getInstance();
+
+  pid_t childPid = 0;
+  while ((childPid = waitpid(static_cast<pid_t>(-1), nullptr, WNOHANG)) > 0) {
+
+    std::cout << "Killed: " << childPid << "\n";
+
+    auto v = inst.pipe.writePipe.writeAll(childPid);
+
+    if (!v.has_value()) {
+      std::cerr << "Error in writing pid: " << to_string(v.error()) << "\n";
+    }
+  }
+}
+
+AppManager::AppManager() : pipe(unistdpp::fatalOnError(unistdpp::pipe())) {
+  unistdpp::setNonBlocking(pipe.readPipe);
+  std::signal(SIGCHLD, onSigChild);
+}
+
+AppManager::~AppManager() {
+  for (auto runInfo : runInfos) {
+    ::stop(runInfo);
+  }
 }

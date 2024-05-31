@@ -93,10 +93,17 @@ protected:
   }
 
   UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) override {
+    const auto& image = widget->canvas;
+
+    if (image.rect().size() == rect.size()) {
+      copy(canvas, rect.topLeft, image, image.rect());
+      return UpdateRegion{ rect };
+    }
+
     auto rectW = float(rect.width());
     auto rectH = float(rect.height());
-    auto canvasW = float(widget->canvas.width());
-    auto canvasH = float(widget->canvas.height());
+    auto canvasW = float(image.width());
+    auto canvasH = float(image.height());
     float scaleX = rectW / canvasW;
     float scaleY = rectH / canvasH;
     int offsetX = 0;
@@ -116,16 +123,13 @@ protected:
       [&](int x, int y, int old) {
         auto subY = int(float(y - rect.topLeft.y - offsetY) / scaleY);
         auto subX = int(float(x - rect.topLeft.x - offsetX) / scaleX);
-        if (!widget->canvas.rect().contains(Point{ subX, subY })) {
+        if (!image.rect().contains(Point{ subX, subY })) {
           return old;
         }
 
-        auto pixel = widget->canvas.getPixel(subX, subY);
-        // auto* pixel = widget->canvas.getPtr(subX, subY);
-        return pixel;
+        return image.getPixel(subX, subY);
       },
       rect);
-
     return UpdateRegion{ rect };
   }
 };

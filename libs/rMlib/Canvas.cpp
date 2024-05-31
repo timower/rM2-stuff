@@ -24,23 +24,6 @@ blend(uint8_t factor, uint8_t fg, uint8_t bg) {
   return uint8_t(val);
 }
 
-constexpr uint16_t
-toRGB565(uint8_t grey) {
-  // NOLINTNEXTLINE
-  return (grey >> 3) | ((grey >> 2) << 5) | ((grey >> 3) << 11);
-}
-
-constexpr uint8_t
-fromRGB565(uint16_t rgb) {
-  // uint8_t r = (rgb & 0x1f) << 3;
-  // NOLINTNEXTLINE
-  uint8_t g = ((rgb >> 5) & 0x3f) << 2;
-  // uint8_t b = ((rgb >> 11) & 0x1f) << 3;
-
-  // Only use g for now, as it has the most bit depth.
-  return g;
-};
-
 #ifdef EMULATE
 #include "noto-sans-mono.h"
 #else
@@ -190,7 +173,7 @@ Canvas::drawText(std::string_view text,
         // int pixel = bg8 + (t * (fg8 - bg8)) / 0xff;
         auto pixel = blend(t, fg8, bg8);
         // auto pixel = (0xff - textBuffer[y * w + x]);
-        uint16_t pixel565 = toRGB565(pixel);
+        uint16_t pixel565 = greyToRGB565(pixel);
         // (pixel >> 3) | ((pixel >> 2) << 5) | ((pixel >> 3) << 11);
 
         auto memY = location.y + static_cast<int>(baseLine) + y0 + y /*- 1*/;
@@ -269,7 +252,7 @@ greyAlphaToRGB565(uint8_t background, uint16_t pixel) {
 
   auto blended = blend(alpha, grey, background);
 
-  return toRGB565(blended);
+  return greyToRGB565(blended);
 }
 
 std::optional<ImageCanvas>
@@ -344,7 +327,7 @@ writeImage(const char* path, const Canvas& canvas) {
   MemoryCanvas test(canvas.width(), canvas.height(), 1);
 
   canvas.forEach([&](auto x, auto y, auto pixel) {
-    test.canvas.setPixel({ x, y }, fromRGB565(pixel));
+    test.canvas.setPixel({ x, y }, greyFromRGB565(pixel));
   });
 
   if (stbi_write_png(path,

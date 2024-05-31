@@ -19,6 +19,23 @@ constexpr auto default_text_size = 48;
 constexpr auto white = 0xFFFF;
 constexpr auto black = 0x0;
 
+constexpr uint16_t
+greyToRGB565(uint8_t grey) {
+  // NOLINTNEXTLINE
+  return (grey >> 3) | ((grey >> 2) << 5) | ((grey >> 3) << 11);
+}
+
+constexpr uint8_t
+greyFromRGB565(uint16_t rgb) {
+  // uint8_t r = (rgb & 0x1f) << 3;
+  // NOLINTNEXTLINE
+  uint8_t g = ((rgb >> 5) & 0x3f) << 2;
+  // uint8_t b = ((rgb >> 11) & 0x1f) << 3;
+
+  // Only use g for now, as it has the most bit depth.
+  return g;
+}
+
 // Returns a glyph for the given codepoint.
 bool
 getGlyph(uint32_t code, uint8_t* bitmap, int height, int* width);

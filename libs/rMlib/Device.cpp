@@ -2,9 +2,9 @@
 
 #include <unistdpp/file.h>
 
+#include <algorithm>
 #include <dirent.h>
 #include <fcntl.h>
-#include <fstream>
 #include <unistd.h>
 
 namespace rmlib::device {
@@ -119,6 +119,7 @@ listDirectory(std::string_view path, bool onlyFiles) {
 
   closedir(dir);
 
+  std::sort(result.begin(), result.end());
   return result;
 }
 

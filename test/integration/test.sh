@@ -65,7 +65,8 @@ scp -P 2222 "$IPKS_PATH"/*.ipk root@localhost:
 do_ssh systemctl restart systemd-timesyncd
 do_ssh opkg update
 
-do_ssh opkg install ./*.ipk calculator || true # TODO: xochitl doesn't configure for 3.5+
+# TODO: xochitl doesn't configure for 3.5+
+do_ssh opkg install ./*.ipk calculator mines || true
 
 # Start rocket, which should trigger the rm2fb socket and start the service.
 do_ssh systemctl start rocket
@@ -75,7 +76,7 @@ sleep 2
 check_screenshot "startup.png"
 
 # tilem
-tap_at 666 1050
+tap_at 730 1050
 sleep 2
 check_screenshot "tilem.png"
 tap_at 840 962
@@ -83,7 +84,7 @@ sleep 2
 check_screenshot "startup.png"
 
 # Yaft
-tap_at 986 1042
+tap_at 1058 1042
 sleep 3
 check_screenshot "yaft.png"
 tap_at 76 1832
@@ -93,7 +94,7 @@ sleep 2
 check_screenshot "startup.png"
 
 # Calculator
-tap_at 484 1054
+tap_at 400 1054
 sleep 3
 check_screenshot "calculator.png"
 tap_at 826 1440
@@ -105,6 +106,19 @@ sleep 1
 tap_at 702 718 # Stop sleeping
 sleep 1
 tap_at 824 1124 # Kill calculator
+sleep 1
+check_screenshot "startup.png"
+
+# mines
+tap_at 600 1054
+sleep 2
+check_screenshot "mines.png"
+
+press_power
+sleep 1
+tap_at 702 718 # Stop sleeping
+sleep 2
+tap_at 764 1124 # Kill mines
 sleep 1
 check_screenshot "startup.png"
 

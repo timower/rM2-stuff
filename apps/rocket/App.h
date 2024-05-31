@@ -3,17 +3,16 @@
 #include <Canvas.h>
 #include <FrameBuffer.h>
 
+#include <unistdpp/pipe.h>
+
 #include <chrono>
 #include <optional>
 #include <string>
 #include <vector>
 
 struct AppRunInfo {
-  pid_t pid;
+  pid_t pid = -1;
   bool paused = false;
-
-  // Indicates that the app should be removed when it exists
-  bool shouldRemove = false;
 };
 
 struct AppDescription {
@@ -25,7 +24,8 @@ struct AppDescription {
   std::string command;
   std::string icon;
 
-  std::optional<rmlib::ImageCanvas> iconImage;
+  std::string iconPath;
+  std::optional<rmlib::ImageCanvas> getIcon() const;
 
   static std::optional<AppDescription> read(std::string_view path,
                                             std::string_view iconDir);
@@ -34,23 +34,15 @@ struct AppDescription {
 std::vector<AppDescription>
 readAppFiles(std::string_view directory);
 
-struct App {
-  AppDescription description;
+class App {
+public:
+  App(AppDescription desc)
+    : mDescription(std::move(desc)), iconImage(mDescription.getIcon()) {}
 
-  std::optional<AppRunInfo> runInfo = std::nullopt;
+  void updateDescription(AppDescription desc);
 
-  std::chrono::steady_clock::time_point lastActivated;
-
-  std::optional<rmlib::MemoryCanvas> savedFb;
-
-  // Used for UI:
-  rmlib::Rect launchRect;
-  rmlib::Rect killRect;
-
-  App(AppDescription desc) : description(std::move(desc)) {}
-
-  bool isRunning() const { return runInfo.has_value(); }
-  bool isPaused() const { return isRunning() && runInfo->paused; }
+  bool isRunning() const { return !runInfo.expired(); }
+  bool isPaused() const { return isRunning() && runInfo.lock()->paused; }
 
   /// Starts a new instance of the app if it's not already running.
   /// \returns True if a new instance was started.
@@ -60,4 +52,43 @@ struct App {
 
   void pause(std::optional<rmlib::MemoryCanvas> screen = std::nullopt);
   void resume(rmlib::fb::FrameBuffer* fb = nullptr);
+
+  const AppDescription& description() const { return mDescription; }
+
+  const std::optional<rmlib::ImageCanvas>& icon() const { return iconImage; }
+  const std::optional<rmlib::MemoryCanvas>& savedFB() const { return savedFb; }
+  void resetSavedFB() { savedFb.reset(); }
+
+  void setRemoveOnExit() { shouldRemove = true; }
+  bool shouldRemoveOnExit() const { return shouldRemove; }
+
+private:
+  AppDescription mDescription;
+
+  std::weak_ptr<AppRunInfo> runInfo;
+
+  std::optional<rmlib::ImageCanvas> iconImage;
+  std::optional<rmlib::MemoryCanvas> savedFb;
+
+  // Indicates that the app should be removed when it exists
+  bool shouldRemove = false;
+};
+
+class AppManager {
+public:
+  static AppManager& getInstance();
+
+  bool update();
+  const unistdpp::FD& getWaitFD() const { return pipe.readPipe; }
+
+private:
+  friend class App;
+  unistdpp::Pipe pipe;
+
+  std::vector<std::shared_ptr<AppRunInfo>> runInfos;
+
+  static void onSigChild(int sig);
+
+  AppManager();
+  ~AppManager();
 };
