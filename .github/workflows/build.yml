@@ -10,7 +10,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/toltec-dev/base:v2.3
+      image: ghcr.io/toltec-dev/base:v3.1
 
     steps:
       - name: Install Deps
