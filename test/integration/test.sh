@@ -66,7 +66,7 @@ do_ssh systemctl restart systemd-timesyncd
 do_ssh opkg update
 
 # TODO: xochitl doesn't configure for 3.5+
-do_ssh opkg install ./*.ipk calculator mines || true
+do_ssh opkg install ./*.ipk calculator mines
 
 # Start rocket, which should trigger the rm2fb socket and start the service.
 do_ssh systemctl start rocket
