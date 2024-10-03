@@ -127,7 +127,12 @@ imgFile=c
 }
 
 TEST_CASE("App", "[rocket]") {
-  App app(AppDescription{ .name = "yes", .command = "sleep 5000" });
+  App app(AppDescription{ .path = "",
+                          .name = "yes",
+                          .description = "",
+                          .command = "sleep 5000",
+                          .icon = {},
+                          .iconPath = {} });
 
   REQUIRE(app.launch());
   usleep(500);
@@ -147,7 +152,12 @@ TEST_CASE("App", "[rocket]") {
 TEST_CASE("AppWidget", "[rocket]") {
   auto ctx = TestContext::make();
 
-  App app(AppDescription{ .name = "foo", .command = "/usr/bin/ls" });
+  App app(AppDescription{ .path = "",
+                          .name = "foo",
+                          .description = "",
+                          .command = "/usr/bin/ls",
+                          .icon = {},
+                          .iconPath = {} });
 
   SECTION("AppWidget") {
     int clicked = 0;
@@ -166,8 +176,8 @@ TEST_CASE("AppWidget", "[rocket]") {
 
     bool current = GENERATE(true, false);
 
-    ctx.pumpWidget(Center(RunningAppWidget(
-      app, [&] { tapped++; }, [&] { killed++; }, current)));
+    ctx.pumpWidget(Center(
+      RunningAppWidget(app, [&] { tapped++; }, [&] { killed++; }, current)));
 
     auto appWidget = ctx.findByType<RunningAppWidget>();
     REQUIRE_THAT(
