@@ -8,7 +8,7 @@ Collection of reMarkable related apps, utilities and libraries.
 Projects
 --------
 
-### rm2fb
+### [rm2fb](libs/rm2fb)
 [![2.15: supported](https://img.shields.io/badge/2.15-supported-brightgreen)](https://support.remarkable.com/s/article/Software-release-2-15-October-2022)
 [![3.3: supported](https://img.shields.io/badge/3.3-supported-brightgreen)](https://support.remarkable.com/s/article/Software-release-3-3)
 [![3.5: supported](https://img.shields.io/badge/3.5-supported-brightgreen)](https://support.remarkable.com/s/article/Software-release-3-5)
@@ -31,7 +31,7 @@ More usage information can be found in the yaft [Readme](apps/yaft).
 
 ### Rocket
 
-Launcher that uses the power button to show.
+Launcher that uses the power button to toggle.
 
 <img src="doc/rocket.png" width=500/>
 
