@@ -152,6 +152,8 @@ const KeyMap rm_qwerty_keymap = {
   { KEY_I, { 'I' } },
   { KEY_O, { 'O' } },
   { KEY_P, { 'P' } },
+  { KEY_LEFTBRACE, { '[', '{' } },
+  { KEY_RIGHTBRACE, { ']', '}' } },
   { KEY_ENTER, { Enter } },
   { KEY_LEFTCTRL, { Ctrl } },
   { KEY_A, { 'A' } },
