@@ -165,7 +165,7 @@ const KeyMap rm_qwerty_keymap = {
   { KEY_L, { 'L' } },
   { KEY_SEMICOLON, { ';', ':' } },
   { KEY_APOSTROPHE, { '\'', '"' } },
-  { KEY_GRAVE, { '`', '~', '{', } },
+  { KEY_GRAVE, { '`', '~', '{' } },
   { KEY_LEFTSHIFT, { Shift } },
   { KEY_BACKSLASH, { '\\', '|', '}' } },
   { KEY_Z, { 'Z' } },
