@@ -6,3 +6,5 @@ compile_commands.json
 
 .DS_Store
 default.profraw
+.direnv/
+/result
