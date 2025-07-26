@@ -12,3 +12,7 @@ target_link_libraries(${PROJECT_NAME}
     rMlib)
 
 add_deploy(${PROJECT_NAME})
+
+install(TARGETS ${PROJECT_NAME}
+  COMPONENT tools
+  DESTINATION opt/bin)

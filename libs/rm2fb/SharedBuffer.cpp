@@ -33,11 +33,12 @@ SharedFB::open(const char* path) {
     return tl::unexpected(fd.error());
   }
 
-  TRY(unistdpp::ftruncate(*fd, fb_size));
+  TRY(unistdpp::ftruncate(*fd, total_size));
   auto mem =
-    TRY(unistdpp::mmap(nullptr, fb_size, PROT_WRITE, MAP_SHARED, *fd, 0));
+    TRY(unistdpp::mmap(nullptr, total_size, PROT_WRITE, MAP_SHARED, *fd, 0));
   if (clear) {
     memset(mem.get(), UINT8_MAX, fb_size);
+    memset((char*)mem.get() + fb_size, 0, grayscale_size);
   }
 
   return SharedFB{ .fd = std::move(*fd), .mem = std::move(mem) };

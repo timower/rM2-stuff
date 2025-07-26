@@ -15,8 +15,6 @@ constexpr auto usleep_delay = 1000;
 bool hook_first_malloc = false;  // NOLINT
 bool* usleep_hook_var = nullptr; // NOLINT
 
-AddressInfoBase::UpdateFn* global_new_update = nullptr; // NOLINT
-
 struct ImageInfo {
   int32_t width;
   int32_t height;
@@ -25,13 +23,6 @@ struct ImageInfo {
   int32_t zero2;
   uint16_t* data;
 };
-
-struct ExtendedUpdateParams {
-  UpdateParams params;
-  float extra1;
-  int extra2;
-};
-static_assert(sizeof(ExtendedUpdateParams) == 0x20);
 
 int
 createThreadsHook(ImageInfo* info) {
@@ -44,11 +35,6 @@ createThreadsHook(ImageInfo* info) {
   info->zero2 = 0;
   info->data = static_cast<uint16_t*>(fb.mem.get());
   return 0;
-}
-
-void
-updateHook(const ExtendedUpdateParams* params) {
-  global_new_update(params->params);
 }
 
 void
@@ -134,15 +120,11 @@ struct AddressInfo : public AddressInfoBase {
   }
 
   bool doUpdate(const UpdateParams& params) const final {
-    ExtendedUpdateParams extraParams{
-      .params = params,
-      .extra1 = 0.0F,
-      .extra2 = 0, // TODO: set priority?
-    };
-    extraParams.params.waveform = mapNewWaveform(params.waveform);
+    UpdateParams mappedParams = params;
+    mappedParams.waveform = mapNewWaveform(params.waveform);
 
     pthread_mutex_lock(updateMutex);
-    update.call<void, const ExtendedUpdateParams*>(&extraParams);
+    update.call<void, const UpdateParams*>(&mappedParams);
     pthread_mutex_unlock(updateMutex);
     sem_post(updateSemaphore);
 
@@ -160,8 +142,7 @@ struct AddressInfo : public AddressInfoBase {
 
     createThreads.hook((void*)createThreadsHook);
 
-    global_new_update = newUpdate;
-    update.hook((void*)updateHook);
+    update.hook((void*)newUpdate);
 
     shutdownFn.hook((void*)shutdownHook);
     return true;
@@ -212,15 +193,15 @@ usleep(useconds_t micros) {
   return funcUSleep(micros);
 }
 
-void*
-malloc(size_t size) {
-  if (size == 0x503580 && hook_first_malloc) {
-    const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
-    hook_first_malloc = false;
-    return fb.mem.get();
-  }
-
-  static auto funcMalloc = (void* (*)(size_t))dlsym(RTLD_NEXT, "malloc");
-  return funcMalloc(size);
-}
+// void*
+// malloc(size_t size) {
+//   if (size == 0x503580 && hook_first_malloc) {
+//     const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
+//     hook_first_malloc = false;
+//     return fb.mem.get();
+//   }
+//
+//   static auto funcMalloc = (void* (*)(size_t))dlsym(RTLD_NEXT, "malloc");
+//   return funcMalloc(size);
+// }
 }

@@ -41,10 +41,12 @@ target_link_libraries(${PROJECT_NAME}
 if (NOT EMULATE OR EMULATE_UINPUT)
   find_package(PkgConfig)
   pkg_check_modules(LIBEVDEV REQUIRED libevdev)
+  message(STATUS "Found evdevv: ${LIBEVDEV_INCLUDE_DIRS}")
 
   target_link_libraries(${PROJECT_NAME}
     PRIVATE
-      ${LIBEVDEV_LIBRARIES}
+      # Make sure to link libevdev statically
+      -Wl,-Bstatic ${LIBEVDEV_LIBRARIES} -Wl,-Bdynamic
       udev
       linux::mxcfb)
 

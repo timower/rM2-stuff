@@ -158,6 +158,18 @@ ioctl(int fd, unsigned long request, char* ptr) {
   return func_ioctl(fd, request, ptr);
 }
 
+int
+__ioctl_time64(int fd, unsigned long int request, char* ptr) {
+  if (inXochitl && fd == fake_fd) {
+    return handleIOCTL(request, ptr);
+  }
+
+  static auto func_ioctl = (int (*)(int, unsigned long request, ...))dlsym(
+    RTLD_NEXT, "__ioctl_time64");
+
+  return func_ioctl(fd, request, ptr);
+}
+
 void*
 mmap(void* addr, size_t len, int prot, int flags, int fildes, off_t off) {
   if (inXochitl && fildes == fake_fd) {
@@ -176,6 +188,24 @@ mmap(void* addr, size_t len, int prot, int flags, int fildes, off_t off) {
 
   return func_mmap(addr, len, prot, flags, fildes, off);
 }
+void*
+mmap64(void* addr, size_t len, int prot, int flags, int fd, off64_t offset) {
+  if (inXochitl && fd == fake_fd) {
+    // mmap2(NULL, 24893440, PROT_READ|PROT_WRITE, MAP_SHARED, 16, 0) =
+    // 0x6e57c000
+    globalMem = malloc(len);
+    return globalMem;
+  }
+
+  static auto func_mmap = (void* (*)(void* addr,
+                                     size_t len,
+                                     int prot,
+                                     int flags,
+                                     int fildes,
+                                     off64_t off))dlsym(RTLD_NEXT, "mmap64");
+
+  return func_mmap(addr, len, prot, flags, fd, offset);
+}
 
 int
 __libc_start_main(int (*_main)(int, char**, char**),
@@ -189,12 +219,12 @@ __libc_start_main(int (*_main)(int, char**, char**),
   char pathBuffer[PATH_MAX];
   auto size = readlink("/proc/self/exe", pathBuffer, PATH_MAX);
 
-  if (std::string_view(pathBuffer, size) == "/usr/bin/xochitl") {
-    inXochitl = true;
-    std::cout << "In xochitl!\n";
-  } else {
-    std::cout << "Not xochitl!\n";
-  }
+  // if (std::string_view(pathBuffer, size) == "/usr/bin/xochitl") {
+  inXochitl = true;
+  //   std::cout << "In xochitl!\n";
+  // } else {
+  //   std::cout << "Not xochitl!\n";
+  // }
 
   auto* func_main =
     (decltype(&__libc_start_main))dlsym(RTLD_NEXT, "__libc_start_main");

@@ -56,6 +56,7 @@ extern const AddressInfoBase* const version_2_15_1;
 extern const AddressInfoBase* const version_3_3_2;
 extern const AddressInfoBase* const version_3_5_2;
 extern const AddressInfoBase* const version_3_8_2;
+extern const AddressInfoBase* const version_3_20_0;
 
 const AddressInfoBase*
 getAddresses();

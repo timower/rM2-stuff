@@ -107,6 +107,19 @@ ioctl(int fd, unsigned long request, char* ptr) {
   return func_ioctl(fd, request, ptr);
 }
 
+int
+__ioctl_time64(int fd, unsigned long int request, char* ptr) {
+  if (const auto& fb = SharedFB::getInstance();
+      !inXochitl && fb.has_value() && fd == fb->fd.fd) {
+    return handleIOCTL(request, ptr);
+  }
+
+  static auto func_ioctl = (int (*)(int, unsigned long request, ...))dlsym(
+    RTLD_NEXT, "__ioctl_time64");
+
+  return func_ioctl(fd, request, ptr);
+}
+
 constexpr key_t rm2fb_key = 0x2257c;
 static int rm2fb_mqid = -1;
 

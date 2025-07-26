@@ -35,7 +35,8 @@ getTouchFlood() {
       r.type = a;
       r.code = b;
       r.value = v;
-      r.time = { 0, 0 };
+      r.input_event_sec = 0;
+      r.input_event_usec = 0;
       return r;
     };
 
