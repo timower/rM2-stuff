@@ -14,6 +14,8 @@
 #include <rm2.h>
 
 namespace {
+
+// NOLINTBEGIN
 enum MSG_TYPE { INIT_t = 1, UPDATE_t, XO_t, WAIT_t };
 
 struct xochitl_data {
@@ -43,6 +45,8 @@ struct swtfb_update {
   } mdata;
 };
 
+// NOLINTEND
+
 int
 handleUpdate(const mxcfb_update_data& data) {
   const auto& rect = data.update_region;
@@ -59,7 +63,10 @@ handleUpdate(const mxcfb_update_data& data) {
     params.waveform = waveform;
     params.flags = data.flags;
 
-    return sendUpdate(params);
+    params.temperatureOverride = 0;
+    params.extraMode = 0;
+
+    return static_cast<int>(sendUpdate(params));
   }
 
   // There are three update modes on the rm2. But they are mapped to the five
@@ -115,17 +122,20 @@ handleUpdate(const mxcfb_update_data& data) {
 int
 handleIOCTL(unsigned long request, char* ptr) {
   if (request == MXCFB_SEND_UPDATE) {
-    mxcfb_update_data* update = (mxcfb_update_data*)ptr;
+    auto* update = (mxcfb_update_data*)ptr;
     return handleUpdate(*update);
-  } else if (request == MXCFB_SET_AUTO_UPDATE_MODE) {
+  }
 
+  if (request == MXCFB_SET_AUTO_UPDATE_MODE) {
     return 0;
-  } else if (request == MXCFB_WAIT_FOR_UPDATE_COMPLETE) {
+  }
 
+  if (request == MXCFB_WAIT_FOR_UPDATE_COMPLETE) {
     return 0;
-  } else if (request == FBIOGET_VSCREENINFO) {
+  }
 
-    fb_var_screeninfo* screeninfo = (fb_var_screeninfo*)ptr;
+  if (request == FBIOGET_VSCREENINFO) {
+    auto* screeninfo = (fb_var_screeninfo*)ptr;
     screeninfo->xres = fb_width;
     screeninfo->yres = fb_height;
     screeninfo->grayscale = 0;
@@ -143,21 +153,22 @@ handleIOCTL(unsigned long request, char* ptr) {
     return 0;
   }
 
-  else if (request == FBIOPUT_VSCREENINFO) {
+  if (request == FBIOPUT_VSCREENINFO) {
     return 0;
-  } else if (request == FBIOGET_FSCREENINFO) {
+  }
+  if (request == FBIOGET_FSCREENINFO) {
 
-    fb_fix_screeninfo* screeninfo = (fb_fix_screeninfo*)ptr;
+    auto* screeninfo = (fb_fix_screeninfo*)ptr;
     screeninfo->smem_len = fb_size;
     screeninfo->smem_start = (unsigned long)0x1000;
     screeninfo->line_length = fb_width * fb_pixel_size;
     constexpr char fb_id[] = "mxcfb";
     std::memcpy(screeninfo->id, fb_id, sizeof(fb_id));
     return 0;
-  } else {
-    std::cerr << "UNHANDLED IOCTL" << ' ' << request << std::endl;
-    return 0;
   }
+
+  std::cerr << "UNHANDLED IOCTL" << ' ' << request << std::endl;
+  return 0;
 }
 
 int
