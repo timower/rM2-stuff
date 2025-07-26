@@ -149,7 +149,7 @@ TEST_CASE("Keyboard", "[yaft][ui]") {
 TEST_CASE("Yaft", "[yaft][ui]") {
   auto ctx = TestContext::make();
 
-  std::string program = "/bin/cat";
+  std::string program = CAT_EXE;
   std::vector<char*> args = { program.data(), nullptr };
 
   YaftConfigAndError cfgAndErr;
