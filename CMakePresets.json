@@ -71,8 +71,7 @@
       "inherits": ["base", "rm", "debug-base"],
       "binaryDir": "${sourceDir}/build/dev",
       "cacheVariables": {
-        "BUILD_TESTS": false,
-        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+        "BUILD_TESTS": false
       }
     },
     {
