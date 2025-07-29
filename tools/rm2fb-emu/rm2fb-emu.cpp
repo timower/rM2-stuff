@@ -49,10 +49,7 @@ Result<UpdateMsg>
 readUpdate(const FD& sock) {
   auto msg = TRY(sock.readAll<UpdateParams>());
   if ((msg.flags & 4) == 0) {
-    std::cout << "Got msg: "
-              << "{ { " << msg.x1 << ", " << msg.y1 << "; " << msg.x2 << ", "
-              << msg.y2 << " }, wave: " << msg.waveform
-              << " flags: " << msg.flags << " }\n";
+    std::cout << "Got msg: " << msg << "\n";
   }
 
   rmlib::Rect region = { .topLeft = { msg.x1, msg.y1 },
@@ -219,6 +216,9 @@ public:
     if (!msgOrErr.has_value()) {
       std::cerr << "Error reading update: " << to_string(msgOrErr.error())
                 << "\n";
+      if (msgOrErr.error() == FD::eof_error) {
+        std::exit(EXIT_FAILURE);
+      }
       return;
     }
     setState([&](auto& self) {

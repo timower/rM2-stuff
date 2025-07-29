@@ -179,14 +179,17 @@ handleMsg(const SharedFB& fb,
           unistdpp::FD& fd,
           const AllUinputDevices& devs,
           GetUpdate msg) {
-  doTCPUpdate(fd,
-              fb,
-              { .y1 = 0,
-                .x1 = 0,
-                .y2 = fb_height - 1,
-                .x2 = fb_width - 1,
-                .flags = 0,
-                .waveform = 0 });
+  UpdateParams params{
+    .y1 = 0,
+    .x1 = 0,
+    .y2 = fb_height - 1,
+    .x2 = fb_width - 1,
+    .flags = 0,
+    .waveform = 0,
+    .temperatureOverride = 0,
+    .extraMode = 0,
+  };
+  doTCPUpdate(fd, fb, params);
 }
 
 void
@@ -215,9 +218,9 @@ handleMsg(const SharedFB& fb,
 } // namespace
 
 int
-serverMain(int argc, char* argv[], char** envp) { // NOLINT
+serverMain(char* argv0, const AddressInfoBase* addrs) { // NOLINT
   setupExitHandler();
-  setProcessName(argv[0]); // NOLINT
+  setProcessName(argv0);
 
   const bool debugMode = checkDebugMode();
   const char* socketAddr = default_sock_addr.data();
@@ -259,12 +262,9 @@ serverMain(int argc, char* argv[], char** envp) { // NOLINT
   std::vector<unistdpp::FD> tcpClients;
 
   // Get addresses
-
-#ifndef USE_QSGEPAPER
-  const auto* addrs = getAddresses();
-#else
-  const auto* addrs = version_3_20_0;
-#endif
+  if (addrs == nullptr) {
+    addrs = getAddresses();
+  }
 
   if (addrs == nullptr) {
     std::cerr << "Failed to get addresses\n";

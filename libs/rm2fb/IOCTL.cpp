@@ -112,6 +112,9 @@ handleUpdate(const mxcfb_update_data& data) {
   params.waveform = waveform;
   params.flags = flags;
 
+  params.temperatureOverride = 0;
+  params.extraMode = 0;
+
   sendUpdate(params);
 
   return 0;

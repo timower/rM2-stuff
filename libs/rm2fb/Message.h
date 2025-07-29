@@ -1,5 +1,6 @@
 #pragma once
 
+#include <iomanip>
 #include <unistdpp/unistdpp.h>
 
 #include <cstdint>
@@ -27,11 +28,15 @@ static_assert(sizeof(UpdateParams) == update_message_size,
 
 inline std::ostream&
 operator<<(std::ostream& stream, const UpdateParams& msg) {
-  return stream << "{ { " << msg.x1 << ", " << msg.y1 << "; " << msg.x2 << ", "
-                << msg.y2 << " }, wave: " << msg.waveform
-                << " flags: " << msg.flags
+  // clang-format off
+  return stream << "{ { "
+                << std::setw(4) << msg.x1 << ", " << std::setw(4) << msg.y1
+                << "; "
+                << std::setw(4) << msg.x2 << ", " << std::setw(4) << msg.y2
+                << " }, wave: " << msg.waveform << " flags: " << msg.flags
                 << " temp: " << msg.temperatureOverride
                 << " mode: " << msg.extraMode << " }";
+  // clang-format on
 }
 
 struct Input {
