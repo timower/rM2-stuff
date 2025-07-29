@@ -6,13 +6,11 @@ DOCKER_IMAGE=$1
 IPKS_PATH=$(readlink -f "$2")
 TEST_BINARY=$(readlink -f "$3")
 
-
 TEST_DIR=$(dirname -- "$(readlink -f -- "$0")")
 ASSETS_DIR="${TEST_DIR}/assets/"
 TMP_DIR=$(mktemp -d)
 
-if [ "$#" -ge 4 ]
-then
+if [ "$#" -ge 4 ]; then
   TMP_DIR=$(readlink -f "$4")
 fi
 
@@ -30,10 +28,8 @@ check_screenshot() {
 
   "$TEST_BINARY" 127.0.0.1 8888 screenshot "${SH_PATH}"
 
-  for matches in "$@"
-  do
-    if diff "${SH_PATH}" "${ASSETS_DIR}/$matches"
-    then
+  for matches in "$@"; do
+    if diff "${SH_PATH}" "${ASSETS_DIR}/$matches"; then
       return
     else
       echo "Unmatching screenshot $matches"
@@ -54,15 +50,14 @@ press_power() {
 image=$(docker run --name rm-docker --rm -d -p 2222:22 -p 8888:8888 "$DOCKER_IMAGE")
 trap cleanup EXIT
 
-while ! do_ssh true
-do
+while ! do_ssh true; do
   sleep 1
 done
 
 scp -P 2222 "$IPKS_PATH"/*.ipk root@localhost:
 
-# Update & install display to make sure rm2fb.ipa replaces it.
-do_ssh systemctl restart systemd-timesyncd
+# do_ssh timedatectl status
+do_ssh systemctl restart systemd-timesyncd || do_ssh systemctl restart systemd-timedated
 do_ssh opkg update
 
 # TODO: xochitl doesn't configure for 3.5+
@@ -85,7 +80,7 @@ check_screenshot "startup.png"
 
 # Yaft
 tap_at 1058 1042
-sleep 3
+sleep 4
 check_screenshot "yaft.png"
 tap_at 76 1832
 sleep 1
@@ -94,20 +89,23 @@ sleep 2
 check_screenshot "startup.png"
 
 # Calculator
-tap_at 400 1054
-sleep 3
-check_screenshot "calculator.png"
-tap_at 826 1440
-sleep 1
-check_screenshot "calculator_3.png"
+# Does not work on 3.20 as Qt5 isn't used anymore.
+if ! (do_ssh calculator 2>&1 | grep "libQt5Quick.so.5: cannot open shared object file"); then
+  tap_at 400 1054
+  sleep 3
+  check_screenshot "calculator.png"
+  tap_at 826 1440
+  sleep 1
+  check_screenshot "calculator_3.png"
 
-press_power
-sleep 1
-tap_at 702 718 # Stop sleeping
-sleep 1
-tap_at 824 1124 # Kill calculator
-sleep 1
-check_screenshot "startup.png"
+  press_power
+  sleep 1
+  tap_at 702 718 # Stop sleeping
+  sleep 1
+  tap_at 824 1124 # Kill calculator
+  sleep 1
+  check_screenshot "startup.png"
+fi
 
 # mines
 tap_at 600 1054
@@ -124,12 +122,13 @@ check_screenshot "startup.png"
 
 # Xochitl
 tap_at 832 1086
-sleep 60
+sleep 120
 
 check_screenshot \
   "xochitl_2.15.png" \
   "xochitl_3.3.png" \
   "xochitl_3.5.png" \
-  "xochitl_3.8.png"
+  "xochitl_3.8.png" \
+  "xochitl_3.20.png"
 
 echo "ALL OK"
