@@ -8,9 +8,8 @@ After=opt.mount
 [Service]
 Restart=on-failure
 RestartSec=5
-ExecStart=/usr/bin/xochitl
+ExecStart=/opt/bin/rm2fb_server
 Environment=HOME=/home/root
-Environment=LD_PRELOAD=/opt/lib/librm2fb_server.so
 
 [Install]
 Also=rm2fb.socket

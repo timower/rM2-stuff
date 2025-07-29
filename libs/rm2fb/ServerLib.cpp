@@ -1,7 +1,14 @@
 #include "Server.h"
 
-#include <iostream>
 #include <dlfcn.h>
+#include <iostream>
+
+namespace {
+int
+newMain(int argc, char* argv[], char** envp) { // NOLINT
+  return serverMain(argv[0], nullptr);
+}
+} // namespace
 
 extern "C" {
 
@@ -20,6 +27,6 @@ __libc_start_main(int (*_main)(int, char**, char**), // NOLINT
   auto* funcMain = reinterpret_cast<decltype(&__libc_start_main)>(
     dlsym(RTLD_NEXT, "__libc_start_main"));
 
-  return funcMain(serverMain, argc, argv, init, fini, rtldFini, stackEnd);
+  return funcMain(newMain, argc, argv, init, fini, rtldFini, stackEnd);
 };
 }

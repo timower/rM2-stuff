@@ -1,4 +1,5 @@
 
+class AddressInfoBase;
 
 int
-serverMain(int argc, char* argv[], char** envp) ;
+serverMain(char* argv0, const AddressInfoBase* addrs);

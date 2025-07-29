@@ -1,17 +1,23 @@
 #include "Version.h"
 
-#include <array>
 #include <cstring>
+#include <dlfcn.h>
 #include <iomanip>
 #include <iostream>
 #include <map>
 
 namespace {
+
+// The build ID in xochitl binaries happens to be at this address for all
+// supported versions. See:
+// readelf --sections /usr/bin/xochitl
+//   [ 2] .note.gnu.bu[...] NOTE            00010170
+// To get the value:
 // xxd -s 384 -l 20 -i xochitl
-using BuildId = std::array<unsigned char, 20>;
+constexpr auto xochitl_buildid_addr = 0x10180;
 
 const AddressInfoBase*
-getAddresses(BuildId version) {
+getAddressesById(BuildId version) {
   static const std::map<BuildId, const AddressInfoBase*> addresses = {
     { { 0x93, 0x88, 0x6b, 0x15, 0xc3, 0xf5, 0x05, 0x12, 0x04, 0x9e,
         0xf2, 0x50, 0xc3, 0x20, 0xae, 0x00, 0x2a, 0x96, 0x5b, 0x05 },
@@ -29,12 +35,13 @@ getAddresses(BuildId version) {
         0x14, 0xcd, 0xd3, 0xac, 0xb6, 0xdf, 0xbd, 0xc8, 0xb5, 0x67 },
       version_3_8_2 },
 
-    { { 0xdd, 0xa7, 0x95, 0x11, 0x84, 0xf6, 0x05, 0xfa, 0x2e, 0x23,
-        0x7f, 0xa7, 0x03, 0x81, 0xe8, 0x7d, 0x46, 0x5b, 0xdc, 0xd9 },
-      version_3_8_2 }, // TODO
-
+    // xochitl
     { { 0x4f, 0xa0, 0xe9, 0x51, 0x3d, 0x15, 0x53, 0xf3, 0x4d, 0xdc,
         0x89, 0xba, 0x65, 0xbd, 0xd5, 0x69, 0x92, 0x92, 0x93, 0x9a },
+      version_3_20_0 },
+    // libqsgepaper
+    { { 0x0f, 0x18, 0xb6, 0x39, 0xf6, 0x05, 0x2d, 0xdb, 0xf5, 0x89,
+        0x35, 0x62, 0x45, 0xdb, 0x66, 0xc9, 0x96, 0x96, 0xbe, 0xe7 },
       version_3_20_0 },
   };
 
@@ -46,23 +53,45 @@ getAddresses(BuildId version) {
   return it->second;
 }
 
+BuildId
+getXochitlBuildId() {
+  BuildId id;
+
+  memcpy(
+    id.data(), reinterpret_cast<const char*>(xochitl_buildid_addr), id.size());
+
+  return id;
+}
+
 } // namespace
 
 const AddressInfoBase*
-getAddresses() {
-  static const AddressInfoBase* result = [] {
-    BuildId id;
+getAddresses(std::optional<BuildId> id) {
+  if (!id.has_value()) {
+    id = getXochitlBuildId();
+  }
 
-    // NOLINTNEXTLINE
-    memcpy(id.data(), reinterpret_cast<const char*>(0x10180), id.size());
+  std::cerr << "Build ID: ";
+  for (unsigned char c : *id) {
+    std::cerr << "0x" << std::hex << std::setfill('0') << std::setw(2) << int(c)
+              << " ";
+  }
+  std::cerr << "\n";
 
-    std::cerr << "Build ID: ";
-    for (unsigned char c : id) {
-      std::cerr << "0x" << std::hex << std::setfill('0') << std::setw(2)
-                << int(c) << " ";
+  return getAddressesById(*id);
+}
+
+void*
+getQsgepaperHandle() {
+  static auto* handle = []() -> void* {
+    auto* handle =
+      dlopen("/usr/lib/plugins/scenegraph/libqsgepaper.so", RTLD_LAZY);
+    if (handle == nullptr) {
+      std::cerr << dlerror() << "\n";
+      return nullptr;
     }
-    std::cerr << "\n";
-    return getAddresses(id);
+    return handle;
   }();
-  return result;
+
+  return handle;
 }
