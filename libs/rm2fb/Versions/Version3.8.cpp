@@ -1,4 +1,5 @@
 #include "AddressHooking.h"
+#include "PreloadHooks.h"
 #include "SharedBuffer.h"
 #include "Version.h"
 
@@ -12,7 +13,6 @@
 namespace {
 constexpr auto usleep_delay = 1000;
 
-bool hook_first_malloc = false;  // NOLINT
 bool* usleep_hook_var = nullptr; // NOLINT
 
 struct ImageInfo {
@@ -40,6 +40,18 @@ createThreadsHook(ImageInfo* info) {
 void
 shutdownHook() {
   puts("HOOK: Shutdown called!");
+}
+
+void*
+mallocHook(void* (*orig)(size_t), size_t size) {
+  if (size == 0x503580) {
+    std::cout << "HOOK: malloc redirected to shared FB\n";
+    const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
+    PreloadHook::getInstance().unhook<PreloadHook::Malloc>();
+    return fb.mem.get();
+  }
+
+  return orig(size);
 }
 
 /// client:
@@ -109,7 +121,8 @@ struct AddressInfo : public AddressInfoBase {
   }
 
   void initThreads() const final {
-    hook_first_malloc = true;
+    PreloadHook::getInstance().hook<PreloadHook::Malloc>(mallocHook);
+
     ImageInfo info{};
     createThreads.call<void*, ImageInfo*>(&info);
     assert([&] {
@@ -192,16 +205,4 @@ usleep(useconds_t micros) {
   static auto funcUSleep = (int (*)(useconds_t))dlsym(RTLD_NEXT, "usleep");
   return funcUSleep(micros);
 }
-
-// void*
-// malloc(size_t size) {
-//   if (size == 0x503580 && hook_first_malloc) {
-//     const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
-//     hook_first_malloc = false;
-//     return fb.mem.get();
-//   }
-//
-//   static auto funcMalloc = (void* (*)(size_t))dlsym(RTLD_NEXT, "malloc");
-//   return funcMalloc(size);
-// }
 }

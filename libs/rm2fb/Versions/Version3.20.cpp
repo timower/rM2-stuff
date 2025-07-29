@@ -1,4 +1,5 @@
 #include "AddressHooking.h"
+#include "PreloadHooks.h"
 #include "SharedBuffer.h"
 #include "Version.h"
 
@@ -11,7 +12,6 @@
 
 namespace {
 
-bool hook_first_malloc = false;       // NOLINT
 bool hook_first_calloc = false;       // NOLINT
 bool* sched_yield_hook_var = nullptr; // NOLINT
 
@@ -53,17 +53,15 @@ shutdownHook() {
 ///
 
 void*
-getQsgepaperHandle() {
-  static auto* handle = [] {
-    auto* handle =
-      dlopen("/usr/lib/plugins/scenegraph/libqsgepaper.so", RTLD_LAZY);
-    if (handle == nullptr) {
-      std::cerr << dlerror() << "\n";
-      exit(EXIT_FAILURE);
-    }
-    return handle;
-  }();
-  return handle;
+mallocHook(void* (*orig)(size_t), size_t size) {
+  if (size == 0x503580) {
+    std::cout << "HOOK: malloc redirected to shared FB\n";
+    const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
+    PreloadHook::getInstance().unhook<PreloadHook::Malloc>();
+    return fb.mem.get();
+  }
+
+  return orig(size);
 }
 
 /// client:
@@ -125,7 +123,9 @@ struct AddressInfo : public AddressInfoBase {
     /// Initialize calls the Qimage copy constructor on these, so pass some
     /// dummy buffer.
     auto* fakeQimage = malloc(2 * 0xc);
-    hook_first_malloc = true;
+
+    PreloadHook::getInstance().hook<PreloadHook::Malloc>(mallocHook);
+
     hook_first_calloc = true;
     createThreads.call<void*, void*>(fakeQimage);
     // TODO: verify qiamge data?
@@ -246,19 +246,6 @@ sched_yield() {
 
   static auto originalFn = (int (*)())dlsym(RTLD_NEXT, "sched_yield");
   return originalFn();
-}
-
-void*
-malloc(size_t size) {
-  if (size == 0x503580 && hook_first_malloc) {
-    std::cout << "HOOK: malloc redirected to shared FB\n";
-    const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
-    hook_first_malloc = false;
-    return fb.mem.get();
-  }
-
-  static auto funcMalloc = (void* (*)(size_t))dlsym(RTLD_NEXT, "malloc");
-  return funcMalloc(size);
 }
 
 void*
