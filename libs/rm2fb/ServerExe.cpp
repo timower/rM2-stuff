@@ -43,11 +43,14 @@ getBuildId(struct dl_phdr_info* info) {
 
 const AddressInfoBase*
 getLibQscepaperAddrs() {
+  std::cerr << "Trying to dlopen libqscepaper\n";
   void* handle = getQsgepaperHandle();
   if (handle == nullptr) {
+    std::cerr << "Dlopen failed\n";
     return nullptr;
   }
 
+  std::cerr << "Finding build ID\n";
   BuildIdNote* buildIdPtr = nullptr;
   dl_iterate_phdr(
     [](struct dl_phdr_info* info, size_t size, void* buildIdPtr) {

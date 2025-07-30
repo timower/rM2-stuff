@@ -12,7 +12,6 @@
 
 namespace {
 
-bool hook_first_calloc = false;       // NOLINT
 bool* sched_yield_hook_var = nullptr; // NOLINT
 
 struct ImageInfo {
@@ -62,6 +61,18 @@ mallocHook(void* (*orig)(size_t), size_t size) {
   }
 
   return orig(size);
+}
+
+void*
+callocHook(void* (*orig)(size_t, size_t), size_t size, size_t count) {
+  if (size == 0x281ac0 && count == 1) {
+    std::cout << "HOOK: calloc redirected to shared FB\n";
+    const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
+    PreloadHook::getInstance().unhook<PreloadHook::Calloc>();
+    return fb.getGrayBuffer();
+  }
+
+  return orig(size, count);
 }
 
 /// client:
@@ -125,8 +136,8 @@ struct AddressInfo : public AddressInfoBase {
     auto* fakeQimage = malloc(2 * 0xc);
 
     PreloadHook::getInstance().hook<PreloadHook::Malloc>(mallocHook);
+    PreloadHook::getInstance().hook<PreloadHook::Calloc>(callocHook);
 
-    hook_first_calloc = true;
     createThreads.call<void*, void*>(fakeQimage);
     // TODO: verify qiamge data?
   }
@@ -246,19 +257,5 @@ sched_yield() {
 
   static auto originalFn = (int (*)())dlsym(RTLD_NEXT, "sched_yield");
   return originalFn();
-}
-
-void*
-calloc(size_t size, size_t count) {
-  if (size == 0x281ac0 && count == 1 && hook_first_calloc) {
-    std::cout << "HOOK: calloc redirected to shared FB\n";
-    const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
-    hook_first_calloc = false;
-    return fb.getGrayBuffer();
-  }
-
-  static auto funcCalloc =
-    (void* (*)(size_t, size_t))dlsym(RTLD_NEXT, "calloc");
-  return funcCalloc(size, count);
 }
 }

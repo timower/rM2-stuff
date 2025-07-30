@@ -90,7 +90,7 @@ check_screenshot "startup.png"
 
 # Calculator
 # Does not work on 3.20 as Qt5 isn't used anymore.
-if ! (do_ssh calculator 2>&1 | grep "libQt5Quick.so.5: cannot open shared object file"); then
+if do_ssh test -e /usr/lib/libQt5Quick.so.5; then
   tap_at 400 1054
   sleep 3
   check_screenshot "calculator.png"

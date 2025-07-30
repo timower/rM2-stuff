@@ -10,7 +10,9 @@ using Ptr = T*;
 // X macro to define functions we can hook using preload.
 //
 // X(ID, name, return type, args...)
-#define HOOKS(X) X(Malloc, Ptr<void>, malloc, size_t(size))
+#define HOOKS(X)                                                               \
+  X(Malloc, Ptr<void>, malloc, size_t(size))                                   \
+  X(Calloc, Ptr<void>, calloc, size_t(size), size_t(count))
 
 class PreloadHook {
   using HookTuple = std::tuple<
