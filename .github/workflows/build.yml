@@ -4,7 +4,7 @@ on: [push, pull_request]
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: 'ghcr.io/timower/rm-docker:main'
+  IMAGE_NAME: 'ghcr.io/timower/rm-docker:main-qemu-toltec'
 
 jobs:
   build:
@@ -75,7 +75,7 @@ jobs:
 
     strategy:
       matrix:
-        fw_version: ['2.15.1', '3.3.2', '3.5.2', '3.8.2']
+        fw_version: ['2.15.1.1189', '3.3.2.1666', '3.8.2.1965', '3.20.0.92']
 
     steps:
       - uses: actions/checkout@v4
