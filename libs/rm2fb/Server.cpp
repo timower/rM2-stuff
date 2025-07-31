@@ -21,8 +21,6 @@
 
 using namespace unistdpp;
 
-bool inXochitl = true;
-
 namespace {
 constexpr auto tcp_port = 8888;
 

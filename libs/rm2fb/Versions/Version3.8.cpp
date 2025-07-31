@@ -54,6 +54,16 @@ mallocHook(void* (*orig)(size_t), size_t size) {
   return orig(size);
 }
 
+int
+usleepHook(int (*orig)(useconds_t), useconds_t micros) {
+  if (usleep_hook_var != nullptr && micros == usleep_delay) {
+    *usleep_hook_var = false;
+    usleep_hook_var = nullptr;
+    PreloadHook::getInstance().unhook<PreloadHook::USleep>();
+  }
+  return orig(micros);
+}
+
 /// client:
 ///  * Hook createThreads, returning shared mem in 'ImageInfo'
 ///  * Hook usleep, set 'do init' flag on call
@@ -152,6 +162,7 @@ struct AddressInfo : public AddressInfoBase {
   bool installHooks(UpdateFn* newUpdate) const final {
     puts("Hooking!");
     usleep_hook_var = globalInit;
+    PreloadHook::getInstance().hook<PreloadHook::USleep>(usleepHook);
 
     createThreads.hook((void*)createThreadsHook);
 
@@ -193,16 +204,3 @@ const AddressInfo version_3_8_info = AddressInfo{
 } // namespace
 
 const AddressInfoBase* const version_3_8_2 = &version_3_8_info;
-
-extern "C" {
-
-int
-usleep(useconds_t micros) {
-  if (usleep_hook_var != nullptr && micros == usleep_delay) {
-    *usleep_hook_var = false;
-    usleep_hook_var = nullptr;
-  }
-  static auto funcUSleep = (int (*)(useconds_t))dlsym(RTLD_NEXT, "usleep");
-  return funcUSleep(micros);
-}
-}

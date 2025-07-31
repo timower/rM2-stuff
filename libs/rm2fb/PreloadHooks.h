@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstddef>
 #include <tuple>
+#include <unistd.h>
 
 template<typename T>
 using Ptr = T*;
@@ -12,7 +13,15 @@ using Ptr = T*;
 // X(ID, name, return type, args...)
 #define HOOKS(X)                                                               \
   X(Malloc, Ptr<void>, malloc, size_t(size))                                   \
-  X(Calloc, Ptr<void>, calloc, size_t(size), size_t(count))
+  X(Calloc, Ptr<void>, calloc, size_t(size), size_t(count))                    \
+  X(USleep, int, usleep, useconds_t(usec))                                     \
+  X(QImageCtor,                                                                \
+    void,                                                                      \
+    _ZN6QImageC1EiiNS_6FormatE,                                                \
+    Ptr<void>(that),                                                           \
+    int(width),                                                                \
+    int(height),                                                               \
+    int(format))
 
 class PreloadHook {
   using HookTuple = std::tuple<

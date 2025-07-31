@@ -101,48 +101,48 @@ ioctl(int fd, unsigned long request, char* ptr) {
     return handleIOCTL(request, ptr);
   }
 
-  static auto func_ioctl =
+  static auto funcIoctl =
     (int (*)(int, unsigned long request, ...))dlsym(RTLD_NEXT, "ioctl");
 
-  return func_ioctl(fd, request, ptr);
+  return funcIoctl(fd, request, ptr);
 }
 
 int
-__ioctl_time64(int fd, unsigned long int request, char* ptr) {
+__ioctl_time64(int fd, unsigned long int request, char* ptr) { // NOLINT
   if (const auto& fb = SharedFB::getInstance();
       !inXochitl && fb.has_value() && fd == fb->fd.fd) {
     return handleIOCTL(request, ptr);
   }
 
-  static auto func_ioctl = (int (*)(int, unsigned long request, ...))dlsym(
+  static auto funcIoctl = (int (*)(int, unsigned long request, ...))dlsym(
     RTLD_NEXT, "__ioctl_time64");
 
-  return func_ioctl(fd, request, ptr);
+  return funcIoctl(fd, request, ptr);
 }
 
 constexpr key_t rm2fb_key = 0x2257c;
-static int rm2fb_mqid = -1;
+static int rm2fbMqid = -1;
 
 int
 msgget(key_t key, int msgflg) {
-  static auto func_msgsnd = (int (*)(key_t, int))dlsym(RTLD_NEXT, "msgget");
-  int res = func_msgsnd(key, msgflg);
+  static auto funcMsgsnd = (int (*)(key_t, int))dlsym(RTLD_NEXT, "msgget");
+  int res = funcMsgsnd(key, msgflg);
   if (!inXochitl && key == rm2fb_key) {
-    rm2fb_mqid = res;
+    rm2fbMqid = res;
   }
   return res;
 }
 
 int
 msgsnd(int msqid, const void* msgp, size_t msgsz, int msgflg) {
-  if (!inXochitl && msqid == rm2fb_mqid) {
+  if (!inXochitl && msqid == rm2fbMqid) {
     return handleMsgSend(msgp, msgsz);
   }
 
-  static auto func_msgsnd =
+  static auto funcMsgsnd =
     (int (*)(int, const void*, size_t, int))dlsym(RTLD_NEXT, "msgsnd");
 
-  return func_msgsnd(msqid, msgp, msgsz, msgflg);
+  return funcMsgsnd(msqid, msgp, msgsz, msgflg);
 }
 }
 
@@ -150,35 +150,35 @@ extern "C" {
 
 int
 setenv(const char* name, const char* value, int overwrite) {
-  static const auto originalFunc =
+  static const auto original_func =
     (int (*)(const char*, const char*, int))dlsym(RTLD_NEXT, "setenv");
 
   if (!inXochitl && strcmp(name, "QT_QPA_EVDEV_TOUCHSCREEN_PARAMETERS") == 0) {
     value = "rotate=180:invertx";
   }
 
-  return originalFunc(name, value, overwrite);
+  return original_func(name, value, overwrite);
 }
 
 int
-__libc_start_main(int (*_main)(int, char**, char**),
+__libc_start_main(int (*mainFn)(int, char**, char**), // NOLINT
                   int argc,
                   char** argv,
                   int (*init)(int, char**, char**),
                   void (*fini)(void),
-                  void (*rtld_fini)(void),
-                  void* stack_end) {
+                  void (*rtldFini)(void),
+                  void* stackEnd) {
 
-  setenv("RM2FB_SHIM", "1", true);
-  setenv("RM2STUFF_RM2FB", "1", true);
+  setenv("RM2FB_SHIM", "1", 1);
+  setenv("RM2STUFF_RM2FB", "1", 1);
   if (getenv("RM2FB_ACTIVE") != nullptr) {
-    setenv("RM2FB_NESTED", "1", true);
+    setenv("RM2FB_NESTED", "1", 1);
   } else {
-    setenv("RM2FB_ACTIVE", "1", true);
+    setenv("RM2FB_ACTIVE", "1", 1);
   }
 
   // We don't support waiting with semaphores yet
-  setenv("RM2FB_NO_WAIT_IOCTL", "1", true);
+  setenv("RM2FB_NO_WAIT_IOCTL", "1", 1);
 
   char pathBuffer[PATH_MAX];
   auto size = readlink("/proc/self/exe", pathBuffer, PATH_MAX);
@@ -194,9 +194,9 @@ __libc_start_main(int (*_main)(int, char**, char**),
     }
   }
 
-  auto* func_main =
+  auto* funcMain =
     (decltype(&__libc_start_main))dlsym(RTLD_NEXT, "__libc_start_main");
 
-  return func_main(_main, argc, argv, init, fini, rtld_fini, stack_end);
+  return funcMain(mainFn, argc, argv, init, fini, rtldFini, stackEnd);
 };
 }

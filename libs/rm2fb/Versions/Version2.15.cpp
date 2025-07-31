@@ -1,6 +1,8 @@
 #include "Version.h"
 
 #include "AddressHooking.h"
+#include "ImageHook.h"
+#include "PreloadHooks.h"
 #include "SharedBuffer.h"
 
 #include <rm2.h>
@@ -65,6 +67,7 @@ struct AddressInfo : public AddressInfoBase {
     update.hook((void*)newUpdate);
     shutdownFn.hook((void*)shutdownHook);
     waitForStart.hook((void*)waitHook);
+    PreloadHook::getInstance().hook<PreloadHook::QImageCtor>(qimageHook);
     return true;
   }
 };

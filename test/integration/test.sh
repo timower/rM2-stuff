@@ -48,7 +48,7 @@ press_power() {
 }
 
 image=$(docker run --name rm-docker --rm -d -p 2222:22 -p 8888:8888 "$DOCKER_IMAGE")
-trap cleanup EXIT
+# trap cleanup EXIT
 
 while ! do_ssh true; do
   sleep 1
