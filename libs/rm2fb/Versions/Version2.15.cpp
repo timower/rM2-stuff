@@ -5,6 +5,7 @@
 #include "PreloadHooks.h"
 #include "SharedBuffer.h"
 
+#include <cstring>
 #include <rm2.h>
 
 namespace {
@@ -47,8 +48,18 @@ struct AddressInfo : public AddressInfoBase {
     if (!fb.has_value()) {
       return;
     }
+
+    // createThreads can init the framebuffer data, but if rm2fb server was
+    // started by a systemd socket, the client could have already written to it.
+    // So we save a copy and restore it. The updates will be buffered in the
+    // control socket.
+    auto* fbMem = static_cast<std::uint8_t*>(fb->getFb());
+    std::vector<std::uint8_t> fbCopy(fbMem, fbMem + fb_size);
+
     createThreads.call<int, void*>(fb->mem.get());
     waitForStart.call<void>();
+
+    std::memcpy(fb->mem.get(), fbCopy.data(), fbCopy.size());
   }
 
   bool doUpdate(const UpdateParams& params) const final {

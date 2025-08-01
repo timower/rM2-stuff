@@ -48,7 +48,7 @@ press_power() {
 }
 
 image=$(docker run --name rm-docker --rm -d -p 2222:22 -p 8888:8888 "$DOCKER_IMAGE")
-# trap cleanup EXIT
+trap cleanup EXIT
 
 while ! do_ssh true; do
   sleep 1
@@ -92,7 +92,7 @@ check_screenshot "startup.png"
 # Does not work on 3.20 as Qt5 isn't used anymore.
 if do_ssh test -e /usr/lib/libQt5Quick.so.5; then
   tap_at 400 1054
-  sleep 3
+  sleep 4
   check_screenshot "calculator.png"
   tap_at 826 1440
   sleep 1
