@@ -1,6 +1,6 @@
 find_program(XXD xxd)
 
-if ("${XXD}" STREQUAL "XXD-NOTFOUND")
+if("${XXD}" STREQUAL "XXD-NOTFOUND")
   message(WARNING "XXD not found, skipping font include")
   return()
 endif()
@@ -10,9 +10,7 @@ set(FONT_HEADER "${BUILD_INCLUDE_DIR}/noto-sans-mono.h")
 add_custom_command(
   OUTPUT "${FONT_HEADER}"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${BUILD_INCLUDE_DIR}"
-  COMMAND
-    ${XXD} -i "NotoSansMono-Regular.ttf"
-              "${FONT_HEADER}"
+  COMMAND ${XXD} -i "NotoSansMono-Regular.ttf" "${FONT_HEADER}"
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 
 add_library(NotoFont INTERFACE "${FONT_HEADER}")

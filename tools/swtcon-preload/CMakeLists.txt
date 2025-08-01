@@ -1,13 +1,9 @@
-if (NOT TARGET swtcon)
+if(NOT TARGET swtcon)
   return()
 endif()
 
 project(swtcon-preload)
 
-add_library(${PROJECT_NAME} SHARED
-  main.cpp)
+add_library(${PROJECT_NAME} SHARED main.cpp)
 
-target_link_libraries(${PROJECT_NAME}
-  PRIVATE
-    swtcon
-    dl)
+target_link_libraries(${PROJECT_NAME} PRIVATE swtcon dl)

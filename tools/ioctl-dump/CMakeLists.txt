@@ -1,5 +1,5 @@
 # rm2fb uses Linux APIs extensively
-if (NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
+if(NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
   return()
 endif()
 
@@ -13,10 +13,12 @@ target_link_libraries(${PROJECT_NAME} PRIVATE linux::mxcfb)
 
 add_executable(fb-dump dump.cpp)
 
-install(TARGETS ioctl-dump
+install(
+  TARGETS ioctl-dump
   COMPONENT ioctl-dump
   DESTINATION opt/lib)
 
-install(FILES rm2fb_ioctl_dump.conf
+install(
+  FILES rm2fb_ioctl_dump.conf
   COMPONENT ioctl-dump
   DESTINATION etc/systemd/system/rm2fb.service.d/)
