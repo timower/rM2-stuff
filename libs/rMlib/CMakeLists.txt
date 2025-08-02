@@ -31,16 +31,7 @@ target_link_libraries(
 
 # If not emulating, or emulating uinput, link in udev, evdev and linux headers.
 if(NOT EMULATE OR EMULATE_UINPUT)
-  find_package(PkgConfig)
-  pkg_check_modules(LIBEVDEV REQUIRED libevdev)
-  message(STATUS "Found evdevv: ${LIBEVDEV_INCLUDE_DIRS}")
-
-  target_link_libraries(
-    ${PROJECT_NAME}
-    PRIVATE # Make sure to link libevdev statically
-            -Wl,-Bstatic ${LIBEVDEV_LIBRARIES} -Wl,-Bdynamic udev linux::mxcfb)
-
-  target_include_directories(${PROJECT_NAME} PRIVATE ${LIBEVDEV_INCLUDE_DIRS})
+  target_link_libraries(${PROJECT_NAME} PRIVATE Evdev::Static udev linux::mxcfb)
 endif()
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
@@ -68,8 +59,8 @@ endif()
 install(
   TARGETS ${PROJECT_NAME}
   COMPONENT ${PROJECT_NAME}
-  DESTINATION opt/lib)
+  DESTINATION ${OPT_PREFIX}lib)
 install(
   DIRECTORY include/
   COMPONENT ${PROJECT_NAME}
-  DESTINATION opt/include/rmlib)
+  DESTINATION ${OPT_PREFIX}include/rmlib)

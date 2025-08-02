@@ -4,7 +4,8 @@
     {
       "name": "base",
       "hidden": true,
-      "generator": "Ninja"
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}"
     },
     {
       "name": "rm",
@@ -17,7 +18,8 @@
       "name": "toltec",
       "hidden": true,
       "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": "/usr/share/cmake/$env{CHOST}.cmake"
+        "CMAKE_TOOLCHAIN_FILE": "/usr/share/cmake/$env{CHOST}.cmake",
+        "ADD_OPT_PREFIX": true
       }
     },
     {
@@ -50,7 +52,6 @@
     {
       "name": "dev-host",
       "inherits": ["base", "clang", "debug-base"],
-      "binaryDir": "${sourceDir}/build/host",
       "cacheVariables": {
         "EMULATE": true,
         "COVERAGE": true
@@ -59,7 +60,6 @@
     {
       "name": "dev-tidy",
       "inherits": ["base", "clang", "debug-base"],
-      "binaryDir": "${sourceDir}/build/tidy",
       "cacheVariables": {
         "CMAKE_CXX_CLANG_TIDY": "clang-tidy;-warnings-as-errors=*",
         "CMAKE_C_FLAGS": "-Werror",
@@ -69,7 +69,6 @@
     {
       "name": "dev",
       "inherits": ["base", "rm", "debug-base"],
-      "binaryDir": "${sourceDir}/build/dev",
       "cacheVariables": {
         "BUILD_TESTS": false
       }
@@ -77,20 +76,17 @@
     {
       "name": "release",
       "inherits": ["base", "rm", "release-base"],
-      "binaryDir": "${sourceDir}/build/release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "MinSizeRel"
       }
     },
     {
       "name": "release-toltec",
-      "inherits": ["base", "toltec", "release-base"],
-      "binaryDir": "${sourceDir}/build/release-toltec"
+      "inherits": ["base", "toltec", "release-base"]
     },
     {
       "name": "dev-toltec",
       "inherits": ["base", "toltec", "debug-base"],
-      "binaryDir": "${sourceDir}/build/dev-toltec",
       "cacheVariables": {
         "BUILD_TESTS": false
       }

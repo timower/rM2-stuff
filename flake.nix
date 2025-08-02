@@ -21,14 +21,17 @@
         system:
         let
           pkgs = nixpkgs.legacyPackages."${system}";
+          pkgsCross = pkgs.pkgsCross.remarkable2;
         in
         rec {
           default = pkgs.callPackage ./nix/default.nix { };
           rm2-toolchain = pkgs.callPackage ./nix/rm2-toolchain.nix { };
-          dev = pkgs.callPackage ./nix/default.nix {
-            preset = "dev";
+
+          dev-cross = pkgsCross.callPackage ./nix/default.nix { };
+          dev-rm2-toolchain = pkgs.callPackage ./nix/default.nix {
             toolchain_root = "${rm2-toolchain}";
           };
+
         }
       );
 
@@ -41,7 +44,10 @@
         {
           default = pkgs.mkShell {
             inputsFrom = [ packages.default ];
-            packages = with pkgs; [ clang-tools ];
+            packages = with pkgs; [
+              clang-tools
+              libllvm
+            ];
           };
         }
       );

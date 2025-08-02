@@ -2,9 +2,6 @@ if(NOT EMULATE)
   return()
 endif()
 
-find_package(PkgConfig)
-pkg_check_modules(LIBEVDEV libevdev)
-
 project(rm2fb-emu)
 
 add_executable(${PROJECT_NAME} rm2fb-emu.cpp)

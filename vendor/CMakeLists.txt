@@ -13,6 +13,8 @@ add_subdirectory(libTilEm)
 add_subdirectory(thick)
 add_subdirectory(stb)
 
+add_subdirectory(evdev)
+
 if(${BUILD_TESTS})
   add_subdirectory(catch2)
 endif()

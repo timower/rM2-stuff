@@ -7,6 +7,20 @@ env:
   IMAGE_NAME: 'ghcr.io/timower/rm-docker:main-qemu-toltec'
 
 jobs:
+
+  nix-build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: cachix/install-nix-action@v27
+      with:
+        github_access_token: ${{ secrets.GITHUB_TOKEN }}
+    - run: nix build
+    - run: nix build .#dev-cross
+    - run: nix build .#dev-rm2-toolchain
+    - run: nix flake check
+
+
   build:
     runs-on: ubuntu-latest
     container:
@@ -50,16 +64,16 @@ jobs:
         run: cmake --preset dev-host
 
       - name: Build
-        run: cmake --build build/host
+        run: cmake --build build/dev-host
 
       - name: Unit Tests
-        run: cmake --build build/host --target make-coverage
+        run: cmake --build build/dev-host --target make-coverage
 
       - name: Upload Coverage
         uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }} # required
-          files: ./build/host/report.lcov
+          files: ./build/dev-host/report.lcov
           fail_ci_if_error: false # optional (default = false)
           verbose: true # optional (default = false)
 
@@ -67,7 +81,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: host-package
-          path: build/host/tools/rm2fb-emu/rm2fb-test
+          path: build/dev-host/tools/rm2fb-emu/rm2fb-test
 
   integration-tests:
     runs-on: ubuntu-latest

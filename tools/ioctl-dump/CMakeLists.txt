@@ -16,7 +16,7 @@ add_executable(fb-dump dump.cpp)
 install(
   TARGETS ioctl-dump
   COMPONENT ioctl-dump
-  DESTINATION opt/lib)
+  DESTINATION ${OPT_PREFIX}lib)
 
 install(
   FILES rm2fb_ioctl_dump.conf

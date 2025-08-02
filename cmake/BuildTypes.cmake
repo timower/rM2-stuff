@@ -8,7 +8,7 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug)
 endif()
 
-# set(CMAKE_SbARED_LINKER_FLAGS "-static-libstdc++")
+# set(CMAKE_SHARED_LINKER_FLAGS "-static-libstdc++")
 #
 # set(CMAKE_EXE_LINKER_FLAGS "-static-libstdc++")
 

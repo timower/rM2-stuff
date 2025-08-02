@@ -1,6 +1,15 @@
 {
-  preset ? "dev-host",
   toolchain_root ? null,
+  preset ? null,
+  components ? [
+    "ioctl-dump"
+    # TODO: "rMlib", fails to copy includes
+    "rm2display"
+    "rocket"
+    "tilem"
+    "tools"
+    "yaft"
+  ],
 
   fetchzip,
   stdenv,
@@ -18,7 +27,8 @@
   ...
 }:
 let
-  isCross = toolchain_root != null;
+  isRMToolchain = toolchain_root != null;
+  isCross = toolchain_root != null || stdenv.buildPlatform != stdenv.hostPlatform;
 
   # TODO: base on host arch.
   frida_arch = if isCross then "armhf" else "x86_64";
@@ -45,40 +55,70 @@ let
     url = "https://github.com/nemtrif/utfcpp/archive/refs/tags/v4.0.0.tar.gz";
     hash = "sha256-IuFbWS5rV3Bdmi+CqUrmgd7zTmWkpQksRpCrhT499fM=";
   };
+
+  libevdev-static = libevdev.overrideAttrs (old: {
+    dontDisableStatic = true;
+  });
+
+  getCompomentOut = (comp: builtins.replaceStrings [ "-" ] [ "_" ] comp);
 in
 stdenv.mkDerivation {
   pname = "rM2-stuff";
   version = "master";
   src = ./..;
 
-  buildInputs = lib.optionals (!isCross) [
-    sdl2-compat.dev
-    systemdLibs.dev
-    libevdev
-  ];
+  buildInputs =
+    lib.optionals (!isCross) [
+      sdl2-compat.dev
+    ]
+    ++ lib.optionals (!isRMToolchain) [
+      systemdLibs.dev
+      libevdev-static
+    ];
 
   nativeBuildInputs =
     lib.optionals (!isCross) [
       clang
-      pkg-config
+      ninja
       xxd
+    ]
+    ++ lib.optionals (!isRMToolchain) [
+      pkg-config
     ]
     ++ [
       cmake
-      ninja
       ncurses
     ];
 
-  dontFixCmake = isCross;
+  dontFixCmake = isRMToolchain;
 
-  TOOLCHAIN_ROOT = lib.optionalString (toolchain_root != null) "${toolchain_root}";
+  TOOLCHAIN_ROOT = lib.optionalString isRMToolchain "${toolchain_root}";
 
-  cmakeFlags = [
-    "-DFETCHCONTENT_SOURCE_DIR_FRIDA-GUM=${frida_gum}"
-    "-DFETCHCONTENT_SOURCE_DIR_EXPECTED=${expected}"
-    "-DFETCHCONTENT_SOURCE_DIR_CATCH2=${catch2}"
-    "-DFETCHCONTENT_SOURCE_DIR_UTFCPP=${utfcpp}"
-    "--preset=${preset}"
-    "-B."
-  ];
+  cmakeFlags =
+    [
+      "-DFETCHCONTENT_SOURCE_DIR_FRIDA-GUM=${frida_gum}"
+      "-DFETCHCONTENT_SOURCE_DIR_EXPECTED=${expected}"
+      "-DFETCHCONTENT_SOURCE_DIR_CATCH2=${catch2}"
+      "-DFETCHCONTENT_SOURCE_DIR_UTFCPP=${utfcpp}"
+    ]
+    ++ lib.optionals (isRMToolchain) [
+      "-DCMAKE_TOOLCHAIN_FILE=${./../cmake/rm-toolchain.cmake}"
+    ]
+    ++ lib.optionals (preset != null) [
+      "--preset=${preset}"
+      "-B."
+    ];
+
+  outputs = [ "out" ] ++ builtins.map getCompomentOut components;
+  installPhase = ''
+    runHook preInstall
+
+    cmake --install . --prefix $out
+
+    ${lib.strings.concatMapStringsSep ";" (
+      comp: "cmake --install . --component ${comp} --prefix ${placeholder (getCompomentOut comp)}"
+    ) components}
+
+    runHook postInstall
+  '';
 }

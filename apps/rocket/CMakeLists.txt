@@ -15,7 +15,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE rocket_lib rMlib)
 install(
   TARGETS ${PROJECT_NAME}
   COMPONENT ${PROJECT_NAME}
-  DESTINATION opt/bin/)
+  DESTINATION ${OPT_PREFIX}bin/)
 install(
   FILES rocket.service
   COMPONENT ${PROJECT_NAME}

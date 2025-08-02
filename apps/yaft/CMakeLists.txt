@@ -20,20 +20,20 @@ target_link_libraries(${PROJECT_NAME} PRIVATE yaft_app_lib rMlib)
 install(
   TARGETS ${PROJECT_NAME}
   COMPONENT ${PROJECT_NAME}
-  DESTINATION opt/bin)
+  DESTINATION ${OPT_PREFIX}bin)
 
 install(
   DIRECTORY ${CMAKE_BINARY_DIR}/terminfo
   COMPONENT ${PROJECT_NAME}
-  DESTINATION opt/share)
+  DESTINATION ${OPT_PREFIX}share)
 
 install(
   FILES draft/yaft.draft
   COMPONENT ${PROJECT_NAME}
-  DESTINATION opt/etc/draft)
+  DESTINATION ${OPT_PREFIX}etc/draft)
 install(
   FILES draft/yaft.png
   COMPONENT ${PROJECT_NAME}
-  DESTINATION opt/etc/draft/icons)
+  DESTINATION ${OPT_PREFIX}etc/draft/icons)
 
 add_deploy(${PROJECT_NAME})

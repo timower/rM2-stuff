@@ -16,12 +16,12 @@ target_link_libraries(${PROJECT_NAME} PRIVATE tilem::lib rMlib)
 install(
   TARGETS ${PROJECT_NAME}
   COMPONENT ${PROJECT_NAME}
-  DESTINATION opt/bin)
+  DESTINATION ${OPT_PREFIX}bin)
 install(
   FILES draft/tilem.draft
   COMPONENT ${PROJECT_NAME}
-  DESTINATION opt/etc/draft)
+  DESTINATION ${OPT_PREFIX}etc/draft)
 install(
   FILES draft/tilem.png
   COMPONENT ${PROJECT_NAME}
-  DESTINATION opt/etc/draft/icons)
+  DESTINATION ${OPT_PREFIX}etc/draft/icons)
