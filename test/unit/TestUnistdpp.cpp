@@ -82,6 +82,11 @@ TEST_CASE("readFile", "[unistdpp]") {
 
   SECTION("sysfs") {
     auto res = readFile("/sys/devices/system/cpu/present");
+    if (!res.has_value() &&
+        res.error() == std::errc::no_such_file_or_directory) {
+      SKIP("No sysfs access");
+    }
+
 #ifndef __APPLE__
     REQUIRE(res);
     REQUIRE((*res)[0] == '0');

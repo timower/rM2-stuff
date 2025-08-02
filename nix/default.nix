@@ -1,15 +1,6 @@
 {
   toolchain_root ? null,
   preset ? null,
-  components ? [
-    "ioctl-dump"
-    # TODO: "rMlib", fails to copy includes
-    "rm2display"
-    "rocket"
-    "tilem"
-    "tools"
-    "yaft"
-  ],
 
   fetchzip,
   stdenv,
@@ -22,6 +13,7 @@
   pkg-config,
   xxd,
   ncurses,
+  wget,
 
   lib,
   ...
@@ -29,18 +21,32 @@
 let
   isRMToolchain = toolchain_root != null;
   isCross = toolchain_root != null || stdenv.buildPlatform != stdenv.hostPlatform;
+  isDarwin = stdenv.hostPlatform.isDarwin;
 
-  # TODO: base on host arch.
-  frida_arch = if isCross then "armhf" else "x86_64";
-  frida_hash =
-    if isCross then
-      "sha256-7m5DdOt9YNNuVHK8IXF6KANM4aP+Hk/hMo5EuLfUB+M="
-    else
-      "sha256-WT8RjRj+4SKK3hIhw6Te/GuIy134zk2CXvpLWOqOJcM=";
+  frida_system = if isRMToolchain then "armv7l-linux" else stdenv.hostPlatform.system;
+  frida_info =
+    {
+      "armv7l-linux" = {
+        os = "linux";
+        arch = "armhf";
+        hash = "sha256-7m5DdOt9YNNuVHK8IXF6KANM4aP+Hk/hMo5EuLfUB+M=";
+      };
+      "x86_64-linux" = {
+        os = "linux";
+        arch = "x86_64";
+        hash = "sha256-WT8RjRj+4SKK3hIhw6Te/GuIy134zk2CXvpLWOqOJcM=";
+      };
+      "aarch64-darwin" = {
+        os = "macos";
+        arch = "arm64";
+        hash = "sha256-xUOB505JWKUyJ4MAv9hP85NSOL9PX4DDJGjGO5ydWBM=";
+      };
+    }
+    ."${frida_system}";
 
   frida_gum = fetchzip {
-    url = "https://github.com/frida/frida/releases/download/16.1.4/frida-gum-devkit-16.1.4-linux-${frida_arch}.tar.xz";
-    hash = frida_hash;
+    url = "https://github.com/frida/frida/releases/download/16.1.4/frida-gum-devkit-16.1.4-${frida_info.os}-${frida_info.arch}.tar.xz";
+    hash = frida_info.hash;
     stripRoot = false;
   };
   expected = fetchzip {
@@ -61,6 +67,20 @@ let
   });
 
   getCompomentOut = (comp: builtins.replaceStrings [ "-" ] [ "_" ] comp);
+  components =
+    [
+      # TODO: "rMlib", fails to copy includes
+      "rocket"
+      "tilem"
+      "yaft"
+    ]
+    ++ lib.optionals (isCross) [
+      "tools"
+    ]
+    ++ lib.optionals (!isDarwin) [
+      "ioctl-dump"
+      "rm2display"
+    ];
 in
 stdenv.mkDerivation {
   pname = "rM2-stuff";
@@ -71,7 +91,7 @@ stdenv.mkDerivation {
     lib.optionals (!isCross) [
       sdl2-compat.dev
     ]
-    ++ lib.optionals (!isRMToolchain) [
+    ++ lib.optionals (!isRMToolchain && !isDarwin) [
       systemdLibs.dev
       libevdev-static
     ];
@@ -104,6 +124,10 @@ stdenv.mkDerivation {
     ++ lib.optionals (isRMToolchain) [
       "-DCMAKE_TOOLCHAIN_FILE=${./../cmake/rm-toolchain.cmake}"
     ]
+    ++ lib.optionals (!isCross) [
+      "-DEMULATE=ON"
+      "-DBUILD_TESTS=ON"
+    ]
     ++ lib.optionals (preset != null) [
       "--preset=${preset}"
       "-B."
@@ -121,4 +145,8 @@ stdenv.mkDerivation {
 
     runHook postInstall
   '';
+
+  doCheck = !isCross;
+  nativeCheckInputs = [ wget ];
+
 }

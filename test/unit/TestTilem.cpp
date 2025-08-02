@@ -35,6 +35,11 @@ TEST_CASE("Tilem", "[tilem][ui]") {
   }
 
   SECTION("Download") {
+    // Skip download test in sandboxed environments (like Nix builds)
+    // Test for network access with a quick connection test
+    if (std::system("wget --spider -q --timeout=2 https://www.google.com >/dev/null 2>&1") != 0) {
+      SKIP("Skipping download test - no network access available");
+    }
 
     ctx.tap(ctx.findByText("Download"));
 

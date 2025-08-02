@@ -166,8 +166,8 @@ TEST_CASE("AppWidget", "[rocket]") {
 
     bool current = GENERATE(true, false);
 
-    ctx.pumpWidget(Center(RunningAppWidget(
-      app, [&] { tapped++; }, [&] { killed++; }, current)));
+    ctx.pumpWidget(Center(
+      RunningAppWidget(app, [&] { tapped++; }, [&] { killed++; }, current)));
 
     auto appWidget = ctx.findByType<RunningAppWidget>();
     REQUIRE_THAT(
@@ -215,7 +215,7 @@ call=yes
   REQUIRE_THAT(launcher, ctx.matchesGolden("rocket_a.png"));
 
   sleep(2);
-  ctx.pump();
+  ctx.pump(std::chrono::milliseconds(50));
 
   REQUIRE_THAT(launcher, ctx.matchesGolden("rocket.png"));
 }
