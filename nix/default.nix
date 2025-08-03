@@ -14,6 +14,7 @@
   xxd,
   ncurses,
   wget,
+  ctestCheckHook,
 
   lib,
   ...
@@ -101,6 +102,7 @@ stdenv.mkDerivation {
       clang
       ninja
       xxd
+      ctestCheckHook
     ]
     ++ lib.optionals (!isRMToolchain) [
       pkg-config

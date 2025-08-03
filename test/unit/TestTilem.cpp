@@ -13,8 +13,8 @@ using namespace rmlib;
 using namespace tilem;
 
 TEST_CASE("Tilem", "[tilem][ui]") {
-  TemporaryDirectory tmp;
-  const auto romPath = tmp.dir / "unit_test.rom";
+  TemporaryDirectory tmp(/* cwd */ true);
+  const std::string romPath = "unit_test.rom";
 
   auto ctx = TestContext::make();
 
@@ -37,7 +37,8 @@ TEST_CASE("Tilem", "[tilem][ui]") {
   SECTION("Download") {
     // Skip download test in sandboxed environments (like Nix builds)
     // Test for network access with a quick connection test
-    if (std::system("wget --spider -q --timeout=2 https://www.google.com >/dev/null 2>&1") != 0) {
+    if (std::system("wget --spider -q --timeout=2 https://www.google.com "
+                    ">/dev/null 2>&1") != 0) {
       SKIP("Skipping download test - no network access available");
     }
 
@@ -45,8 +46,7 @@ TEST_CASE("Tilem", "[tilem][ui]") {
 
     // Wait for the download to finish.
     ctx.pump();
-    while (!ctx.findByText("Downloading ROM '" + romPath.string() + "' ...")
-              .empty()) {
+    while (!ctx.findByText("Downloading ROM '" + romPath + "' ...").empty()) {
       ctx.pump();
     }
     ctx.pump(std::chrono::milliseconds(500));

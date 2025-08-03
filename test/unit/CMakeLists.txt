@@ -13,4 +13,10 @@ target_link_libraries(
   ${PROJECT_NAME} PRIVATE Catch2::Catch2WithMain unistdpp rMlib tilem::lib
                           Yaft::app_lib rocket::lib)
 
-add_test(NAME "unit" COMMAND ${PROJECT_NAME})
+# From:
+# https://github.com/catchorg/Catch2/blob/devel/docs/cmake-integration.md#catchcmake-and-catchaddtestscmake
+FetchContent_MakeAvailable(catch2)
+list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
+include(Catch)
+
+catch_discover_tests(${PROJECT_NAME} EXTRA_ARGS "--allow-running-no-tests")

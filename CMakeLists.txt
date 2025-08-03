@@ -17,11 +17,11 @@ include(Packaging)
 
 set(CMAKE_CXX_STANDARD "17")
 
+add_subdirectory(vendor EXCLUDE_FROM_ALL)
+
 add_subdirectory(libs)
 add_subdirectory(tools)
 add_subdirectory(apps)
-
-add_subdirectory(vendor EXCLUDE_FROM_ALL)
 
 option(BUILD_TESTS "Build Tests" OFF)
 if(${BUILD_TESTS})
