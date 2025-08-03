@@ -53,13 +53,13 @@ struct AddressInfo : public AddressInfoBase {
     // started by a systemd socket, the client could have already written to it.
     // So we save a copy and restore it. The updates will be buffered in the
     // control socket.
-    auto* fbMem = static_cast<std::uint8_t*>(fb->getFb());
-    std::vector<std::uint8_t> fbCopy(fbMem, fbMem + fb_size);
+    // auto* fbMem = static_cast<std::uint8_t*>(fb->getFb());
+    // std::vector<std::uint8_t> fbCopy(fbMem, fbMem + fb_size);
 
     createThreads.call<int, void*>(fb->mem.get());
     waitForStart.call<void>();
 
-    std::memcpy(fb->mem.get(), fbCopy.data(), fbCopy.size());
+    // std::memcpy(fb->mem.get(), fbCopy.data(), fbCopy.size());
   }
 
   bool doUpdate(const UpdateParams& params) const final {

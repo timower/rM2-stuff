@@ -22,7 +22,7 @@ do_ssh() {
   ssh -o StrictHostKeyChecking=no -p 2222 root@localhost /bin/sh -l -c "'$*'"
 }
 
-check_screenshot() {
+verify_screenshot() {
   NAME="$1"
   SH_PATH="${TMP_DIR}/${NAME}"
 
@@ -30,10 +30,31 @@ check_screenshot() {
 
   for matches in "$@"; do
     if diff "${SH_PATH}" "${ASSETS_DIR}/$matches"; then
-      return
+      return 0
     else
       echo "Unmatching screenshot $matches"
     fi
+  done
+
+  return 1
+}
+
+check_screenshot() {
+  if ! verify_screenshot "$@"; then
+    exit 1
+  fi
+}
+
+wait_for() {
+  time="$1"
+  shift
+
+  sleep 1
+  for _ in $(seq "$time"); do
+    if verify_screenshot "$@"; then
+      return 0
+    fi
+    sleep 1
   done
 
   exit 1
@@ -67,64 +88,54 @@ do_ssh opkg install ./*.ipk calculator mines
 do_ssh systemctl start rocket
 
 # rocket
-sleep 2
-check_screenshot "startup.png"
+sleep 2 # Sleep here, to make sure it's rocket that starts rm2fb and not this test.
+wait_for 2 "startup.png"
 
 # tilem
 tap_at 730 1050
-sleep 2
-check_screenshot "tilem.png"
+wait_for 2 "tilem.png"
 tap_at 840 962
-sleep 2
-check_screenshot "startup.png"
+wait_for 2 "startup.png"
 
 # Yaft
 tap_at 1058 1042
-sleep 4
-check_screenshot "yaft.png"
+wait_for 4 "yaft.png"
 tap_at 76 1832
 sleep 1
 tap_at 324 1704
-sleep 2
-check_screenshot "startup.png"
+wait_for 2 "startup.png"
 
 # Calculator
 # Does not work on 3.20 as Qt5 isn't used anymore.
 if do_ssh test -e /usr/lib/libQt5Quick.so.5; then
   tap_at 400 1054
-  sleep 4
-  check_screenshot "calculator.png"
+  wait_for 4 "calculator.png"
   tap_at 826 1440
-  sleep 1
-  check_screenshot "calculator_3.png"
+  wait_for 1 "calculator_3.png"
 
   press_power
   sleep 1
   tap_at 702 718 # Stop sleeping
   sleep 1
   tap_at 824 1124 # Kill calculator
-  sleep 1
-  check_screenshot "startup.png"
+  wait_for 1 "startup.png"
 fi
 
 # mines
 tap_at 600 1054
-sleep 2
-check_screenshot "mines.png"
+wait_for 2 "mines.png"
 
 press_power
 sleep 1
 tap_at 702 718 # Stop sleeping
 sleep 2
 tap_at 764 1124 # Kill mines
-sleep 1
-check_screenshot "startup.png"
+wait_for 1 "startup.png"
 
 # Xochitl
 tap_at 832 1086
-sleep 120
 
-check_screenshot \
+wait_for 120 \
   "xochitl_2.15.png" \
   "xochitl_3.3.png" \
   "xochitl_3.5.png" \
