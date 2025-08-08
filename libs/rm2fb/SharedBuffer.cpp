@@ -40,7 +40,6 @@ SharedFB::open(const char* path) {
     memset(mem.get(), UINT8_MAX, fb_size);
     memset((char*)mem.get() + fb_size, 0, grayscale_size);
   }
-
   return SharedFB{ .fd = std::move(*fd), .mem = std::move(mem) };
 }
 

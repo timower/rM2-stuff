@@ -41,6 +41,23 @@ setupHooks() {
   return result ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
+// Sends an empty message to make sure the rm2fb server is listening and has
+// started the SWTCON.
+void
+waitForInit() {
+  std::cerr << "Sending init check\n";
+  sendUpdate(UpdateParams{
+    .y1 = 0,
+    .x1 = 0,
+    .y2 = 0,
+    .x2 = 0,
+    .flags = 0,
+    .waveform = 0,
+    .temperatureOverride = 0,
+    .extraMode = 0,
+  });
+}
+
 } // namespace
 
 bool
@@ -61,6 +78,7 @@ int
 open64(const char* pathname, int flags, mode_t mode = 0) {
   if (!inXochitl && pathname == std::string("/dev/fb0")) {
     const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
+    waitForInit();
     return fb.fd.fd;
   }
 
@@ -74,6 +92,7 @@ int
 open(const char* pathname, int flags, mode_t mode = 0) {
   if (!inXochitl && pathname == std::string("/dev/fb0")) {
     const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
+    waitForInit();
     return fb.fd.fd;
   }
 
@@ -192,6 +211,7 @@ __libc_start_main(int (*mainFn)(int, char**, char**), // NOLINT
     if (setupHooks() != EXIT_SUCCESS) {
       return EXIT_FAILURE;
     }
+    waitForInit();
   }
 
   auto* funcMain =

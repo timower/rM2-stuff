@@ -320,6 +320,12 @@ serverMain(char* argv0, const AddressInfoBase* addrs) { // NOLINT
       readControlMessage(serverSock, [&](auto msgAndAddr) {
         auto [msg, addr] = msgAndAddr;
 
+        // Emtpy message, just to check init.
+        if (msg.x1 == msg.x2 && msg.y1 == msg.y2) {
+          std::cerr << "Got init check!\n";
+          return serverSock.sendto(true, addr);
+        }
+
         bool res = false;
         if (!inQemu) {
           res = addrs->doUpdate(msg);

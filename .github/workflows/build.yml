@@ -60,7 +60,9 @@ jobs:
           lfs: 'true'
 
       - name: Install Deps
-        run: sudo apt-get install -y ninja-build libsdl2-dev xxd llvm libevdev-dev libsystemd-dev
+        run: |
+         sudo apt-get update
+         sudo apt-get install -y ninja-build libsdl2-dev xxd llvm libevdev-dev libsystemd-dev
 
       - name: Configure CMake
         run: cmake --preset dev-host

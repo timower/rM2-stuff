@@ -81,15 +81,13 @@ scp -P 2222 "$IPKS_PATH"/*.ipk root@localhost:
 do_ssh systemctl restart systemd-timesyncd || do_ssh systemctl restart systemd-timedated
 do_ssh opkg update
 
-# TODO: xochitl doesn't configure for 3.5+
 do_ssh opkg install ./*.ipk calculator mines
 
 # Start rocket, which should trigger the rm2fb socket and start the service.
 do_ssh systemctl start rocket
 
 # rocket
-sleep 2 # Sleep here, to make sure it's rocket that starts rm2fb and not this test.
-wait_for 2 "startup.png"
+wait_for 5 "startup.png"
 
 # tilem
 tap_at 730 1050
@@ -117,6 +115,7 @@ if do_ssh test -e /usr/lib/libQt5Quick.so.5; then
   sleep 1
   tap_at 702 718 # Stop sleeping
   sleep 1
+  wait_for 1 "calculator_sleep.png"
   tap_at 824 1124 # Kill calculator
   wait_for 1 "startup.png"
 fi
