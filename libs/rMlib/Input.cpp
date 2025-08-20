@@ -273,7 +273,7 @@ makeDevice(unistdpp::FD fd,
 }
 
 void
-handeDevice(InputManager& mgr, udev_device& dev) {
+handleDevice(InputManager& mgr, udev_device& dev) {
   const auto* devnode = udev_device_get_devnode(&dev);
   if (devnode == nullptr) {
     return;
@@ -281,7 +281,10 @@ handeDevice(InputManager& mgr, udev_device& dev) {
 
   const auto* action = udev_device_get_action(&dev);
   if (action == nullptr || action == std::string_view("add")) {
-    mgr.open(devnode);
+    auto devOrErr = mgr.open(devnode);
+    if (!devOrErr) {
+      std::cerr << "Error adding device: " << devOrErr.error().msg << "\n";
+    }
     return;
   }
 
@@ -372,7 +375,7 @@ InputManager::openAll(bool monitor) {
     struct udev_device* dev =
       udev_device_new_from_syspath(udevHandle.get(), path);
     if (dev != nullptr) {
-      handeDevice(*this, *dev);
+      handleDevice(*this, *dev);
       udev_device_unref(dev);
     }
   }
@@ -442,7 +445,7 @@ InputManager::waitForInput(std::vector<pollfd>& extraFds,
   if (udevMonitorFd.isValid() && unistdpp::canRead(extraFds.back())) {
     udev_device* dev = udev_monitor_receive_device(udevMonitor.get());
     if (dev != nullptr) {
-      handeDevice(*this, *dev);
+      handleDevice(*this, *dev);
       udev_device_unref(dev);
     }
   }
