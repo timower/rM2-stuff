@@ -13,9 +13,26 @@ constexpr auto calc_default_rom = "/home/root/ti84plus.rom";
 
 int
 main(int argc, char* argv[]) {
-  const auto* calcName = argc > 1 ? argv[1] : calc_default_rom;
+  const char* calcName = nullptr;
+  bool fullScreen = false;
 
-  unistdpp::fatalOnError(runApp(Navigator(tilem::Calculator(calcName))));
+  for (int i = 1; i < argc; i++) {
+    if (argv[i] == std::string_view("--full")) {
+      fullScreen = true;
+    } else if (calcName == nullptr) {
+      calcName = argv[i];
+    } else {
+      std::cerr << "Too many arguments!\n";
+      return EXIT_FAILURE;
+    }
+  }
+
+  if (calcName == nullptr) {
+    calcName = calc_default_rom;
+  }
+
+  unistdpp::fatalOnError(
+    runApp(Navigator(tilem::Calculator(calcName, fullScreen))));
 
   return EXIT_SUCCESS;
 }
