@@ -60,6 +60,10 @@ wait_for() {
   exit 1
 }
 
+wait_for_default() {
+  wait_for 5 "$@"
+}
+
 tap_at() {
   "$TEST_BINARY" 127.0.0.1 8888 touch "$1" "$2"
 }
@@ -75,10 +79,8 @@ while ! do_ssh true; do
   sleep 1
 done
 
+do_ssh systemctl restart systemd-timesyncd || do_ssh systemctl restart chronyd
 scp -P 2222 "$IPKS_PATH"/*.ipk root@localhost:
-
-# do_ssh timedatectl status
-do_ssh systemctl restart systemd-timesyncd || do_ssh systemctl restart systemd-timedated
 do_ssh opkg update
 
 do_ssh opkg install ./*.ipk calculator mines
@@ -87,49 +89,49 @@ do_ssh opkg install ./*.ipk calculator mines
 do_ssh systemctl start rocket
 
 # rocket
-wait_for 5 "startup.png"
+wait_for_default "startup.png"
 
 # tilem
 tap_at 730 1050
-wait_for 2 "tilem.png"
+wait_for_default "tilem.png"
 tap_at 840 962
-wait_for 2 "startup.png"
+wait_for_default "startup.png"
 
 # Yaft
 tap_at 1058 1042
-wait_for 4 "yaft.png"
+wait_for_default "yaft.png"
 tap_at 76 1832
 sleep 1
 tap_at 324 1704
-wait_for 2 "startup.png"
+wait_for_default "startup.png"
 
 # Calculator
 # Does not work on 3.20 as Qt5 isn't used anymore.
 if do_ssh test -e /usr/lib/libQt5Quick.so.5; then
   tap_at 400 1054
-  wait_for 4 "calculator.png"
+  wait_for_default "calculator.png"
   tap_at 826 1440
-  wait_for 1 "calculator_3.png"
+  wait_for_default "calculator_3.png"
 
   press_power
   sleep 1
   tap_at 702 718 # Stop sleeping
   sleep 1
-  wait_for 1 "calculator_sleep.png"
+  wait_for_default "calculator_sleep.png"
   tap_at 824 1124 # Kill calculator
-  wait_for 1 "startup.png"
+  wait_for_default "startup.png"
 fi
 
 # mines
 tap_at 600 1054
-wait_for 2 "mines.png"
+wait_for_default "mines.png"
 
 press_power
 sleep 1
 tap_at 702 718 # Stop sleeping
 sleep 2
 tap_at 764 1124 # Kill mines
-wait_for 1 "startup.png"
+wait_for_default "startup.png"
 
 # Xochitl
 tap_at 832 1086
