@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <csignal>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 
@@ -94,14 +95,41 @@ AppDescription::read(std::string_view path, std::string_view iconDir) {
   return std::optional(std::move(result));
 }
 
-std::optional<ImageCanvas>
+std::optional<Canvas>
 AppDescription::getIcon() const {
+  struct CacheValue {
+    ImageCanvas image;
+    std::filesystem::file_time_type time;
+  };
+  static std::unordered_map<std::string, CacheValue> imageCache;
+
+  std::error_code ec;
+  auto time = std::filesystem::last_write_time(iconPath, ec);
+  if (ec) {
+    return std::nullopt;
+  }
+
+  auto it = imageCache.find(iconPath);
+  if (it != imageCache.end()) {
+    if (time == it->second.time) {
+      return it->second.image.canvas;
+    }
+
+    // Icon has been modified, remove from cache.
+    imageCache.erase(it);
+  }
+
   std::cout << "Parsing image from: " << iconPath << std::endl;
   auto iconImage = ImageCanvas::load(iconPath.c_str());
-  if (iconImage.has_value()) {
-    std::cout << iconImage->canvas.components() << std::endl;
+  if (!iconImage.has_value()) {
+    return std::nullopt;
   }
-  return iconImage;
+
+  auto canvas = iconImage->canvas;
+  std::cout << "With components: " << canvas.components() << std::endl;
+  imageCache.emplace_hint(
+    it, iconPath, CacheValue{ .image = std::move(*iconImage), .time = time });
+  return canvas;
 }
 
 std::vector<AppDescription>
@@ -127,7 +155,7 @@ readAppFiles(std::string_view directory) {
 void
 App::updateDescription(AppDescription desc) {
   mDescription = std::move(desc);
-  iconImage = mDescription.getIcon();
+  iconCanvas = mDescription.getIcon();
 }
 
 bool

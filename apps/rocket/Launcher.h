@@ -112,7 +112,7 @@ public:
       if (const auto& savedFb = currentApp->savedFB(); savedFb.has_value()) {
         background = &savedFb->canvas;
       } else if (const auto& icon = currentApp->icon(); icon.has_value()) {
-        background = &icon->canvas;
+        background = &*icon;
         backgroundSize = splash_size;
       }
     }

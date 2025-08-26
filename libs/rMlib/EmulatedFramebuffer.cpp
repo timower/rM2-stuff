@@ -4,7 +4,10 @@
 #include <SDL.h>
 
 #include <array>
+#include <atomic>
+#include <csignal>
 #include <iostream>
+#include <thread>
 
 #if EMULATE_UINPUT
 #include <libevdev/libevdev-uinput.h>

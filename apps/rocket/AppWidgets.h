@@ -51,7 +51,7 @@ public:
     using namespace rmlib;
 
     const Canvas& canvas =
-      app.icon().has_value() ? app.icon()->canvas : getMissingImage().canvas;
+      app.icon().has_value() ? *app.icon() : getMissingImage().canvas;
     return container(GestureDetector(Column(Sized(Image(canvas), 128, 128),
                                             Text(app.description().name)),
                                      Gestures{}.onTap(onLaunch)),

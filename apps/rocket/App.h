@@ -25,7 +25,7 @@ struct AppDescription {
   std::string icon;
 
   std::string iconPath;
-  std::optional<rmlib::ImageCanvas> getIcon() const;
+  std::optional<rmlib::Canvas> getIcon() const;
 
   static std::optional<AppDescription> read(std::string_view path,
                                             std::string_view iconDir);
@@ -37,7 +37,7 @@ readAppFiles(std::string_view directory);
 class App {
 public:
   App(AppDescription desc)
-    : mDescription(std::move(desc)), iconImage(mDescription.getIcon()) {}
+    : mDescription(std::move(desc)), iconCanvas(mDescription.getIcon()) {}
 
   void updateDescription(AppDescription desc);
 
@@ -55,7 +55,7 @@ public:
 
   const AppDescription& description() const { return mDescription; }
 
-  const std::optional<rmlib::ImageCanvas>& icon() const { return iconImage; }
+  const std::optional<rmlib::Canvas>& icon() const { return iconCanvas; }
   const std::optional<rmlib::MemoryCanvas>& savedFB() const { return savedFb; }
   void resetSavedFB() { savedFb.reset(); }
 
@@ -67,7 +67,7 @@ private:
 
   std::weak_ptr<AppRunInfo> runInfo;
 
-  std::optional<rmlib::ImageCanvas> iconImage;
+  std::optional<rmlib::Canvas> iconCanvas;
   std::optional<rmlib::MemoryCanvas> savedFb;
 
   // Indicates that the app should be removed when it exists
