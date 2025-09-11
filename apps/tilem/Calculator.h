@@ -61,14 +61,16 @@ public:
     constexpr auto default_width = 96;
     constexpr auto default_height = 64;
 
-    const auto scale = getWidget().fullScreen ? 9.1 : 6.5;
+    const auto scale = getWidget().fullScreen
+                         ? double(context.getFbCanvas().width()) / default_width
+                         : 6.5;
     const auto width = std::floor(scale * default_width);
     const auto height = std::floor(scale * default_height);
 
     return Cleared(
       Center(Border(Column(header(context, width),
                            Sized(Screen(mCalc), width, height),
-                           Sized(Keypad(mCalc), width, std::nullopt)),
+                           Expanded(Sized(Keypad(mCalc), width, std::nullopt))),
                     Insets::all(1))));
   }
 
