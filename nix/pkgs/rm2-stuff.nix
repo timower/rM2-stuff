@@ -68,25 +68,24 @@ let
   });
 
   getCompomentOut = (comp: builtins.replaceStrings [ "-" ] [ "_" ] comp);
-  components =
-    [
-      # TODO: "rMlib", fails to copy includes
-      "rocket"
-      "tilem"
-      "yaft"
-    ]
-    ++ lib.optionals (isCross) [
-      "tools"
-    ]
-    ++ lib.optionals (!isDarwin) [
-      "ioctl-dump"
-      "rm2display"
-    ];
+  components = [
+    # TODO: "rMlib", fails to copy includes
+    "rocket"
+    "tilem"
+    "yaft"
+  ]
+  ++ lib.optionals (isCross) [
+    "tools"
+  ]
+  ++ lib.optionals (!isDarwin) [
+    "ioctl-dump"
+    "rm2display"
+  ];
 in
 stdenv.mkDerivation {
   pname = "rM2-stuff";
   version = "master";
-  src = ./..;
+  src = ./../..;
 
   buildInputs =
     lib.optionals (!isCross) [
@@ -116,24 +115,23 @@ stdenv.mkDerivation {
 
   TOOLCHAIN_ROOT = lib.optionalString isRMToolchain "${toolchain_root}";
 
-  cmakeFlags =
-    [
-      "-DFETCHCONTENT_SOURCE_DIR_FRIDA-GUM=${frida_gum}"
-      "-DFETCHCONTENT_SOURCE_DIR_EXPECTED=${expected}"
-      "-DFETCHCONTENT_SOURCE_DIR_CATCH2=${catch2}"
-      "-DFETCHCONTENT_SOURCE_DIR_UTFCPP=${utfcpp}"
-    ]
-    ++ lib.optionals (isRMToolchain) [
-      "-DCMAKE_TOOLCHAIN_FILE=${./../cmake/rm-toolchain.cmake}"
-    ]
-    ++ lib.optionals (!isCross) [
-      "-DEMULATE=ON"
-      "-DBUILD_TESTS=ON"
-    ]
-    ++ lib.optionals (preset != null) [
-      "--preset=${preset}"
-      "-B."
-    ];
+  cmakeFlags = [
+    "-DFETCHCONTENT_SOURCE_DIR_FRIDA-GUM=${frida_gum}"
+    "-DFETCHCONTENT_SOURCE_DIR_EXPECTED=${expected}"
+    "-DFETCHCONTENT_SOURCE_DIR_CATCH2=${catch2}"
+    "-DFETCHCONTENT_SOURCE_DIR_UTFCPP=${utfcpp}"
+  ]
+  ++ lib.optionals (isRMToolchain) [
+    "-DCMAKE_TOOLCHAIN_FILE=${./../../cmake/rm-toolchain.cmake}"
+  ]
+  ++ lib.optionals (!isCross) [
+    "-DEMULATE=ON"
+    "-DBUILD_TESTS=ON"
+  ]
+  ++ lib.optionals (preset != null) [
+    "--preset=${preset}"
+    "-B."
+  ];
 
   outputs = [ "out" ] ++ builtins.map getCompomentOut components;
   installPhase = ''

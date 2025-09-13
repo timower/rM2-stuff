@@ -24,11 +24,11 @@
           pkgsCross = pkgs.pkgsCross.remarkable2;
         in
         rec {
-          default = pkgs.callPackage ./nix/default.nix { };
-          rm2-toolchain = pkgs.callPackage ./nix/rm2-toolchain.nix { };
+          default = pkgs.callPackage ./nix/pkgs/rm2-stuff.nix { };
+          rm2-toolchain = pkgs.callPackage ./nix/pkgs/rm2-toolchain.nix { };
 
-          dev-cross = pkgsCross.callPackage ./nix/default.nix { };
-          dev-rm2-toolchain = pkgs.callPackage ./nix/default.nix {
+          dev-cross = pkgsCross.callPackage ./nix/pkgs/rm2-stuff.nix { };
+          dev-rm2-toolchain = pkgs.callPackage ./nix/pkgs/rm2-stuff.nix {
             toolchain_root = "${rm2-toolchain}";
           };
 
