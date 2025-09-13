@@ -1,0 +1,37 @@
+#!/bin/sh
+
+set -eu
+
+backing_path="${BACKING_IMAGE:-/opt/root/rootfs.qcow2}"
+root_path="${ROOT_IMAGE:-/tmp/$(echo $BACKING_IMAGE | md5sum | cut -f1 -d' ').qcow2}"
+kernel_path=${KERNEL_PATH:-/opt/zImage}
+dtb_path=${DTB_PATH:-/opt/imx7d-rm.dtb}
+ssh_port=${SSH_PORT:-22}
+
+if ! [ -f "$root_path" ] && [ -f "$backing_path" ]; then
+  echo "No image found, creating new one at $root_path"
+  mkdir -p $(dirname $root_path)
+  qemu-img create -b "$backing_path" -F qcow2 -f qcow2 "$root_path"
+fi
+
+load_state=""
+if qemu-img snapshot -l $root_path | grep main >/dev/null; then
+  echo "Snapshot found, loading"
+  load_state="-loadvm main"
+fi
+
+echo "Staring QEMU..."
+qemu-system-arm \
+  -machine mcimx7d-sabre \
+  -cpu cortex-a9 \
+  -smp 2 \
+  -m 2048 \
+  -kernel $kernel_path \
+  -dtb $dtb_path \
+  -drive if=sd,file=$root_path,format=qcow2,index=2 \
+  -append "console=ttymxc0 rootfstype=ext4 root=/dev/mmcblk2p2 rw rootwait init=/sbin/init" \
+  -nic user,hostfwd=tcp::$ssh_port-:22,hostfwd=tcp::8888-:8888 \
+  -monitor tcp::5555,server=on,wait=off \
+  -parallel null -display none \
+  $load_state \
+  "$@"

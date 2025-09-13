@@ -1,0 +1,16 @@
+#!/bin/sh
+
+set -eux
+
+# Start the VM
+run_vm -serial null -daemonize
+
+# Make sure it's up
+wait_ssh
+
+# Connect using the FB emulator
+rm2fb-emu 127.0.0.1 8888 &
+
+# Start xochitl
+in_vm LD_PRELOAD=/opt/lib/librm2fb_client.so /usr/bin/xochitl
+

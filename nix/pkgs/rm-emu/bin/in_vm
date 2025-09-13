@@ -1,0 +1,6 @@
+#!/bin/sh
+
+set -eux
+port=${SSH_PORT:-22}
+ssh -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  root@localhost /bin/sh -l -c "'$*'"

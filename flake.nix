@@ -20,12 +20,19 @@
       packages = forAllSystems (
         system:
         let
+          linuxSystem = builtins.replaceStrings [ "darwin" ] [ "linux" ] system;
           pkgs = nixpkgs.legacyPackages."${system}";
+          pkgsLinux = nixpkgs.legacyPackages."${linuxSystem}";
 
           pkgsCross = pkgs.pkgsCross.remarkable2;
           pkgsArmv7 = pkgs.pkgsCross.armv7l-hf-multiplatform;
 
           nix-installer = pkgsArmv7.callPackage ./nix/pkgs/nix-installer.nix { };
+
+          rm-emu-packages = import ./nix/pkgs/rm-emu/default.nix {
+            inherit (nixpkgs) lib;
+            inherit pkgs pkgsLinux;
+          };
         in
         rec {
           default = pkgs.callPackage ./nix/pkgs/rm2-stuff.nix { };
@@ -41,6 +48,7 @@
             inherit nix-installer;
           };
         }
+        // rm-emu-packages
       );
 
       devShells = forAllSystems (
