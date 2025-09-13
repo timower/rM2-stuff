@@ -16,12 +16,16 @@
 
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
     in
-    {
+    rec {
       packages = forAllSystems (
         system:
         let
           pkgs = nixpkgs.legacyPackages."${system}";
+
           pkgsCross = pkgs.pkgsCross.remarkable2;
+          pkgsArmv7 = pkgs.pkgsCross.armv7l-hf-multiplatform;
+
+          nix-installer = pkgsArmv7.callPackage ./nix/pkgs/nix-installer.nix { };
         in
         rec {
           default = pkgs.callPackage ./nix/pkgs/rm2-stuff.nix { };
@@ -32,6 +36,10 @@
             toolchain_root = "${rm2-toolchain}";
           };
 
+          inherit nix-installer;
+          remarkable-build = pkgs.callPackage ./nix/pkgs/remarkable-build.nix {
+            inherit nix-installer;
+          };
         }
       );
 
@@ -51,5 +59,35 @@
           };
         }
       );
+
+      lib.remarkableSystem =
+        {
+          modules,
+          buildSystem ? "x86_64-linux",
+        }:
+        let
+          rm2StuffPkgs = packages."${buildSystem}";
+
+          baseModules = import ./nix/modules/module-list.nix;
+
+          inputsModule =
+            { ... }:
+            {
+              nixpkgs.buildPlatform = buildSystem;
+              _module.args = {
+                rm2-stuff = rm2StuffPkgs;
+                nixpkgs = nixpkgs;
+              };
+            };
+        in
+        nixpkgs.lib.evalModules {
+          modules = baseModules ++ [ inputsModule ] ++ modules;
+          class = "remarkable";
+        };
+
+      remarkableConfigurations.example = lib.remarkableSystem {
+        modules = [ ./nix/modules/examples/simple.nix ];
+      };
+
     };
 }
