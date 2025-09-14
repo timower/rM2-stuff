@@ -22,7 +22,7 @@
   setupCommands ? null,
 }:
 let
-  hasSetup = setupCommands != null || setupCommands != null;
+  hasSetup = setupCommands != null || nativeSetupCommands != null;
 
   setupScript = lib.optionalString (hasSetup) ''
     export ROOT_IMAGE=$out/image.qcow2
@@ -51,6 +51,7 @@ stdenvNoCC.mkDerivation {
   ++ lib.optionals (hasSetup) [
     qemu
     openssh
+    netcat
   ];
 
   src = ./bin;

@@ -54,7 +54,7 @@ in
     # TODO: Nix doesn't build for remarkable2, use armv7
     nixpkgs.overlays = [
       (final: prev: {
-        nix = pkgsArmv7l.nix;
+        nix = if prev.system == "armv7l-linux" then pkgsArmv7l.nix else prev.nix;
       })
     ];
   };

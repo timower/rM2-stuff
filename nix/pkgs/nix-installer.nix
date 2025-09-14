@@ -3,13 +3,16 @@
   buildPackages,
   nix,
   cacert,
+
+  extraPaths ? [ ],
 }:
 let
   installerClosureInfo = buildPackages.closureInfo {
     rootPaths = [
       nix
       cacert
-    ];
+    ]
+    ++ extraPaths;
   };
 in
 runCommand "nix-installer" { } ''

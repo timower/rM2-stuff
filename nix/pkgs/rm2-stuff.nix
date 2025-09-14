@@ -85,7 +85,13 @@ in
 stdenv.mkDerivation {
   pname = "rM2-stuff";
   version = "master";
-  src = ./../..;
+
+  # src = ./../..;
+  src = builtins.path {
+    path = ./../..;
+    name = "rm2-stuff-src";
+    filter = path: type: type != "directory" || builtins.baseNameOf path != "nix";
+  };
 
   buildInputs =
     lib.optionals (!isCross) [
