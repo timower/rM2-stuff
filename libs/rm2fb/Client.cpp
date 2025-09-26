@@ -5,11 +5,14 @@
 #include "SharedBuffer.h"
 #include "Versions/Version.h"
 
+#ifndef NO_HOOKING
 #include "frida-gum.h"
+#endif
 
 #include <dlfcn.h>
 
 #include <cstring>
+#include <linux/limits.h>
 #include <unistd.h>
 
 bool inXochitl = false;
@@ -35,7 +38,11 @@ setupHooks() {
     return EXIT_FAILURE;
   }
 
+#ifndef NO_HOOKING
   gum_init_embedded();
+#else
+  return EXIT_FAILURE;
+#endif
 
   auto result = addrs->installHooks(sendUpdate);
   return result ? EXIT_SUCCESS : EXIT_FAILURE;
@@ -209,6 +216,7 @@ __libc_start_main(int (*mainFn)(int, char**, char**), // NOLINT
     unistdpp::fatalOnError(getControlSocket(), "Error creating control socket");
 
     if (setupHooks() != EXIT_SUCCESS) {
+      std::cerr << "Seting up hooks failed\n";
       return EXIT_FAILURE;
     }
     waitForInit();
