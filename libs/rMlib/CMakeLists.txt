@@ -2,6 +2,7 @@ project(rMlib)
 
 option(EMULATE "Emulate a rM tablet using SDL" OFF)
 option(EMULATE_UINPUT "Emulate input devices using uinput" OFF)
+option(BUILTIN_FONT "Use builtin noto font instead of system font" ON)
 
 set(RMLIB_SOURCES Device.cpp Canvas.cpp)
 
@@ -36,8 +37,12 @@ endif()
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
 
-if(EMULATE)
+if(BUILTIN_FONT)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE BUILTIN_FONT)
   target_link_libraries(${PROJECT_NAME} PRIVATE NotoFont::font)
+endif()
+
+if(EMULATE)
 
   find_package(SDL2 REQUIRED)
   if(TARGET SDL2::SDL2)

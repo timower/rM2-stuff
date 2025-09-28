@@ -30,7 +30,7 @@ jobs:
 
     steps:
       - name: Install Deps
-        run: apt-get update && apt-get install -y git git-lfs
+        run: apt-get update && apt-get install -y git git-lfs xxd
 
       - uses: actions/checkout@v4
         with:

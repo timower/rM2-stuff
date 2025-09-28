@@ -106,13 +106,13 @@ stdenv.mkDerivation {
     lib.optionals (!isCross) [
       clang
       ninja
-      xxd
       ctestCheckHook
     ]
     ++ lib.optionals (!isRMToolchain) [
       pkg-config
     ]
     ++ [
+      xxd
       cmake
       ncurses
     ];

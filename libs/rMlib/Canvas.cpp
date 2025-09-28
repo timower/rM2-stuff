@@ -24,7 +24,7 @@ blend(uint8_t factor, uint8_t fg, uint8_t bg) {
   return uint8_t(val);
 }
 
-#ifdef EMULATE
+#ifdef BUILTIN_FONT
 #include "noto-sans-mono.h"
 #else
 constexpr auto font_path = "/usr/share/fonts/ttf/noto/NotoMono-Regular.ttf";
@@ -34,7 +34,7 @@ const stbtt_fontinfo*
 getFont() {
   static const auto* font = [] {
     static stbtt_fontinfo font;
-#ifndef EMULATE
+#ifndef BUILTIN_FONT
     // TODO: unistdpp
     constexpr auto large_number = 24 << 20;
     static std::array<uint8_t, large_number> fontBuffer = { 0 };
@@ -56,7 +56,7 @@ getFont() {
       std::exit(EXIT_FAILURE);
     }
 
-#ifndef EMULATE
+#ifndef BUILTIN_FONT
     fclose(fp); // NOLINT
 #endif
     return &font;

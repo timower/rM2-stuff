@@ -1,7 +1,7 @@
 find_program(XXD xxd)
 
 if("${XXD}" STREQUAL "XXD-NOTFOUND")
-  message(WARNING "XXD not found, skipping font include")
+  message(FATAL_ERROR "XXD not found, required for font")
   return()
 endif()
 
