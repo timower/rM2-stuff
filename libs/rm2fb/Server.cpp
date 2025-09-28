@@ -15,6 +15,7 @@
 #include <cstring>
 #include <dlfcn.h>
 #include <iostream>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <systemd/sd-daemon.h>
@@ -217,6 +218,8 @@ handleMsg(const SharedFB& fb,
 
 int
 serverMain(char* argv0, const AddressInfoBase* addrs) { // NOLINT
+  umask(0);
+
   setupExitHandler();
   setProcessName(argv0);
 

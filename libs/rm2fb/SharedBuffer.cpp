@@ -12,7 +12,7 @@
 using namespace unistdpp;
 
 namespace {
-constexpr mode_t shm_mode = 0755;
+constexpr mode_t shm_mode = 0777;
 }
 
 Result<SharedFB>
