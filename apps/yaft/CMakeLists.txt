@@ -14,11 +14,18 @@ if(APPLE)
 endif()
 
 add_executable(${PROJECT_NAME} main.cpp)
-
 target_link_libraries(${PROJECT_NAME} PRIVATE yaft_app_lib rMlib)
+
+add_executable(yaft_reader reader.cpp)
+target_link_libraries(yaft_reader PRIVATE yaft_app_lib rMlib)
 
 install(
   TARGETS ${PROJECT_NAME}
+  COMPONENT ${PROJECT_NAME}
+  DESTINATION ${OPT_PREFIX}bin)
+
+install(
+  TARGETS yaft_reader
   COMPONENT ${PROJECT_NAME}
   DESTINATION ${OPT_PREFIX}bin)
 

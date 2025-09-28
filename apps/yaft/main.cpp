@@ -11,7 +11,7 @@
 using namespace rmlib;
 
 namespace {
-const char* shellCmd = "/bin/bash";
+const char* shellCmd = "/bin/sh";
 }
 
 int
