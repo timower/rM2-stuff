@@ -10,7 +10,12 @@ let
 
   extractor = pkgsLinux.callPackage ./extractor.nix { };
 
-  allRootFs = (pkgsLinux.callPackage ./rootfs.nix { inherit versions extractor; }).rootfs;
+  allRootFs = builtins.mapAttrs (
+    fw_version: fw_info:
+    pkgsLinux.callPackage ./rootfs.nix {
+      inherit fw_version fw_info extractor;
+    }
+  ) versions;
 
   allRootFs' = lib.mapAttrs' (
     version: rootfs: lib.nameValuePair "rootfs-${version}" rootfs

@@ -30,5 +30,12 @@ kernelNoMods.override {
     INPUT_UINPUT = yes;
     KERNEL_LZO = no;
     KERNEL_GZIP = yes;
+
+    NLS_CODEPAGE_437 = lib.mkForce yes;
+    NLS_ISO8859_1 = lib.mkForce yes;
+
+    # rM kernels don't have this :(
+    TMPFS_XATTR = lib.mkForce no;
+    TMPFS_POSIX_ACL = lib.mkForce no;
   };
 }
