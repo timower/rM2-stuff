@@ -16,7 +16,7 @@
 
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
     in
-    rec {
+    {
       packages = forAllSystems (
         system:
         let
@@ -44,8 +44,6 @@
           };
 
           inherit nix-installer;
-          remarkable-build = pkgs.callPackage ./nix/pkgs/remarkable-build.nix {
-            inherit nix-installer;
           };
         }
         // rm-emu-packages
@@ -68,33 +66,7 @@
         }
       );
 
-      lib.remarkableSystem =
-        {
-          modules,
-          buildSystem ? "x86_64-linux",
-        }:
-        let
-          rm2StuffPkgs = packages."${buildSystem}";
-
-          baseModules = import ./nix/modules/module-list.nix;
-
-          inputsModule =
-            { ... }:
-            {
-              nixpkgs.buildPlatform = buildSystem;
-              _module.args = {
-                rm2-stuff = rm2StuffPkgs;
-                nixpkgs = nixpkgs;
-              };
             };
-        in
-        nixpkgs.lib.evalModules {
-          modules = baseModules ++ [ inputsModule ] ++ modules;
-          class = "remarkable";
-        };
-
-      remarkableConfigurations.example = lib.remarkableSystem {
-        modules = [ ./nix/modules/examples/simple.nix ];
       };
 
     };
