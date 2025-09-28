@@ -44,7 +44,6 @@
           };
 
           inherit nix-installer;
-          };
         }
         // rm-emu-packages
       );
@@ -66,7 +65,15 @@
         }
       );
 
+      nixosConfigurations.rm = nixpkgs.lib.nixosSystem {
+        modules = [
+          ./nix/configuration.nix
+          {
+            _module.args = {
+              rm2-stuff = self.packages."x86_64-linux";
             };
+          }
+        ];
       };
 
     };
