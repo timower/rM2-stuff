@@ -22,7 +22,7 @@ Installing
 
 To install nixos, build the `config.system.build.image`:
 ```bash
-nix build .#nixosConfigurations.rm.config.system.build.image
+nix build .#nixosConfigurations.example.config.system.build.image
 ```
 This will put a tarball in `result/tarball/rm-nixos.tar.xz`, which can be copied
 over and extracted on the remarkable 2:
@@ -57,7 +57,7 @@ Virtual Machine
 
 A QEMU based vm is available at `config.system.build.vm`:
 ```bash
-nix build .#nixosConfigurations.rm.config.system.build.vm
+nix build .#nixosConfigurations.example.config.system.build.vm
 ./result/bin/run_vm
 # Wait for boot, login as root
 > nixos/launch
@@ -70,8 +70,8 @@ TODO
 
  - [x] Test wpa_supplicant conf copy.
  - [x] Test `nixos-rebuild` from host.
- - [ ] Split `./configuration.nix` into separate modules.
- - [ ] Make vm that starts rm2-emu automatically.
- - [ ] Re-create wrapWithPreload.
+ - [x] Split `./configuration.nix` into separate modules.
  - [ ] Create xochitl chroot.
+ - [ ] Make vm that starts rm2-emu automatically.
+ - [ ] Re-create wrapWithPreload, rm2-stuff program modules.
  - [ ] Write rocket launcher systemd unit.

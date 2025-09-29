@@ -65,14 +65,19 @@
         }
       );
 
-      nixosConfigurations.rm = nixpkgs.lib.nixosSystem {
+      nixosModules.default =
+        { ... }:
+        {
+          imports = [ ./nix/modules/remarkable.nix ];
+          _module.args = {
+            rm2-stuff = self.packages."x86_64-linux";
+          };
+        };
+
+      nixosConfigurations.example = nixpkgs.lib.nixosSystem {
         modules = [
-          ./nix/configuration.nix
-          {
-            _module.args = {
-              rm2-stuff = self.packages."x86_64-linux";
-            };
-          }
+          self.nixosModules.default
+          ./nix/example.nix
         ];
       };
 
