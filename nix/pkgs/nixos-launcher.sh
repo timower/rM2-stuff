@@ -30,7 +30,7 @@ Description=Nixos rm2fb server
 SurviveFinalKillSignal=yes
 IgnoreOnIsolate=yes
 DefaultDependencies=no
-After=basic.target
+After=basic.target rm2fb.service
 Conflicts=reboot.target kexec.target poweroff.target halt.target rescue.target emergency.target rm2fb.service rm2fb.socket launcher.service
 Before=shutdown.target rescue.target emergency.target
 

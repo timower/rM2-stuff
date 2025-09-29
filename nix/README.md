@@ -71,7 +71,7 @@ TODO
  - [x] Test wpa_supplicant conf copy.
  - [x] Test `nixos-rebuild` from host.
  - [x] Split `./configuration.nix` into separate modules.
- - [ ] Create xochitl chroot.
+ - [x] Create xochitl chroot.
  - [ ] Make vm that starts rm2-emu automatically.
  - [ ] Re-create wrapWithPreload, rm2-stuff program modules.
  - [ ] Write rocket launcher systemd unit.

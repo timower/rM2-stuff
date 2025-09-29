@@ -10,6 +10,7 @@
     gdb
     strace
     rm2-stuff.dev-cross
+    (pkgs.callPackage ./pkgs/xochitlEnv.nix { inherit rm2-stuff; })
   ];
 
   users.mutableUsers = false;
@@ -22,7 +23,8 @@
       "input"
     ];
 
-    password = "rM";
+    # password = "rM";
+    hashedPassword = "$2b$05$nBj.3OinubU4iNP8aZ6tOOln8gJ68fjWPmCR1jNGzylVY5gHYOkUO";
   };
   security.sudo.wheelNeedsPassword = false;
 
