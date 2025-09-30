@@ -139,6 +139,11 @@ stdenv.mkDerivation {
     "-B."
   ];
 
+  prePatch = ''
+    substituteInPlace apps/tilem/Dialog.cpp \
+      --replace-fail 'wget' ${lib.getExe wget}
+  '';
+
   outputs = [ "out" ] ++ builtins.map getCompomentOut components;
   installPhase = ''
     runHook preInstall
@@ -153,6 +158,5 @@ stdenv.mkDerivation {
   '';
 
   doCheck = !isCross;
-  nativeCheckInputs = [ wget ];
-
+  # nativeCheckInputs = [ wget ];
 }

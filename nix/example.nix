@@ -9,9 +9,12 @@
     htop
     gdb
     strace
-    rm2-stuff.dev-cross
-    (pkgs.callPackage ./pkgs/xochitlEnv.nix { inherit rm2-stuff; })
   ];
+
+  programs.yaft.enable = true;
+  programs.tilem.enable = true;
+  programs.rocket.enable = true;
+  programs.xochitl.enable = true;
 
   users.mutableUsers = false;
   users.users."rM" = {
@@ -31,20 +34,20 @@
   # Add sudo users as trusted, so nixos-rebuild works.
   nix.settings.trusted-users = [ "@wheel" ];
 
-  systemd.services."yaft-boot" = {
-    description = "Yaft terminal on boot";
-    serviceConfig = {
-      Type = "simple";
-      ExecStartPre = "-${lib.getExe' pkgs.procps "pkill"} yaft_reader";
-      ExecStart = lib.getExe' rm2-stuff.dev-cross "yaft";
-    };
+  # systemd.services."yaft-boot" = {
+  #   description = "Yaft terminal on boot";
+  #   serviceConfig = {
+  #     Type = "simple";
+  #     ExecStartPre = "-${lib.getExe' pkgs.procps "pkill"} yaft_reader";
+  #     ExecStart = lib.getExe' rm2-stuff.dev-cross.yaft "yaft";
+  #   };
 
-    environment = {
-      LD_PRELOAD = "${rm2-stuff.dev-cross}/lib/librm2fb_client.so";
-    };
+  #   environment = {
+  #     LD_PRELOAD = "${rm2-stuff.dev-cross.rm2display}/lib/librm2fb_client.so";
+  #   };
 
-    wantedBy = [ "multi-user.target" ];
-  };
+  #   wantedBy = [ "multi-user.target" ];
+  # };
 
   services.openssh.enable = true;
   networking.wireless.enable = true;

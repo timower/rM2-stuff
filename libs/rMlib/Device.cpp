@@ -111,7 +111,7 @@ listDirectory(std::string_view path, bool onlyFiles) {
 
   std::vector<std::string> result;
   for (auto* dirent = readdir(dir); dirent != nullptr; dirent = readdir(dir)) {
-    if (onlyFiles && dirent->d_type != DT_REG) {
+    if (onlyFiles && (dirent->d_type != DT_REG && dirent->d_type != DT_LNK)) {
       continue;
     }
     result.push_back(std::string(path) + "/" + std::string(dirent->d_name));

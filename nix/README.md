@@ -72,6 +72,6 @@ TODO
  - [x] Test `nixos-rebuild` from host.
  - [x] Split `./configuration.nix` into separate modules.
  - [x] Create xochitl chroot.
+ - [x] Re-create wrapWithPreload, rm2-stuff program modules.
+ - [x] Write rocket launcher systemd unit.
  - [ ] Make vm that starts rm2-emu automatically.
- - [ ] Re-create wrapWithPreload, rm2-stuff program modules.
- - [ ] Write rocket launcher systemd unit.

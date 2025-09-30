@@ -6,6 +6,8 @@
     ./security-wrappers
     ./tarball.nix
     ./launch.nix
+    ./rm2-stuff.nix
+    ./xochitl.nix
   ];
 
   fileSystems."/" = {
