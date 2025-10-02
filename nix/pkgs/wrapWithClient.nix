@@ -1,7 +1,6 @@
 {
   symlinkJoin,
   makeWrapper,
-  rm2-stuff,
   ...
 }:
 package:
@@ -14,7 +13,7 @@ symlinkJoin {
   postBuild = ''
     for prog in  $out/bin/*; do
       wrapProgram $prog \
-        --set LD_PRELOAD ${rm2-stuff.rm2display}/lib/librm2fb_client.so
+        --set LD_PRELOAD /run/current-system/sw/lib/librm2fb_client.so
     done
   '';
 }

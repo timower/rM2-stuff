@@ -8,6 +8,7 @@
     ./launch.nix
     ./rm2-stuff.nix
     ./xochitl.nix
+    ./koreader.nix
   ];
 
   fileSystems."/" = {

@@ -8,7 +8,7 @@
 let
   # TODO: use nixpkgs overlay
   rm2-pkgs = rm2-stuff.dev-cross;
-  mkWrapper = pkgs.callPackage ../pkgs/wrapWithClient.nix { rm2-stuff = rm2-pkgs; };
+  mkWrapper = pkgs.callPackage ../pkgs/wrapWithClient.nix { };
 
   tilem = mkWrapper rm2-pkgs.tilem;
   yaft = mkWrapper rm2-pkgs.yaft;
@@ -25,6 +25,12 @@ in
       };
       rocket = {
         enable = lib.mkEnableOption "Enable Rocket Launcher";
+      };
+    };
+
+    hardware.rm2display = {
+      enable = lib.mkEnableOption "Enable rm2fb display wrapper" // {
+        default = true;
       };
     };
   };
@@ -71,6 +77,10 @@ in
 
         wantedBy = [ "multi-user.target" ];
       };
+    })
+
+    (lib.mkIf config.hardware.rm2display.enable {
+      environment.systemPackages = [ rm2-pkgs.rm2display ];
     })
   ];
 }

@@ -11,10 +11,13 @@
     strace
   ];
 
+  hardware.rm2display.enable = true;
+
   programs.yaft.enable = true;
   programs.tilem.enable = true;
   programs.rocket.enable = true;
   programs.xochitl.enable = true;
+  programs.koreader.enable = true;
 
   users.mutableUsers = false;
   users.users."rM" = {

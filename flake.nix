@@ -43,6 +43,8 @@
             toolchain_root = "${rm2-toolchain}";
           };
 
+          koreader = pkgsArmv7.callPackage ./nix/pkgs/koreader.nix { };
+
           inherit nix-installer;
         }
         // rm-emu-packages

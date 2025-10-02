@@ -56,7 +56,7 @@ writeShellApplication {
     # Start xochitl
     exec chroot $root /usr/bin/env -i \
       PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin \
-      LD_PRELOAD=${rm2-stuff.dev-rm2-toolchain.rm2display}/lib/librm2fb_client.so \
+      LD_PRELOAD=/run/current-system/sw/lib/librm2fb_client.so \
       /usr/bin/xochitl
   '';
 }
