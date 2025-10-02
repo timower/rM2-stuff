@@ -7,6 +7,10 @@ nixosRoot="$(dirname "$0")"
 # Copy wifi networks config
 cp ~/.config/remarkable/wifi_networks.conf "$nixosRoot/etc/wpa_supplicant.conf"
 
+# Copy firmware, required for resume after suspend.
+mkdir -p "$nixosRoot/lib/firmware"
+cp -ar /lib/firmware/* "$nixosRoot/lib/firmware"
+
 # Bind mount /nix so binaries from the nix store work.
 mkdir -p /nix
 mount -o bind,ro $nixosRoot/nix /nix

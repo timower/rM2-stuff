@@ -9,6 +9,7 @@
     htop
     gdb
     strace
+    evtest
   ];
 
   hardware.rm2display.enable = true;

@@ -11,7 +11,6 @@ endif()
 
 find_package(PkgConfig)
 pkg_check_modules(LIBEVDEV libevdev REQUIRED)
-pkg_check_modules(SYSTEMD libsystemd REQUIRED)
 
 # Library used for the (socket) testing tool
 add_library(
@@ -34,21 +33,14 @@ target_include_directories(
 target_link_libraries(rm2fb_lib PUBLIC linux::mxcfb rt dl unistdpp)
 
 add_library(rm2fb_server SHARED ServerLib.cpp Server.cpp ImageHook.cpp)
-target_link_libraries(rm2fb_server PRIVATE rm2fb_lib ${SYSTEMD_LIBRARIES}
+target_link_libraries(rm2fb_server PRIVATE rm2fb_lib Systemd::Lib
                                            Evdev::Dynamic)
-target_include_directories(rm2fb_server PRIVATE ${SYSTEMD_INCLUDE_DIRS})
 
 add_executable(rm2fb_server_exe ServerExe.cpp Server.cpp ImageHook.cpp)
 set_property(TARGET rm2fb_server_exe PROPERTY OUTPUT_NAME rm2fb_server)
 
-target_link_libraries(
-  rm2fb_server_exe
-  PRIVATE rm2fb_lib ${SYSTEMD_LIBRARIES}
-          # Frida::Gum
-          pthread)
-
+target_link_libraries(rm2fb_server_exe PRIVATE rm2fb_lib Systemd::Lib pthread)
 target_link_libraries(rm2fb_server_exe PRIVATE Evdev::Static)
-target_include_directories(rm2fb_server_exe PRIVATE ${SYSTEMD_INCLUDE_DIRS})
 
 target_compile_definitions(rm2fb_server_exe PRIVATE USE_QSGEPAPER)
 

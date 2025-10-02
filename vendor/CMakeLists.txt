@@ -15,6 +15,7 @@ add_subdirectory(stb)
 
 if("${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
   add_subdirectory(evdev)
+  add_subdirectory(systemd)
 endif()
 
 if(${BUILD_TESTS})

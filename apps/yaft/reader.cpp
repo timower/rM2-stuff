@@ -37,8 +37,11 @@ public:
     std::vector<uint8_t> res;
     res.reserve(size);
 
-    for (std::size_t i = 0; i < size; i++) {
-      auto c = data[i];
+    const auto* end = data + size;
+    const auto* comma = std::find(data, end, ';');
+
+    for (const auto* it = comma == end ? data : comma + 1; it < end; it++) {
+      auto c = *it;
       if (c == '\n') {
         res.push_back('\r');
       }
