@@ -95,7 +95,7 @@ main(int argc, char* argv[], char** envp) {
   if (const auto* addrs = getLibQscepaperAddrs(); addrs != nullptr) {
     return serverMain(argv[0], addrs);
   }
-  std::cerr << "Could not find supported libqscepaper.so, starting xochitl "
+  std::cerr << "Could not find supported libqsgepaper.so, starting xochitl "
                "with preload\n";
 
   const auto* libPath = getLibraryPath();

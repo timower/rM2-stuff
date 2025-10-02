@@ -97,24 +97,23 @@ callocHook(void* (*orig)(size_t, size_t), size_t size, size_t count) {
 ///  * shutdownThreads, just call
 ///
 struct AddressInfo : public AddressInfoBase {
-  SimpleFunction createThreads{};
+  struct Addresses {
+    SimpleFunction createThreads{};
 
-  SimpleFunction update{};
-  SimpleFunction shutdownFn{};
+    SimpleFunction update{};
+    SimpleFunction shutdownFn{};
 
-  bool* globalInit = nullptr;
-  bool* hasShutdown = nullptr;
+    uintptr_t funcEPFramebufferSwtconUpdate;
+    uintptr_t funcUpdate;
+    uintptr_t funcLock;
+    uintptr_t funcUnlock;
 
-  AddressInfo(SimpleFunction createThreads,
-              SimpleFunction update,
-              SimpleFunction shutdownFn,
-              bool* globalInit,
-              bool* hasShutdown)
-    : createThreads(createThreads)
-    , update(update)
-    , shutdownFn(shutdownFn)
-    , globalInit(globalInit)
-    , hasShutdown(hasShutdown) {}
+    bool* globalInit = nullptr;
+    bool* hasShutdown = nullptr;
+  };
+  Addresses addrs;
+
+  AddressInfo(Addresses addrs) : addrs(addrs) {}
 
   //=========================================================================//
   // Server
@@ -143,7 +142,7 @@ struct AddressInfo : public AddressInfoBase {
   }
 
   bool doUpdate(const UpdateParams& params) const final {
-    static auto updateFn = [] {
+    static auto updateFnPtr = [] {
       auto* updateFnPtr =
         dlsym(getQsgepaperHandle(),
               "_ZN19EPFramebufferSwtcon6updateE5QRecti9PixelModei");
@@ -152,10 +151,13 @@ struct AddressInfo : public AddressInfoBase {
         exit(EXIT_FAILURE);
       }
       printf("Update addr: 0x%p\n", updateFnPtr);
-      return SimpleFunction{ (uintptr_t)updateFnPtr - 0x38b58 + 0x3ccdc };
+      return (uintptr_t)updateFnPtr;
+      ;
     }();
-    auto lockFn = SimpleFunction{ updateFn.address - 0x3ccdc + 0x3b6d8 };
-    auto unlockFn = SimpleFunction{ updateFn.address - 0x3ccdc + 0x3ddc0 };
+    const auto base = updateFnPtr - addrs.funcEPFramebufferSwtconUpdate;
+    auto updateFn = SimpleFunction{ base + addrs.funcUpdate };
+    auto lockFn = SimpleFunction{ base + addrs.funcLock };
+    auto unlockFn = SimpleFunction{ base + addrs.funcUnlock };
 
     UpdateParams mappedParams = params;
     mappedParams.waveform = mapNewWaveform(params.waveform);
@@ -186,16 +188,16 @@ struct AddressInfo : public AddressInfoBase {
 
   bool installHooks(UpdateFn* newUpdate) const final {
     puts("Hooking!");
-    sched_yield_hook_var = globalInit;
+    sched_yield_hook_var = addrs.globalInit;
 
-    createThreads.hook((void*)createThreadsHook);
+    addrs.createThreads.hook((void*)createThreadsHook);
 
-    update.hook((void*)newUpdate);
+    addrs.update.hook((void*)newUpdate);
 
-    shutdownFn.hook((void*)shutdownHook);
+    addrs.shutdownFn.hook((void*)shutdownHook);
 
     // TODO: hook usleep instead?
-    *hasShutdown = true;
+    *addrs.hasShutdown = true;
 
     return true;
   }
@@ -236,15 +238,37 @@ struct AddressInfo : public AddressInfoBase {
   }
 };
 
-const AddressInfo version_3_20_info = AddressInfo{
-  SimpleFunction{ 0x73a3c0 }, SimpleFunction{ 0x7919c8 },
-  SimpleFunction{ 0x739c80 }, (bool*)0x11ba2c0,
-  (bool*)0x11b7478,
+const AddressInfo version_3_20_info = AddressInfo::Addresses{
+  .createThreads = SimpleFunction{ 0x73a3c0 },
+  .update = SimpleFunction{ 0x7919c8 },
+  .shutdownFn = SimpleFunction{ 0x739c80 },
+
+  .funcEPFramebufferSwtconUpdate = 0x38b58,
+  .funcUpdate = 0x3ccdc,
+  .funcLock = 0x3b6d8,
+  .funcUnlock = 0x3ddc0,
+
+  .globalInit = (bool*)0x11ba2c0,
+  .hasShutdown = (bool*)0x11b7478,
 };
 
+const AddressInfo version_3_22_info = AddressInfo::Addresses{
+  .createThreads = SimpleFunction{ 0x6d2664 },
+  .update = SimpleFunction{ 0x70c5c8 },
+  .shutdownFn = SimpleFunction{ 0x6d1ddc },
+
+  .funcEPFramebufferSwtconUpdate = 0x38b18,
+  .funcUpdate = 0x3ccb4,
+  .funcLock = 0x3b698,
+  .funcUnlock = 0x3dd98,
+
+  .globalInit = (bool*)0x13f6380,
+  .hasShutdown = (bool*)0x13f20c8,
+};
 } // namespace
 
 const AddressInfoBase* const version_3_20_0 = &version_3_20_info;
+const AddressInfoBase* const version_3_22_0 = &version_3_22_info;
 
 extern "C" {
 
