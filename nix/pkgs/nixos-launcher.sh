@@ -11,6 +11,9 @@ cp ~/.config/remarkable/wifi_networks.conf "$nixosRoot/etc/wpa_supplicant.conf"
 mkdir -p "$nixosRoot/lib/firmware"
 cp -ar /lib/firmware/* "$nixosRoot/lib/firmware"
 
+# Save active partition
+swupdate -g >/run/active-partition
+
 # Bind mount /nix so binaries from the nix store work.
 mkdir -p /nix
 mount -o bind,ro $nixosRoot/nix /nix
@@ -35,7 +38,7 @@ SurviveFinalKillSignal=yes
 IgnoreOnIsolate=yes
 DefaultDependencies=no
 After=basic.target rm2fb.service
-Conflicts=reboot.target kexec.target poweroff.target halt.target rescue.target emergency.target rm2fb.service rm2fb.socket launcher.service
+Conflicts=reboot.target kexec.target poweroff.target halt.target rescue.target emergency.target rm2fb.service rm2fb.socket launcher.service xochitl.service
 Before=shutdown.target rescue.target emergency.target
 
 [Service]

@@ -2,11 +2,10 @@
   lib,
   pkgs,
   config,
-  rm2-stuff,
   ...
 }:
 let
-  pkg = pkgs.callPackage ../pkgs/xochitlEnv.nix { inherit rm2-stuff; };
+  pkg = pkgs.callPackage ../pkgs/xochitlEnv.nix { };
 in
 {
   options.programs.xochitl = {

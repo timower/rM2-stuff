@@ -2,7 +2,6 @@
   writeShellApplication,
   util-linux,
   coreutils,
-  rm2-stuff,
 }:
 writeShellApplication {
   name = "xochitl";
@@ -32,7 +31,8 @@ writeShellApplication {
     mkdir -p $root
 
     # Mount partitions, read only to prevent changes.
-    mount /dev/mmcblk2p2 $root || mount -o ro /dev/mmcblk2p2 $root
+    activePartition=$(cat /run/active-partition)
+    mount "$activePartition" $root || mount -o ro "$activePartition" $root
     mount -o remount,ro $root $root
     mount -o ro /dev/mmcblk2p1 $root/var/lib/uboot
 
