@@ -1,10 +1,25 @@
 {
+  lib,
+
   writeShellApplication,
   util-linux,
   coreutils,
+
+  preloadRm2fb ? false,
+  extraEnv ? { },
 }:
+let
+  envAttr = {
+    PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin";
+    HOME = "/home/root";
+  }
+  // extraEnv
+  // lib.optionalAttrs preloadRm2fb { LD_PRELOAD = "/run/current-system/sw/lib/librm2fb_client.so"; };
+
+  envList = lib.attrsets.mapAttrsToList (name: value: "${name}=${value}") envAttr;
+in
 writeShellApplication {
-  name = "xochitl";
+  name = "xochitl-env";
 
   runtimeInputs = [
     util-linux
@@ -32,8 +47,8 @@ writeShellApplication {
 
     # Mount partitions, read only to prevent changes.
     activePartition=$(cat /run/active-partition)
-    mount "$activePartition" $root || mount -o ro "$activePartition" $root
-    mount -o remount,ro $root $root
+    mount "$activePartition" $root
+    mount -o remount,ro,bind $root
     mount -o ro /dev/mmcblk2p1 $root/var/lib/uboot
 
     # Mount /home rw, to allow document access.
@@ -44,19 +59,16 @@ writeShellApplication {
     mount --rbind /sys $root/sys
     mount --rbind /proc $root/proc
 
-    # /tmp needed for xochitl
-    mount -t tmpfs none $root/tmp
-
     # Mount nix stuff, so the LD_PRELOAD library can be found.
     mount -o bind,ro /nix $root/nix
 
+    # /tmp needed for xochitl, and the rm-sync service
+    # rm.synchronizer: Synchronizer's libraryLock path="/tmp/library-enumeration.lock"
+    mount -o bind /tmp $root/tmp
     # Mount /run for rm2fb.sock and dbus access.
     mount -o bind /run $root/run
 
     # Start xochitl
-    exec chroot $root /usr/bin/env -i \
-      PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin \
-      LD_PRELOAD=/run/current-system/sw/lib/librm2fb_client.so \
-      /usr/bin/xochitl
+    exec chroot $root /usr/bin/env -i ${lib.escapeShellArgs envList} "$@"
   '';
 }

@@ -74,6 +74,7 @@ TODO
  - [x] Create xochitl chroot.
  - [x] Re-create wrapWithPreload, rm2-stuff program modules.
  - [x] Write rocket launcher systemd unit.
- - [ ] Rework launch, allow install.
+ - [x] Rework launch, allow install.
+ - [x] reMarkable document sync.
  - [ ] Usb ethernet.
  - [ ] Make vm that starts rm2-emu automatically.
