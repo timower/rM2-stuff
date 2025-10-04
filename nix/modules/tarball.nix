@@ -18,8 +18,8 @@
 
     contents = [
       {
-        source = config.system.build.toplevel + "/launch";
-        target = "/launch";
+        source = config.system.build.toplevel + "/nixctl";
+        target = "/nixctl";
       }
       {
         source = config.system.build.toplevel + "/init";

@@ -4,16 +4,16 @@ let
 in
 
 {
-
+  # Make sure /nixctl is created in the toplevel derivation.
   system.systemBuilderCommands = ''
-    cp ${launcher} $out/launch
+    cp ${launcher} $out/nixctl
   '';
 
   # Use /sbin/init as a bootloader.
-  # Copy launch, as /nix won't be bind mounted yet.
+  # Copy nixctl, as /nix won't be bind mounted yet.
   system.build.installBootLoader = pkgs.writeScript "install-sbin-init.sh" ''
     #!${pkgs.runtimeShell}
     ${pkgs.coreutils}/bin/ln -fs "$1/init" /sbin/init
-    ${pkgs.coreutils}/bin/cp "$1/launch" /launch
+    ${pkgs.coreutils}/bin/cp "$1/nixctl" /nixctl
   '';
 }
