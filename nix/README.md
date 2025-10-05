@@ -76,5 +76,6 @@ TODO
  - [x] Write rocket launcher systemd unit.
  - [x] Rework launch, allow install.
  - [x] reMarkable document sync.
- - [ ] Usb ethernet.
+ - [x] Fix koreader spamming 'WARN  Polling for input events returned an error:'
  - [ ] Make vm that starts rm2-emu automatically.
+ - [ ] Usb ethernet.
