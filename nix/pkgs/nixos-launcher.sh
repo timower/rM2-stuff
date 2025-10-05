@@ -51,10 +51,10 @@ start_server() {
     sleep 1
   done
 
+  LD_PRELOAD="@rm2fb-client@" "@yaft_reader@" /dev/kmsg &
+
   # The server has started, let systemd know
   systemd-notify --ready
-
-  LD_PRELOAD="@rm2fb-client@" "@yaft_reader@" /dev/kmsg
 
   exit 0
 }
