@@ -12,21 +12,21 @@
 using namespace unistdpp;
 
 namespace {
-constexpr mode_t shm_mode = 0777;
+constexpr mode_t shm_mode = 0666;
 }
 
 Result<SharedFB>
 SharedFB::open(const char* path) {
-  auto fd = unistdpp::shm_open(path, O_RDWR, shm_mode);
+  auto fd = unistdpp::shm_open(path, O_RDWR, 0);
 
   bool clear = false;
-  if (!fd.has_value() && fd.error() == std::errc::no_such_file_or_directory) {
+  if (!fd.has_value() && (fd.error() == std::errc::no_such_file_or_directory ||
+                          fd.error() == std::errc::permission_denied)) {
+    int origMask = umask(0);
     fd = unistdpp::shm_open(path, O_RDWR | O_CREAT, shm_mode);
-    clear = true;
-  }
+    umask(origMask);
 
-  if (!fd.has_value() && fd.error() == std::errc::permission_denied) {
-    fd = unistdpp::shm_open(path, O_RDWR | O_CREAT, shm_mode);
+    clear = true;
   }
 
   if (!fd.has_value()) {

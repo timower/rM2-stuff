@@ -71,6 +71,7 @@ public:
 
   const Canvas& getFbCanvas() const { return framebuffer.canvas; }
   const fb::FrameBuffer& getFramebuffer() const { return framebuffer; }
+  fb::FrameBuffer& getFramebuffer() { return framebuffer; }
 
   void onDeviceUpdate(Callback fn) {
     onDeviceUpdates.emplace_back(std::move(fn));

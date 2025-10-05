@@ -41,7 +41,9 @@ stop(int signal) {
 
 template<typename AppWidget>
 OptError<>
-runApp(AppWidget widget, std::optional<Size> size = {}) {
+runApp(AppWidget widget,
+       std::optional<Size> size = {},
+       bool clearOnExit = false) {
   auto context = TRY(AppContext::makeContext(size));
   details::currentContext = &context;
 
@@ -58,6 +60,10 @@ runApp(AppWidget widget, std::optional<Size> size = {}) {
   std::signal(SIGINT, SIG_DFL);
   std::signal(SIGTERM, SIG_DFL);
   details::currentContext = nullptr;
+
+  if (clearOnExit) {
+    context.getFramebuffer().clear();
+  }
 
   return {};
 }
