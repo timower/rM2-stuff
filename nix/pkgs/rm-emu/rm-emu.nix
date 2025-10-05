@@ -20,6 +20,8 @@
   # Commands to run in vm during build.
   nativeSetupCommands ? null,
   setupCommands ? null,
+
+  commandline ? "console=ttymxc0 rootfstype=ext4 root=/dev/mmcblk2p2 rw rootwait init=/sbin/init",
 }:
 let
   hasSetup = setupCommands != null || nativeSetupCommands != null;
@@ -65,6 +67,9 @@ stdenvNoCC.mkDerivation {
     install -m 0555 ./in_vm $out/bin/in_vm
     install -m 0555 ./wait_ssh $out/bin/wait_ssh
     install -m 0555 ./save_vm $out/bin/save_vm
+
+    substituteInPlace $out/bin/run_vm \
+      --subst-var-by commandline "${commandline}"
 
     export KERNEL_PATH=${kernel}/zImage
     export DTB_PATH=${kernel}/dtbs/imx7d-rm.dtb
