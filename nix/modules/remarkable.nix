@@ -6,6 +6,7 @@
     ./security-wrappers
     ./tarball.nix
     ./launch.nix
+    ./rm2-display.nix
     ./rm2-stuff.nix
     ./xochitl.nix
     ./koreader.nix
@@ -39,9 +40,9 @@
 
   # Auto restart wpa_supplicant as it can fail after suspend.
   systemd.services.wpa_supplicant.serviceConfig.Restart = "on-failure";
-  systemd.services.wpa_supplicant.serviceConfig.RestartSec = "1min";
-  systemd.services.wpa_supplicant.startLimitBurst = 5;
-  systemd.services.wpa_supplicant.startLimitIntervalSec = 600;
+  systemd.services.wpa_supplicant.serviceConfig.RestartSec = "10";
+  # systemd.services.wpa_supplicant.startLimitBurst = 5;
+  # systemd.services.wpa_supplicant.startLimitIntervalSec = 600;
 
   # Use networkd.
   networking.useNetworkd = true;
@@ -59,6 +60,7 @@
   # Kernel and init are managed by xochitl 'host'.
   boot.kernel.enable = false;
   boot.initrd.enable = false;
+  systemd.shutdownRamfs.enable = false;
 
   # Cross compile for armv7l on x86_64.
   nixpkgs.hostPlatform.system = "armv7l-linux";

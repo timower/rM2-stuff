@@ -16,7 +16,13 @@ let
   // extraEnv
   // lib.optionalAttrs preloadRm2fb { LD_PRELOAD = "/run/current-system/sw/lib/librm2fb_client.so"; };
 
-  envList = lib.attrsets.mapAttrsToList (name: value: "${name}=${value}") envAttr;
+  # Generate '${FOO+FOO="$FOO"}' which ensures it's not an error if the variable isn't set.
+  getValue = (
+    name: value: if value == null then "\${${name}+${name}=\"\$${name}\"}" else "${name}=\"${value}\""
+  );
+
+  envList = lib.attrsets.mapAttrsToList getValue envAttr;
+  envStr = lib.concatStringsSep " " envList;
 in
 writeShellApplication {
   name = "xochitl-env";
@@ -36,7 +42,7 @@ writeShellApplication {
     # Adapted from nixos-enter.
     if [ -z "''${UNSHARED:-}" ]; then
       export UNSHARED=1
-      exec unshare --fork --mount -- "$0" "$@"
+      exec unshare --mount -- "$0" "$@"
     else
       mount --make-rprivate /
     fi
@@ -46,9 +52,17 @@ writeShellApplication {
     mkdir -p $root
 
     # Mount partitions, read only to prevent changes.
-    activePartition=$(cat /run/active-partition)
+    if [ -f /run/active-partition ]; then
+      activePartition=$(cat /run/active-partition)
+    else
+      activePartition="/dev/mmcblk2p2"
+    fi
+
+    # Mount active root
     mount "$activePartition" $root
+    mkdir -p $root/nix # On first boot, /nix might not exist.
     mount -o remount,ro,bind $root
+
     mount -o ro /dev/mmcblk2p1 $root/var/lib/uboot
 
     # Mount /home rw, to allow document access.
@@ -69,6 +83,6 @@ writeShellApplication {
     mount -o bind /run $root/run
 
     # Start xochitl
-    exec chroot $root /usr/bin/env -i ${lib.escapeShellArgs envList} "$@"
+    exec chroot $root /usr/bin/env -i ${envStr} "$@"
   '';
 }

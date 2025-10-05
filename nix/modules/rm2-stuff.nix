@@ -27,12 +27,6 @@ in
         enable = lib.mkEnableOption "Enable Rocket Launcher";
       };
     };
-
-    hardware.rm2display = {
-      enable = lib.mkEnableOption "Enable rm2fb display wrapper" // {
-        default = true;
-      };
-    };
   };
 
   config = lib.mkMerge [
@@ -63,12 +57,15 @@ in
     (lib.mkIf config.programs.rocket.enable {
       environment.systemPackages = [ rocket ];
       systemd.services."rocket" = {
-        description = "Rocket launcher on boot";
+        description = "Rocket launcher";
         serviceConfig = {
           Type = "simple";
           # Kill yaft_reader that might still be running from the nixos launch script.
           ExecStartPre = "-${lib.getExe' pkgs.procps "pkill"} yaft_reader";
           ExecStart = lib.getExe' rocket "rocket";
+
+          Restart = "on-failure";
+          RestartSec = "5";
         };
 
         environment = {
@@ -76,11 +73,23 @@ in
         };
 
         wantedBy = [ "multi-user.target" ];
+        aliases = [ "launcher.service" ];
       };
-    })
-
-    (lib.mkIf config.hardware.rm2display.enable {
-      environment.systemPackages = [ rm2-pkgs.rm2display ];
     })
   ];
 }
+
+# systemd.services."yaft-boot" = {
+#   description = "Yaft terminal on boot";
+#   serviceConfig = {
+#     Type = "simple";
+#     ExecStartPre = "-${lib.getExe' pkgs.procps "pkill"} yaft_reader";
+#     ExecStart = lib.getExe' rm2-stuff.dev-cross.yaft "yaft";
+#   };
+
+#   environment = {
+#     LD_PRELOAD = "/run/current-system/sw/lib/librm2fb_client.so";
+#   };
+
+#   wantedBy = [ "multi-user.target" ];
+# };
