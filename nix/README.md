@@ -4,7 +4,7 @@ reMarkable NixOS
 Booting
 -------
 
-The system is launched using a systemd soft-reboot. The `launch` script will
+The system is launched using a systemd soft-reboot. The `nixctl` script will
 mount the `nixos` directory on `/run/nextroot`. This will cause systemd to use
 it as a new root when rebooting. The NixOS stage2 init script at `sbin/init`
 will be started, booting the full NixOS system.
@@ -39,7 +39,7 @@ Now the system can be launched by starting the launch script, make sure to stop
 xochitl / rm2fb first:
 ```bash
 > systemctl stop xochitl rm2fb # Or any other service that uses the screen.
-> ./nixos/launch
+> ./nixos/nixctl launch
 ```
 Now a new rm2fb server will be running, with an instance of `yaft_reader` that
 shows the kernel log, which is useful for debugging.
@@ -60,10 +60,12 @@ A QEMU based vm is available at `config.system.build.vm`:
 nix build .#nixosConfigurations.example.config.system.build.vm
 ./result/bin/run_vm
 # Wait for boot, login as root
-> nixos/launch
+> nixos/nixctl launch
 # Connect using rm-emu in another terminal.
 > systemctl soft-reboot
 ```
+This VM boots into the xochitl system first, to boot into NixOS directly use `config.system.build.vm-fast`.
+
 
 TODO
 ----
