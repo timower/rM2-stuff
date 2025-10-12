@@ -69,11 +69,25 @@
 
       nixosModules.default = ./nix/modules/remarkable.nix;
 
-      nixosConfigurations.example = nixpkgs.lib.nixosSystem {
-        modules = [
-          self.nixosModules.default
-          ./nix/example.nix
-        ];
+      nixosConfigurations = {
+        example = nixpkgs.lib.nixosSystem {
+          modules = [
+            self.nixosModules.default
+            ./nix/example.nix
+          ];
+        };
+
+        darwin = nixpkgs.lib.nixosSystem {
+          modules = [
+            self.nixosModules.default
+            ./nix/example.nix
+            {
+              virtualisation.host.pkgs = nixpkgs.legacyPackages."aarch64-darwin";
+              nixpkgs.buildPlatform = "aarch64-linux";
+            }
+          ];
+
+        };
       };
     };
 }
