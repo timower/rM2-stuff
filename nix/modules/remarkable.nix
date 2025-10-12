@@ -1,4 +1,4 @@
-{ modulesPath, ... }:
+{ modulesPath, lib, ... }:
 {
   imports = [
     "${modulesPath}/profiles/minimal.nix"
@@ -10,6 +10,7 @@
     ./rm2-stuff.nix
     ./xochitl.nix
     ./koreader.nix
+    ./overlay.nix
   ];
 
   fileSystems."/" = {
@@ -62,7 +63,7 @@
   boot.initrd.enable = false;
   systemd.shutdownRamfs.enable = false;
 
-  # Cross compile for armv7l on x86_64.
+  # Cross compile for armv7l on x86_64 by default.
   nixpkgs.hostPlatform.system = "armv7l-linux";
-  nixpkgs.buildPlatform.system = "x86_64-linux";
+  nixpkgs.buildPlatform = lib.mkDefault "x86_64-linux";
 }

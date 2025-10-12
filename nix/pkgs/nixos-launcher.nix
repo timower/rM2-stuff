@@ -1,14 +1,18 @@
-{ replaceVarsWith, rm2-stuff }:
+{
+  lib,
+  replaceVarsWith,
+  rm2-stuff,
+}:
 let
-  rm2Pkgs = rm2-stuff.dev-rm2-toolchain.rm2display;
-  rm2Yaft = rm2-stuff.dev-rm2-toolchain.yaft;
+  rm2-display = rm2-stuff.rm2display;
+  rm2-yaft = rm2-stuff.yaft;
 in
 replaceVarsWith {
   src = ./nixos-launcher.sh;
   replacements = {
-    rm2fb-server = rm2Pkgs + "/bin/rm2fb_server";
-    rm2fb-client = rm2Pkgs + "/lib/librm2fb_client_no_hook.so";
-    yaft_reader = rm2Yaft + "/bin/yaft_reader";
+    rm2fb-server = lib.getExe' rm2-display "rm2fb_server";
+    rm2fb-client = rm2-display + "/lib/librm2fb_client_no_hook.so";
+    yaft_reader = lib.getExe' rm2-yaft "yaft_reader";
   };
 
   isExecutable = true;

@@ -1,7 +1,5 @@
 {
-  lib,
   pkgs,
-  rm2-stuff,
   ...
 }:
 {

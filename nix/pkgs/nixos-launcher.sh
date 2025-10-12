@@ -46,7 +46,7 @@ start_server() {
   mount -o bind,ro /run/nextroot/nix /nix
 
   rm -f /run/rm2fb.sock /dev/shm/swtfb.01
-  @rm2fb-server@ &
+  LD_LIBRARY_PATH=/usr/lib @rm2fb-server@ &
   while ! test -e /run/rm2fb.sock -a -e /dev/shm/swtfb.01; do
     sleep 1
   done
@@ -56,7 +56,7 @@ start_server() {
   # The server has started, let systemd know
   systemd-notify --ready
 
-  exit 0
+  wait
 }
 
 install_services() {

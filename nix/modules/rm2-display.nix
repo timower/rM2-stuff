@@ -2,14 +2,11 @@
   lib,
   pkgs,
   config,
-
-  rm2-stuff,
-
   ...
 }:
 let
-  rm2-pkgs = rm2-stuff.dev-cross;
-  rm2-server-pkg = rm2-stuff.dev-rm2-toolchain.rm2display;
+  rm2-pkgs = pkgs.rm2-stuff;
+  rm2-server-pkg = rm2-pkgs.rm2display;
 
   xochitl-env = pkgs.callPackage ../pkgs/xochitlEnv.nix {
     # No need to add the client for the rm2fb server.
@@ -20,6 +17,8 @@ let
       LISTEN_PID = null;
       LISTEN_FDS = null;
       LISTEN_FDNAMES = null;
+
+      LD_LIBRARY_PATH = "/usr/lib";
     };
   };
 

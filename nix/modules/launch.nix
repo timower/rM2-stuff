@@ -1,6 +1,6 @@
-{ pkgs, rm2-stuff, ... }:
+{ pkgs, ... }:
 let
-  launcher = pkgs.callPackage ../pkgs/nixos-launcher.nix { inherit rm2-stuff; };
+  launcher = pkgs.callPackage ../pkgs/nixos-launcher.nix { };
 in
 
 {

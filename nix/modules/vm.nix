@@ -1,11 +1,20 @@
 {
   lib,
   pkgs,
+  options,
   config,
-  rm2-stuff,
   ...
 }:
 let
+  cfg = config.virtualisation;
+
+  rm-emu =
+    (import ../pkgs/rm-emu/default.nix {
+      inherit lib;
+      pkgs = cfg.host.pkgs;
+      pkgsLinux = pkgs.pkgsBuildBuild;
+    }).rm-emu;
+
   vm-init = pkgs.writeScript "vm-stage-1" ''
     #!${pkgs.runtimeShell}
     export PATH=${
@@ -28,7 +37,7 @@ let
     exec /sbin/init
   '';
 
-  vm-fast = rm2-stuff.rm-emu.override (prev: {
+  vm-fast = rm-emu.override (prev: {
     commandline = "console=ttymxc0 rootfstype=ext4 root=/dev/mmcblk2p4 rw rootwait init=/sbin/vm-init";
     rootfs = prev.rootfs.override {
       extraCommands = ''
@@ -39,7 +48,7 @@ let
     };
   });
 
-  vm = rm2-stuff.rm-emu.override (prev: {
+  vm = rm-emu.override (prev: {
     rootfs = prev.rootfs.override {
       extraCommands = ''
         mkdir -p /mnt/home/root/nixos
@@ -54,9 +63,23 @@ let
 in
 {
   imports = [ ];
-  options = { };
+
+  options = {
+    virtualisation.host.pkgs = lib.mkOption {
+      type = options.nixpkgs.pkgs.type;
+      default = pkgs.pkgsBuildBuild;
+      defaultText = lib.literalExpression "pkgs.pkgsBuildBuild";
+      example = lib.literalExpression ''
+        import pkgs.path { system = "x86_64-darwin"; }
+      '';
+      description = ''
+        Package set to use for the host-specific packages of the VM runner.
+        Changing this to e.g. a Darwin package set allows running NixOS VMs on Darwin.
+      '';
+    };
+  };
 
   config.system.build = {
-    inherit vm vm-fast;
+    inherit vm vm-fast rm-emu;
   };
 }

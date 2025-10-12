@@ -2,12 +2,11 @@
   pkgs,
   lib,
   config,
-  rm2-stuff,
   ...
 }:
 let
   # TODO: use nixpkgs overlay
-  rm2-pkgs = rm2-stuff.dev-cross;
+  rm2-pkgs = pkgs.rm2-stuff;
   mkWrapper = pkgs.callPackage ../pkgs/wrapWithClient.nix { };
 
   tilem = mkWrapper rm2-pkgs.tilem;
