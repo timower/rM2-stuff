@@ -3,7 +3,10 @@ project(rocket)
 add_library(rocket_lib OBJECT App.cpp AppWidgets.cpp Launcher.cpp)
 add_library(rocket::lib ALIAS rocket_lib)
 
-target_link_libraries(rocket_lib PUBLIC rMlib Systemd::Lib)
+target_link_libraries(rocket_lib PUBLIC rMlib)
+if(NOT APPLE)
+  target_link_libraries(rocket_lib PUBLIC Systemd::Lib)
+endif()
 target_include_directories(rocket_lib PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 
 add_executable(${PROJECT_NAME} main.cpp)
