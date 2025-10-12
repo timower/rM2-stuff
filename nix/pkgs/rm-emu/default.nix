@@ -7,6 +7,9 @@ let
   kernel = pkgsLinux.callPackage ./kernel.nix { };
 
   versions = import ./versions.nix { inherit lib; };
+  latestVersion = builtins.head (
+    builtins.attrNames (lib.attrsets.filterAttrs (v: i: i.isLatest) versions)
+  );
 
   extractor = pkgsLinux.callPackage ./extractor.nix { };
 
@@ -51,7 +54,7 @@ in
 {
   rm-emu-kernel = kernel;
   rm-emu-extractor = extractor;
-  rm-emu = allEmus."rm-emu-3.20.0.92";
+  rm-emu = allEmus."rm-emu-${latestVersion}";
 }
 // allEmus
 // allRootFs'

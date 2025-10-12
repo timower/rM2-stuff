@@ -1,5 +1,6 @@
 {
   lib,
+  stdenvNoCC,
   fetchurl,
   runCommand,
 
@@ -10,6 +11,10 @@
   dosfstools,
   e2fsprogs,
 
+  cacert,
+  curl,
+  jq,
+
   extractor,
 
   fw_version,
@@ -18,7 +23,7 @@
   extraCommands ? null,
 }:
 let
-  inherit (fw_info) fileName fileHash;
+  inherit (fw_info) fileName fileHash isLatest;
 
   base_url = "https://updates-download.cloud.remarkable.engineering/build/reMarkable%20Device%20Beta/RM110"; # Default URL for v2 versions
   base_url_v3 = "https://updates-download.cloud.remarkable.engineering/build/reMarkable%20Device/reMarkable2";
@@ -33,10 +38,27 @@ let
     else
       "${base_url}/${fw_version}/${fw_version}_reMarkable2-${fileName}.signed";
 
-  updateArchive = fetchurl {
-    inherit url;
-    sha256 = fileHash;
-  };
+  updateArchive =
+    if isLatest then
+      stdenvNoCC.mkDerivation {
+        name = fileName;
+
+        nativeBuildInputs = [
+          curl
+          jq
+        ];
+        builder = ./fetch-update.sh;
+        SSL_CERT_FILE = "${cacert}/etc/ssl/certs/ca-bundle.crt";
+
+        outputHashAlgo = "sha256";
+        outputHashMode = "flat";
+        outputHash = fileHash;
+      }
+    else
+      fetchurl {
+        inherit url;
+        sha256 = fileHash;
+      };
 
   rootfsImageOld = runCommand "rm-rootfs.ext4" { nativeBuildInputs = [ extractor ]; } ''
     extractor ${updateArchive} $out
