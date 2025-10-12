@@ -338,7 +338,7 @@ serverMain(char* argv0, const AddressInfoBase* addrs) { // NOLINT
         }
 
         // Don't log Stroke updates, unless debug mode is on.
-        if (debugMode || msg.flags != 4) {
+        if (debugMode) {
           std::cerr << "UPDATE " << msg << ": " << res << "\n";
         }
 
