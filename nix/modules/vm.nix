@@ -48,7 +48,7 @@ let
     };
   });
 
-  vm = rm-emu.override (prev: {
+  vm-xochitl = rm-emu.override (prev: {
     rootfs = prev.rootfs.override {
       extraCommands = ''
         mkdir -p /mnt/home/root/nixos
@@ -60,6 +60,31 @@ let
 
     };
   });
+
+  vm = cfg.host.pkgs.writeScript "run-vm" ''
+    #!/bin/sh
+
+    export PATH="${
+      lib.makeBinPath [
+        (cfg.host.pkgs.callPackage ../pkgs/rm2-stuff.nix { }).tools
+        vm-fast
+      ]
+    }:$PATH"
+
+    vmAddr="127.0.0.1 8888"
+
+    waitForEmu() {
+      while ! rm2fb-test $vmAddr screenshot /dev/null; do
+        sleep 5
+      done
+      rm2fb-emu $vmAddr
+    }
+
+    waitForEmu &
+    run_vm -serial mon:stdio
+    wait
+  '';
+
 in
 {
   imports = [ ];
@@ -80,6 +105,11 @@ in
   };
 
   config.system.build = {
-    inherit vm vm-fast rm-emu;
+    inherit
+      vm-xochitl
+      vm-fast
+      rm-emu
+      vm
+      ;
   };
 }

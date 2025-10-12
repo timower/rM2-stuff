@@ -73,8 +73,6 @@ let
     "rocket"
     "tilem"
     "yaft"
-  ]
-  ++ lib.optionals (isCross) [
     "tools"
   ]
   ++ lib.optionals (!isDarwin) [
