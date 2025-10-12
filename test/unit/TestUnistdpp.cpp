@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "TempFiles.h"
+
 // unistdpp
 #include <unistdpp/file.h>
 #include <unistdpp/pipe.h>
@@ -223,13 +225,16 @@ TEST_CASE("TCP Socket", "[unistdpp]") {
 }
 
 TEST_CASE("Unix Socket", "[unistdpp]") {
+  auto tmpPath = TemporaryDirectory();
+
   auto serverSock = unistdpp::socket(AF_UNIX, SOCK_DGRAM, 0);
   REQUIRE(serverSock.has_value());
 
-  constexpr auto test_socket = "/tmp/unistdpp-test.sock";
-  unlink(test_socket);
+  const auto testSocket = tmpPath.dir / "unistdpp-test.sock";
+  unlink(testSocket.c_str());
 
-  REQUIRE(unistdpp::bind(*serverSock, Address::fromUnixPath(test_socket)));
+  REQUIRE(
+    unistdpp::bind(*serverSock, Address::fromUnixPath(testSocket.c_str())));
 
   auto clientSock = unistdpp::socket(AF_UNIX, SOCK_DGRAM, 0);
   REQUIRE(clientSock.has_value());
@@ -238,12 +243,14 @@ TEST_CASE("Unix Socket", "[unistdpp]") {
 #if __linux__
   REQUIRE(unistdpp::bind(*clientSock, Address::fromUnixPath(nullptr)));
 #else
-  unlink("/tmp/client.sock");
+  const auto clientPath = tmpPath.dir / "client.sock";
+  unlink(clientPath.c_str());
   REQUIRE(
-    unistdpp::bind(*clientSock, Address::fromUnixPath("/tmp/client.sock")));
+    unistdpp::bind(*clientSock, Address::fromUnixPath(clientPath.c_str())));
 #endif
 
-  REQUIRE(unistdpp::connect(*clientSock, Address::fromUnixPath(test_socket)));
+  REQUIRE(
+    unistdpp::connect(*clientSock, Address::fromUnixPath(testSocket.c_str())));
 
   const char testMsg[] = "Test";
   REQUIRE(unistdpp::sendto(*clientSock, testMsg, sizeof(testMsg), 0, nullptr));

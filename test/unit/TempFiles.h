@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <optional>
+#include <unistd.h>
 
 class TemporaryDirectory {
 public:
