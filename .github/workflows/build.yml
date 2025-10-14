@@ -17,6 +17,10 @@ jobs:
     - uses: cachix/install-nix-action@v27
       with:
         github_access_token: ${{ secrets.GITHUB_TOKEN }}
+    - uses: cachix/cachix-action@v14
+      with:
+        name: rm2-stuff
+        authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
     - run: nix build
     - run: nix build .#dev-cross
     - run: nix build .#dev-rm2-toolchain
@@ -93,7 +97,7 @@ jobs:
 
     strategy:
       matrix:
-        fw_version: ['2.15.1.1189', '3.3.2.1666', '3.8.2.1965', '3.20.0.92']
+        fw_version: ['3.3.2.1666', '3.20.0.92']
 
     steps:
       - uses: actions/checkout@v4

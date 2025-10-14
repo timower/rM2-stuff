@@ -61,7 +61,7 @@ let
     };
   });
 
-  vm = cfg.host.pkgs.writeScript "run-vm" ''
+  vm = cfg.host.pkgs.writeScriptBin "run-vm" ''
     #!/bin/sh
 
     export PATH="${

@@ -17,10 +17,10 @@ Advantages:
 Disadvantages:
  * NixOS doesn't manage the linux kernel.
 
-Installing
-----------
+Usage
+-----
 
-To install nixos, build the `config.system.build.image`:
+To use nixos, build the `config.system.build.image`:
 ```bash
 nix build .#nixosConfigurations.example.config.system.build.image
 ```
@@ -38,7 +38,9 @@ pollute the home directory.
 Now the system can be launched by starting the launch script, make sure to stop
 xochitl / rm2fb first:
 ```bash
-> systemctl stop xochitl rm2fb # Or any other service that uses the screen.
+# Should technically happen automatically as nixos Conflicts with this,
+# but doesn't hurt:
+> systemctl stop xochitl rm2fb
 > ./nixos/nixctl launch
 ```
 Now a new rm2fb server will be running, with an instance of `yaft_reader` that
@@ -52,19 +54,24 @@ To start NixOS, reboot into it. Each of these commands will do the same:
 
 To exit NixOS, simply reboot again.
 
+Installing
+----------
+
+The `nixctl install` command will install NixOS so that it automatically starts
+when the system is rebooted from xochitl. The `nixos uninstall` command should
+remove all traces from the system partition.
+
 Virtual Machine
 ---------------
 
 A QEMU based vm is available at `config.system.build.vm`:
 ```bash
 nix build .#nixosConfigurations.example.config.system.build.vm
-./result/bin/run_vm
+./result
 # Wait for boot, login as root
-> nixos/nixctl launch
-# Connect using rm-emu in another terminal.
-> systemctl soft-reboot
 ```
-This VM boots into the xochitl system first, to boot into NixOS directly use `config.system.build.vm-fast`.
+This VM boots into NixOS directly. To boot into xochitl first use
+`config.system.build.vm-xochitl`.
 
 
 TODO
@@ -79,5 +86,6 @@ TODO
  - [x] Rework launch, allow install.
  - [x] reMarkable document sync.
  - [x] Fix koreader spamming 'WARN  Polling for input events returned an error:'
- - [ ] Make vm that starts rm2-emu automatically.
+ - [x] Make vm that starts rm2-emu automatically.
+ - [ ] NixOS tests.
  - [ ] Usb ethernet.

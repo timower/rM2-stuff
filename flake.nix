@@ -89,5 +89,14 @@
 
         };
       };
+
+      checks = forAllSystems (
+        system:
+        import ./nix/tests {
+          lib = nixpkgs.lib;
+          pkgs = nixpkgs.legacyPackages."${system}";
+          rm2-stuff = self.packages."${system}".default;
+        }
+      );
     };
 }

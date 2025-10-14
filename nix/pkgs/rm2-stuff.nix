@@ -88,7 +88,10 @@ stdenv.mkDerivation {
   src = builtins.path {
     path = ./../..;
     name = "rm2-stuff-src";
-    filter = path: type: type != "directory" || builtins.baseNameOf path != "nix";
+    filter =
+      path: type:
+      (type != "regular" || builtins.baseNameOf path != "flake.nix")
+      && (type != "directory" || builtins.baseNameOf path != "nix");
   };
 
   buildInputs =
