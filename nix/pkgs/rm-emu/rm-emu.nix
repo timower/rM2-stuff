@@ -18,26 +18,21 @@
   httpPort ? 8080,
 
   # Commands to run in vm during build.
-  nativeSetupCommands ? null,
   setupCommands ? null,
 
   commandline ? "console=ttymxc0 rootfstype=ext4 root=/dev/mmcblk2p2 rw rootwait init=/sbin/init",
 }:
 let
-  hasSetup = setupCommands != null || nativeSetupCommands != null;
+  hasSetup = setupCommands != null;
 
   setupScript = lib.optionalString (hasSetup) ''
     export ROOT_IMAGE=$out/image.qcow2
     oldpath=$PATH
     export PATH=$out/bin:$PATH
 
-    $out/bin/run_vm -daemonize
-    $out/bin/wait_ssh
-    ${lib.optionalString (nativeSetupCommands != null) nativeSetupCommands}
-    ssh -p $SSH_PORT -o StrictHostKeyChecking=no root@localhost <<ENDSSH
-      ${lib.optionalString (setupCommands != null) setupCommands}
-    ENDSSH
-    echo 'quit' | nc -N 127.0.0.1 5555
+    run_vm -daemonize
+    ${setupCommands}
+    save_vm
 
     export BACKING_IMAGE=$out/image.qcow2
     export PATH=$oldpath

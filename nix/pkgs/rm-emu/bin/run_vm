@@ -9,13 +9,19 @@ dtb_path=${DTB_PATH:-/opt/imx7d-rm.dtb}
 ssh_port=${SSH_PORT:-22}
 
 if ! [ -f "$root_path" ] && [ -f "$backing_path" ]; then
-  echo "No image found, creating new one at $root_path"
   mkdir -p $(dirname $root_path)
-  qemu-img create -b "$backing_path" -F qcow2 -f qcow2 "$root_path"
+  if qemu-img snapshot -l $backing_path | grep -q main; then
+    echo "Snapshot in backing image, copying"
+    cp "$backing_path" "$root_path"
+    chmod +w "$root_path"
+  else
+    echo "No image found, creating new one at $root_path"
+    qemu-img create -b "$backing_path" -F qcow2 -f qcow2 "$root_path"
+  fi
 fi
 
 load_state=""
-if qemu-img snapshot -l $root_path | grep main >/dev/null; then
+if qemu-img snapshot -l $root_path | grep -q main; then
   echo "Snapshot found, loading"
   load_state="-loadvm main"
 fi
