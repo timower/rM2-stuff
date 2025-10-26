@@ -12,9 +12,11 @@ Projects
 [![2.15: supported](https://img.shields.io/badge/2.15-supported-brightgreen)](https://support.remarkable.com/s/article/Software-release-2-15-October-2022)
 [![3.3: supported](https://img.shields.io/badge/3.3-supported-brightgreen)](https://support.remarkable.com/s/article/Software-release-3-3)
 [![3.5: supported](https://img.shields.io/badge/3.5-supported-brightgreen)](https://support.remarkable.com/s/article/Software-release-3-5)
-[![3.8: supported](https://img.shields.io/badge/3.8-brightgreen)](https://support.remarkable.com/s/article/Software-release-3-8)
-[![3.20: supported](https://img.shields.io/badge/3.8-brightgreen)](https://support.remarkable.com/s/article/Software-release-3-20)
-[![3.2: supported](https://img.shields.io/badge/3.8-brightgreen)](https://support.remarkable.com/s/article/Software-release-3-22)
+[![3.8: supported](https://img.shields.io/badge/3.8-supported-brightgreen)](https://support.remarkable.com/s/article/Software-release-3-8)
+[![3.20: supported](https://img.shields.io/badge/3.20-supported-brightgreen)](https://support.remarkable.com/s/article/Software-release-3-20)
+[![3.22: supported](https://img.shields.io/badge/3.22-supported-brightgreen)](https://support.remarkable.com/s/article/Software-release-3-22)
+[![3.23: beta](https://img.shields.io/badge/3.23-beta-orange)](https://support.remarkable.com/s/article/Software-release-3-23)
+
 
 Custom implementation for [reMarkable 2 framebuffer](https://github.com/ddvk/remarkable2-framebuffer).
 The differences are:

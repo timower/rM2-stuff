@@ -63,6 +63,7 @@ extern const AddressInfoBase* const version_3_8_2;
 extern const AddressInfoBase* const version_3_20_0;
 extern const AddressInfoBase* const version_3_22_0;
 extern const AddressInfoBase* const version_3_22_4;
+extern const AddressInfoBase* const version_3_23_0;
 
 const AddressInfoBase*
 getAddresses(std::optional<BuildId> id = std::nullopt);
