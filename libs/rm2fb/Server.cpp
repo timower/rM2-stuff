@@ -299,6 +299,7 @@ serverMain(char* argv0, const AddressInfoBase* addrs) { // NOLINT
   std::vector<pollfd> pollfds;
 
   std::cout << "rm2fb-server started!\n";
+  sd_notify(0, "READY=1");
   while (running) {
     pollfds.clear();
     pollfds.reserve(tcpClients.size() + fixedFdNum);
