@@ -24,7 +24,7 @@ jobs:
     - run: nix build
     - run: nix build .#dev-cross
     - run: nix build .#dev-rm2-toolchain
-    - run: nix flake check
+    - run: nix flake check -L --max-jobs 1
 
 
   build:
