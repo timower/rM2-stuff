@@ -87,5 +87,5 @@ TODO
  - [x] reMarkable document sync.
  - [x] Fix koreader spamming 'WARN  Polling for input events returned an error:'
  - [x] Make vm that starts rm2-emu automatically.
- - [ ] NixOS tests.
+ - [x] NixOS tests.
  - [ ] Usb ethernet.

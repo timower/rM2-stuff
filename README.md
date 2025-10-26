@@ -12,7 +12,9 @@ Projects
 [![2.15: supported](https://img.shields.io/badge/2.15-supported-brightgreen)](https://support.remarkable.com/s/article/Software-release-2-15-October-2022)
 [![3.3: supported](https://img.shields.io/badge/3.3-supported-brightgreen)](https://support.remarkable.com/s/article/Software-release-3-3)
 [![3.5: supported](https://img.shields.io/badge/3.5-supported-brightgreen)](https://support.remarkable.com/s/article/Software-release-3-5)
-[![3.8: experimental](https://img.shields.io/badge/3.8-experimental-orange)](https://support.remarkable.com/s/article/Software-release-3-8)
+[![3.8: supported](https://img.shields.io/badge/3.8-brightgreen)](https://support.remarkable.com/s/article/Software-release-3-8)
+[![3.20: supported](https://img.shields.io/badge/3.8-brightgreen)](https://support.remarkable.com/s/article/Software-release-3-20)
+[![3.2: supported](https://img.shields.io/badge/3.8-brightgreen)](https://support.remarkable.com/s/article/Software-release-3-22)
 
 Custom implementation for [reMarkable 2 framebuffer](https://github.com/ddvk/remarkable2-framebuffer).
 The differences are:
@@ -55,6 +57,10 @@ If you already have a ROM file, you can pass it as an argument on the command li
 Library for writing remarkable apps.
 Includes an extensive declarative UI framework based on Flutter.
 
+### [NixOS](nix/)
+
+A [NixOS](https://nixos.org) module that allows soft-rebooting into NixOS. This
+allows to declaratively manage your reMarkable 2 configuration.
 
 ### SWTCON
 
