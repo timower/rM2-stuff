@@ -15,9 +15,9 @@ builtins.mapAttrs (version: info: {
   isLatest = false;
 }) codexUpdateData.remarkable2
 // {
-  "3.22.0.64" = {
+  "3.22.4.2" = {
     isLatest = true;
-    fileName = "remarkable-production-image-3.22.0.64-rm2-public.swu";
-    fileHash = "sha256-NmLn8Ogn1jHJmoRHA4//dxC20shAScpNBhYmd/Gxqoo=";
+    fileName = "remarkable-production-image-3.22.4.2-rm2-public.swu";
+    fileHash = "sha256-5xT3pINi/vorS4AdXxsPrf2KJy/ayWgLBZwQ3eaQMxk=";
   };
 }

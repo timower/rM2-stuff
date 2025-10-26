@@ -252,7 +252,7 @@ const AddressInfo version_3_20_info = AddressInfo::Addresses{
   .hasShutdown = (bool*)0x11b7478,
 };
 
-const AddressInfo version_3_22_info = AddressInfo::Addresses{
+const AddressInfo version_3_22_0_info = AddressInfo::Addresses{
   .createThreads = SimpleFunction{ 0x6d2664 },
   .update = SimpleFunction{ 0x70c5c8 },
   .shutdownFn = SimpleFunction{ 0x6d1ddc },
@@ -265,10 +265,25 @@ const AddressInfo version_3_22_info = AddressInfo::Addresses{
   .globalInit = (bool*)0x13f6380,
   .hasShutdown = (bool*)0x13f20c8,
 };
+
+const AddressInfo version_3_22_4_info = AddressInfo::Addresses{
+  .createThreads = SimpleFunction{ 0x6d219c },
+  .update = SimpleFunction{ 0x70c100 },
+  .shutdownFn = SimpleFunction{ 0x6d1914 },
+
+  .funcEPFramebufferSwtconUpdate = 0x38b18,
+  .funcUpdate = 0x3ccb4,
+  .funcLock = 0x3b698,
+  .funcUnlock = 0x3dd98,
+
+  .globalInit = (bool*)0x13f5380,
+  .hasShutdown = (bool*)0x13f10c8,
+};
 } // namespace
 
 const AddressInfoBase* const version_3_20_0 = &version_3_20_info;
-const AddressInfoBase* const version_3_22_0 = &version_3_22_info;
+const AddressInfoBase* const version_3_22_0 = &version_3_22_0_info;
+const AddressInfoBase* const version_3_22_4 = &version_3_22_4_info;
 
 extern "C" {
 
