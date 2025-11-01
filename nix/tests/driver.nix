@@ -56,12 +56,12 @@ writeShellScript "test-driver" ''
     rm2fb-test $vmAddr pen "$1" "$2"
   }
 
+  in_nixos() {
+    ssh -o StrictHostKeyChecking=no -i ${./id_ed25519} -p 2222 test@localhost "$@"
+  }
+
   # Start the VM
   run_vm -daemonize
-
-  while ! rm2fb-test $vmAddr screenshot /dev/null; do
-    sleep 5
-  done
 
   (
     set -x
