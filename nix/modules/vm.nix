@@ -7,12 +7,13 @@
 }:
 let
   cfg = config.virtualisation;
+  emu-pkg = import ../pkgs/rm-emu {
+    inherit lib;
+    inherit (cfg.host) pkgs;
+    pkgsLinux = pkgs.pkgsBuildBuild;
+  };
 
-  inherit ((import ../pkgs/rm-emu/default.nix {
-      inherit lib;
-      inherit (cfg.host) pkgs;
-      pkgsLinux = pkgs.pkgsBuildBuild;
-    })) rm-emu;
+  inherit (emu-pkg) rm-emu;
 
   vm-init = pkgs.writeScript "vm-stage-1" ''
     #!${pkgs.runtimeShell}
@@ -36,7 +37,7 @@ let
     exec /sbin/init
   '';
 
-  vm-fast = rm-emu.override (prev: {
+  vm-nixos = rm-emu.override (prev: {
     commandline = "console=ttymxc0 rootfstype=ext4 root=/dev/mmcblk2p4 rw rootwait init=/sbin/vm-init";
     rootfs = prev.rootfs.override {
       extraCommands = ''
@@ -66,7 +67,7 @@ let
     export PATH="${
       lib.makeBinPath [
         (cfg.host.pkgs.callPackage ../pkgs/rm2-stuff.nix { }).tools
-        vm-fast
+        vm-nixos
       ]
     }:$PATH"
 
@@ -106,7 +107,7 @@ in
   config.system.build = {
     inherit
       vm-xochitl
-      vm-fast
+      vm-nixos
       rm-emu
       vm
       ;

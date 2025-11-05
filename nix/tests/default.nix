@@ -8,7 +8,7 @@ let
     {
       modules,
       testScript,
-      vmFast ? true,
+      bootNixos ? true,
       golden ? false,
     }@args:
     let
@@ -24,7 +24,7 @@ let
         ];
       };
 
-      vm-fast = system.config.system.build.vm-fast.override {
+      vm-nixos = system.config.system.build.vm-nixos.override {
         setupCommands = ''
           while ! ssh -o StrictHostKeyChecking=no -i ${./id_ed25519} -p 2222 test@localhost true; do
             sleep 1
@@ -40,7 +40,7 @@ let
         '';
       };
 
-      vm = if vmFast then vm-fast else vm-xochitl;
+      vm = if bootNixos then vm-nixos else vm-xochitl;
 
       driver = pkgs.callPackage ./driver.nix {
         inherit vm testScript golden;
@@ -128,7 +128,7 @@ in
       ../modules/remarkable.nix
       ../example.nix
     ];
-    vmFast = false;
+    bootNixos = false;
     testScript = ''
       in_vm nixos/nixctl launch
       sleep 3
