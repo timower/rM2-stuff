@@ -13,15 +13,17 @@ in
   };
 
   config = lib.mkIf config.programs.koreader.enable {
-    environment.systemPackages = [ koreader ];
-    environment.etc."draft/koreader.draft".text = ''
-      name=KOReader
-      desc=An ebook reader application supporting PDF, DjVu, EPUB, FB2 and many more formats
-      call=${lib.getExe koreader}
-      term=:
-      imgFile=koreader
-    '';
-    environment.etc."draft/icons/koreader.png".source = "${koreader}/koreader/icon.png";
+    environment = {
+      systemPackages = [ koreader ];
+      etc."draft/koreader.draft".text = ''
+        name=KOReader
+        desc=An ebook reader application supporting PDF, DjVu, EPUB, FB2 and many more formats
+        call=${lib.getExe koreader}
+        term=:
+        imgFile=koreader
+      '';
+      etc."draft/icons/koreader.png".source = "${koreader}/koreader/icon.png";
+    };
   };
 
 }

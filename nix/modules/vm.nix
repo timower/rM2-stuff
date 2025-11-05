@@ -8,12 +8,11 @@
 let
   cfg = config.virtualisation;
 
-  rm-emu =
-    (import ../pkgs/rm-emu/default.nix {
+  inherit ((import ../pkgs/rm-emu/default.nix {
       inherit lib;
-      pkgs = cfg.host.pkgs;
+      inherit (cfg.host) pkgs;
       pkgsLinux = pkgs.pkgsBuildBuild;
-    }).rm-emu;
+    })) rm-emu;
 
   vm-init = pkgs.writeScript "vm-stage-1" ''
     #!${pkgs.runtimeShell}
@@ -91,7 +90,7 @@ in
 
   options = {
     virtualisation.host.pkgs = lib.mkOption {
-      type = options.nixpkgs.pkgs.type;
+      inherit (options.nixpkgs.pkgs) type;
       default = pkgs.pkgsBuildBuild;
       defaultText = lib.literalExpression "pkgs.pkgsBuildBuild";
       example = lib.literalExpression ''

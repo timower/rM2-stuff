@@ -17,9 +17,8 @@ let
   // lib.optionalAttrs preloadRm2fb { LD_PRELOAD = "/run/current-system/sw/lib/librm2fb_client.so"; };
 
   # Generate '${FOO+FOO="$FOO"}' which ensures it's not an error if the variable isn't set.
-  getValue = (
-    name: value: if value == null then "\${${name}+${name}=\"\$${name}\"}" else "${name}=\"${value}\""
-  );
+  getValue =
+    name: value: if value == null then "\${${name}+${name}=\"\$${name}\"}" else "${name}=\"${value}\"";
 
   envList = lib.attrsets.mapAttrsToList getValue envAttr;
   envStr = lib.concatStringsSep " " envList;

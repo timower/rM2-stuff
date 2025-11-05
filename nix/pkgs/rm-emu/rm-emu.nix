@@ -25,7 +25,7 @@
 let
   hasSetup = setupCommands != null;
 
-  setupScript = lib.optionalString (hasSetup) ''
+  setupScript = lib.optionalString hasSetup ''
     export ROOT_IMAGE=$out/image.qcow2
     oldpath=$PATH
     export PATH=$out/bin:$PATH
@@ -45,7 +45,7 @@ stdenvNoCC.mkDerivation {
   nativeBuildInputs = [
     makeWrapper
   ]
-  ++ lib.optionals (hasSetup) [
+  ++ lib.optionals hasSetup [
     qemu
     openssh
     netcat

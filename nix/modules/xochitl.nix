@@ -42,17 +42,23 @@ in
   };
 
   config = lib.mkIf config.programs.xochitl.enable {
+    environment = {
+      etc."draft/xochitl.draft".text = ''
+        name=xochitl
+        desc=Read documents and take notes
+        call=${lib.getExe xochitl}
+        term=:
+        imgFile=xochitl
+      '';
+      etc."draft/icons/xochitl.png".source = pkgs.fetchurl {
+        url = "https://raw.githubusercontent.com/toltec-dev/toltec/9d15d2ddea4c58fc93e38f9ca0aed4d4afc5f9dc/package/xochitl/xochitl.png";
+        hash = "sha256-ODuDGAe8VpZzyF9qDRbRC8tIYDQu4MjtTKb8dR9UZ8k=";
+      };
 
-    environment.etc."draft/xochitl.draft".text = ''
-      name=xochitl
-      desc=Read documents and take notes
-      call=${lib.getExe xochitl}
-      term=:
-      imgFile=xochitl
-    '';
-    environment.etc."draft/icons/xochitl.png".source = pkgs.fetchurl {
-      url = "https://raw.githubusercontent.com/toltec-dev/toltec/9d15d2ddea4c58fc93e38f9ca0aed4d4afc5f9dc/package/xochitl/xochitl.png";
-      hash = "sha256-ODuDGAe8VpZzyF9qDRbRC8tIYDQu4MjtTKb8dR9UZ8k=";
+      systemPackages = [
+        xochitl-env
+        xochitl
+      ];
     };
 
     systemd.services.rm-sync = {
@@ -68,11 +74,6 @@ in
         # RestartForceExitStatus=SIGHUP SIGINT SIGTERM SIGPIPE
       };
     };
-
-    environment.systemPackages = [
-      xochitl-env
-      xochitl
-    ];
 
     services.dbus.packages = [ xochitl-dbus ];
   };

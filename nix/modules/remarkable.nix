@@ -39,29 +39,37 @@
     '';
   };
 
-  # Auto restart wpa_supplicant as it can fail after suspend.
-  systemd.services.wpa_supplicant.serviceConfig.Restart = "on-failure";
-  systemd.services.wpa_supplicant.serviceConfig.RestartSec = "10";
-  # systemd.services.wpa_supplicant.startLimitBurst = 5;
-  # systemd.services.wpa_supplicant.startLimitIntervalSec = 600;
+  systemd = {
+    # Auto restart wpa_supplicant as it can fail after suspend.
+    services.wpa_supplicant.serviceConfig.Restart = "on-failure";
+    services.wpa_supplicant.serviceConfig.RestartSec = "10";
+    # services.wpa_supplicant.startLimitBurst = 5;
+    # services.wpa_supplicant.startLimitIntervalSec = 600;
+    shutdownRamfs.enable = false;
+  };
 
-  # Use networkd.
-  networking.useNetworkd = true;
+  networking = {
 
-  # So we can copy xochitl config to /etc/wpa_supplicant.conf
-  networking.wireless.allowAuxiliaryImperativeNetworks = true;
+    # Use networkd.
+    useNetworkd = true;
 
-  # Firwall doesn't work anyway as the kernel doesn't support nft.
-  networking.firewall.enable = false;
+    # So we can copy xochitl config to /etc/wpa_supplicant.conf
+    wireless.allowAuxiliaryImperativeNetworks = true;
 
-  # We soft-reboot into nixos, no bootloader needed.
-  boot.loader.grub.enable = false;
-  boot.bootspec.enable = false;
+    # Firwall doesn't work anyway as the kernel doesn't support nft.
+    firewall.enable = false;
+  };
 
-  # Kernel and init are managed by xochitl 'host'.
-  boot.kernel.enable = false;
-  boot.initrd.enable = false;
-  systemd.shutdownRamfs.enable = false;
+  boot = {
+
+    # We soft-reboot into nixos, no bootloader needed.
+    loader.grub.enable = false;
+    bootspec.enable = false;
+
+    # Kernel and init are managed by xochitl 'host'.
+    kernel.enable = false;
+    initrd.enable = false;
+  };
 
   # Cross compile for armv7l on x86_64 by default.
   nixpkgs.hostPlatform.system = "armv7l-linux";

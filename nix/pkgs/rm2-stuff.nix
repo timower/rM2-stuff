@@ -22,7 +22,7 @@
 let
   isRMToolchain = toolchain_root != null;
   isCross = toolchain_root != null || stdenv.buildPlatform != stdenv.hostPlatform;
-  isDarwin = stdenv.hostPlatform.isDarwin;
+  inherit (stdenv.hostPlatform) isDarwin;
 
   frida_system = if isRMToolchain then "armv7l-linux" else stdenv.hostPlatform.system;
   frida_info =
@@ -47,7 +47,7 @@ let
 
   frida_gum = fetchzip {
     url = "https://github.com/frida/frida/releases/download/16.1.4/frida-gum-devkit-16.1.4-${frida_info.os}-${frida_info.arch}.tar.xz";
-    hash = frida_info.hash;
+    inherit (frida_info) hash;
     stripRoot = false;
   };
   expected = fetchzip {
@@ -67,7 +67,7 @@ let
     dontDisableStatic = true;
   });
 
-  getCompomentOut = (comp: builtins.replaceStrings [ "-" ] [ "_" ] comp);
+  getCompomentOut = comp: builtins.replaceStrings [ "-" ] [ "_" ] comp;
   components = [
     # TODO: "rMlib", fails to copy includes
     "rocket"
@@ -128,7 +128,7 @@ stdenv.mkDerivation {
     "-DFETCHCONTENT_SOURCE_DIR_CATCH2=${catch2}"
     "-DFETCHCONTENT_SOURCE_DIR_UTFCPP=${utfcpp}"
   ]
-  ++ lib.optionals (isRMToolchain) [
+  ++ lib.optionals isRMToolchain [
     "-DCMAKE_TOOLCHAIN_FILE=${./../../cmake/rm-toolchain.cmake}"
   ]
   ++ lib.optionals (!isCross) [

@@ -105,9 +105,40 @@ in
 
   ###### implementation
   config = lib.mkIf config.security.enableWrappersNoCaps {
+    security = {
 
-    # Disable upstream wrappers.
-    security.enableWrappers = lib.mkForce false;
+      # Disable upstream wrappers.
+      enableWrappers = lib.mkForce false;
+
+      wrappers =
+        let
+          mkSetuidRoot = source: {
+            setuid = true;
+            owner = "root";
+            group = "root";
+            inherit source;
+          };
+        in
+        {
+          # These are mount related wrappers that require the +s permission.
+          fusermount = mkSetuidRoot "${lib.getBin pkgs.fuse}/bin/fusermount";
+          fusermount3 = mkSetuidRoot "${lib.getBin pkgs.fuse3}/bin/fusermount3";
+          mount = mkSetuidRoot "${lib.getBin pkgs.util-linux}/bin/mount";
+          umount = mkSetuidRoot "${lib.getBin pkgs.util-linux}/bin/umount";
+        };
+
+      apparmor.includes = lib.mapAttrs' (
+        wrapName: wrap:
+        lib.nameValuePair "nixos/security.wrappers/${wrapName}" ''
+          include "${
+            pkgs.apparmorRulesFromClosure { name = "security.wrappers.${wrapName}"; } [
+              (securityWrapper wrap.source)
+            ]
+          }"
+          mrpx ${wrap.source},
+        ''
+      ) wrappers;
+    };
 
     assertions = lib.mapAttrsToList (name: opts: {
       assertion = opts.setuid || opts.setgid -> opts.capabilities == "";
@@ -117,23 +148,6 @@ in
       '';
     }) wrappers;
 
-    security.wrappers =
-      let
-        mkSetuidRoot = source: {
-          setuid = true;
-          owner = "root";
-          group = "root";
-          inherit source;
-        };
-      in
-      {
-        # These are mount related wrappers that require the +s permission.
-        fusermount = mkSetuidRoot "${lib.getBin pkgs.fuse}/bin/fusermount";
-        fusermount3 = mkSetuidRoot "${lib.getBin pkgs.fuse3}/bin/fusermount3";
-        mount = mkSetuidRoot "${lib.getBin pkgs.util-linux}/bin/mount";
-        umount = mkSetuidRoot "${lib.getBin pkgs.util-linux}/bin/umount";
-      };
-
     # Make sure our wrapperDir exports to the PATH env variable when
     # initializing the shell
     environment.extraInit = ''
@@ -141,28 +155,16 @@ in
       export PATH="${wrapperDir}:$PATH"
     '';
 
-    security.apparmor.includes = lib.mapAttrs' (
-      wrapName: wrap:
-      lib.nameValuePair "nixos/security.wrappers/${wrapName}" ''
-        include "${
-          pkgs.apparmorRulesFromClosure { name = "security.wrappers.${wrapName}"; } [
-            (securityWrapper wrap.source)
-          ]
-        }"
-        mrpx ${wrap.source},
-      ''
-    ) wrappers;
-
     systemd.mounts = [
       {
         where = parentWrapperDir;
         what = "tmpfs";
         type = "tmpfs";
-        options = lib.concatStringsSep "," ([
+        options = lib.concatStringsSep "," [
           "nodev"
           "mode=755"
           "size=${config.security.wrapperDirSize}"
-        ]);
+        ];
       }
     ];
 

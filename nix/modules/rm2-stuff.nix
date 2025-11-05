@@ -30,27 +30,31 @@ in
 
   config = lib.mkMerge [
     (lib.mkIf config.programs.yaft.enable {
-      environment.etc."draft/yaft.draft".text = ''
-        name=yaft
-        desc=Framebuffer terminal
-        call=${lib.getExe' yaft "yaft"}
-        term=:
-        imgFile=yaft
-      '';
-      environment.etc."draft/icons/yaft.png".source = "${yaft}/etc/draft/icons/yaft.png";
-      environment.systemPackages = [ yaft ];
+      environment = {
+        etc."draft/yaft.draft".text = ''
+          name=yaft
+          desc=Framebuffer terminal
+          call=${lib.getExe' yaft "yaft"}
+          term=:
+          imgFile=yaft
+        '';
+        etc."draft/icons/yaft.png".source = "${yaft}/etc/draft/icons/yaft.png";
+        systemPackages = [ yaft ];
+      };
     })
 
     (lib.mkIf config.programs.tilem.enable {
-      environment.etc."draft/tilem.draft".text = ''
-        name=TilEm
-        desc=TI-84+ emulator
-        call=${lib.getExe' tilem "tilem"}
-        term=:
-        imgFile=tilem
-      '';
-      environment.etc."draft/icons/tilem.png".source = "${tilem}/etc/draft/icons/tilem.png";
-      environment.systemPackages = [ tilem ];
+      environment = {
+        etc."draft/tilem.draft".text = ''
+          name=TilEm
+          desc=TI-84+ emulator
+          call=${lib.getExe' tilem "tilem"}
+          term=:
+          imgFile=tilem
+        '';
+        etc."draft/icons/tilem.png".source = "${tilem}/etc/draft/icons/tilem.png";
+        systemPackages = [ tilem ];
+      };
     })
 
     (lib.mkIf config.programs.rocket.enable {

@@ -10,14 +10,21 @@
     evtest
   ];
 
-  services.rm2fb.enable = true;
   hardware.rm2display.enable = true;
+  services = {
+    rm2fb.enable = true;
+    openssh.enable = true;
 
-  programs.yaft.enable = true;
-  programs.tilem.enable = true;
-  programs.rocket.enable = true;
-  programs.xochitl.enable = true;
-  programs.koreader.enable = true;
+    getty.autologinUser = "rM";
+  };
+
+  programs = {
+    yaft.enable = true;
+    tilem.enable = true;
+    rocket.enable = true;
+    xochitl.enable = true;
+    koreader.enable = true;
+  };
 
   users.mutableUsers = false;
   users.users."rM" = {
@@ -32,12 +39,9 @@
     password = "rM";
   };
   security.sudo.wheelNeedsPassword = false;
-  services.getty.autologinUser = "rM";
 
   # Add sudo users as trusted, so nixos-rebuild works.
   nix.settings.trusted-users = [ "@wheel" ];
-
-  services.openssh.enable = true;
   networking.wireless.enable = true;
 
   # Disable the flake registry of nixpkgs to save space
