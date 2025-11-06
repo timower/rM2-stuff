@@ -1,5 +1,6 @@
 {
   inputs = {
+    self.lfs = true;
     nixpkgs.url = "nixpkgs/nixos-unstable";
   };
 
@@ -73,14 +74,14 @@
         example = nixpkgs.lib.nixosSystem {
           modules = [
             self.nixosModules.default
-            ./nix/example.nix
+            ./nix/template/config.nix
           ];
         };
 
         darwin = nixpkgs.lib.nixosSystem {
           modules = [
             self.nixosModules.default
-            ./nix/example.nix
+            ./nix/template/config.nix
             {
               virtualisation.host.pkgs = nixpkgs.legacyPackages."aarch64-darwin";
               nixpkgs.buildPlatform = "aarch64-linux";
@@ -88,6 +89,11 @@
           ];
 
         };
+      };
+
+      templates.default = {
+        path = ./nix/template;
+        description = "reMarkable 2 NixOS config flake";
       };
 
       checks = forAllSystems (
@@ -99,4 +105,5 @@
         }
       );
     };
+
 }

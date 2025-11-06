@@ -62,7 +62,7 @@ in
   tilem = mkTest {
     modules = [
       ../modules/remarkable.nix
-      ../example.nix
+      ../template/config.nix
     ];
     testScript = ''
       wait_for "startup.png"
@@ -76,7 +76,7 @@ in
   yaft = mkTest {
     modules = [
       ../modules/remarkable.nix
-      ../example.nix
+      ../template/config.nix
     ];
     testScript = ''
 
@@ -94,7 +94,7 @@ in
   koreader = mkTest {
     modules = [
       ../modules/remarkable.nix
-      ../example.nix
+      ../template/config.nix
     ];
     testScript = ''
       wait_for "startup.png"
@@ -114,7 +114,7 @@ in
   xochitl = mkTest {
     modules = [
       ../modules/remarkable.nix
-      ../example.nix
+      ../template/config.nix
     ];
     testScript = ''
       wait_for "startup.png"
@@ -126,7 +126,7 @@ in
   installer = mkTest {
     modules = [
       ../modules/remarkable.nix
-      ../example.nix
+      ../template/config.nix
     ];
     bootNixos = false;
     testScript = ''

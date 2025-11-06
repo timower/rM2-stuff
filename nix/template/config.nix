@@ -5,9 +5,6 @@
 {
   environment.systemPackages = with pkgs; [
     htop
-    gdb
-    strace
-    evtest
   ];
 
   hardware.rm2display.enable = true;
@@ -48,5 +45,5 @@
   nixpkgs.flake.setFlakeRegistry = false;
   nixpkgs.flake.setNixPath = false;
 
-  system.stateVersion = "24.11";
+  system.stateVersion = "25.11";
 }
