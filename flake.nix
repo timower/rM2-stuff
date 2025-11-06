@@ -1,8 +1,5 @@
 {
-  inputs = {
-    self.lfs = true;
-    nixpkgs.url = "nixpkgs/nixos-unstable";
-  };
+  inputs.nixpkgs.url = "nixpkgs/nixos-unstable";
 
   outputs =
     { self, nixpkgs }:

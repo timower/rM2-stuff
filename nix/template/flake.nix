@@ -3,8 +3,10 @@
 
   inputs = {
     nixpkgs.url = "nixpkgs/nixos-unstable";
-    rm2-stuff.url = "github:timower/rm2-stuff";
-    rm2-stuff.inputs.nixpkgs.follows = "nixpkgs";
+    rm2-stuff = {
+      url = "git+https://github.com/timower/rM2-stuff.git?lfs=1";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
