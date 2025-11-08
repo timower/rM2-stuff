@@ -314,7 +314,10 @@ InputDeviceBase::getName() const {
 
 void
 InputDeviceBase::grab() const {
-  libevdev_grab(evdev.get(), LIBEVDEV_GRAB);
+  int res = libevdev_grab(evdev.get(), LIBEVDEV_GRAB);
+  if (res < 0) {
+    std::cerr << "Grab failed: " << strerror(-res) << "\n";
+  }
 }
 
 void

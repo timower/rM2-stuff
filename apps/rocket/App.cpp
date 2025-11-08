@@ -193,7 +193,12 @@ App::pause(std::optional<MemoryCanvas> screen) {
 
   auto lockedInfo = runInfo.lock();
 
-  kill(-lockedInfo->pid, SIGSTOP);
+  int res = kill(-lockedInfo->pid, SIGSTOP);
+  if (res != 0) {
+    perror("Failed to send SIGSTOP");
+    return;
+  }
+
   lockedInfo->paused = true;
   savedFb = std::move(screen);
 }

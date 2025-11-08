@@ -215,6 +215,10 @@ LauncherState::show() {
 
   if (auto* current = getCurrentApp(); current != nullptr) {
     current->pause(MemoryCanvas(*fbCanvas));
+    // pausing failed
+    if (!current->isPaused()) {
+      return;
+    }
   }
 
   readApps();
