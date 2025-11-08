@@ -4,7 +4,7 @@
   rm2-stuff,
 }:
 let
-  mkTest =
+  mkTest = lib.makeOverridable (
     {
       modules,
       testScript,
@@ -56,9 +56,10 @@ let
       }
       ''
         ${driver}
-      '';
+      ''
+  );
 in
-{
+rec {
   tilem = mkTest {
     modules = [
       ../modules/remarkable.nix
@@ -73,13 +74,13 @@ in
     '';
   };
 
-  yaft = mkTest {
+  yaft-nouser = mkTest {
     modules = [
       ../modules/remarkable.nix
       ../template/config.nix
+      { programs.rocket.loginUser = lib.mkForce null; }
     ];
     testScript = ''
-
       wait_for "startup.png"
       tap_at 936 1052
       wait_for "yaft.png"
@@ -88,6 +89,18 @@ in
       # sleep 1
       # tap_at 308 1704
       # sleep 1
+    '';
+  };
+
+  yaft-user = mkTest {
+    modules = [
+      ../modules/remarkable.nix
+      ../template/config.nix
+    ];
+    testScript = ''
+      wait_for "startup.png"
+      tap_at 936 1052
+      wait_for "yaft-user.png"
     '';
   };
 
@@ -121,6 +134,14 @@ in
       tap_at 782 1046
       wait_for "xochitl_3.20.png" 120
     '';
+  };
+
+  xochitl-nouser = xochitl.override {
+    modules = [
+      ../modules/remarkable.nix
+      ../template/config.nix
+      { programs.rocket.loginUser = lib.mkForce null; }
+    ];
   };
 
   installer = mkTest {

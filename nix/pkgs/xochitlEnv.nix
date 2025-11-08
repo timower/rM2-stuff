@@ -14,7 +14,9 @@ let
     HOME = "/home/root";
   }
   // extraEnv
-  // lib.optionalAttrs preloadRm2fb { LD_PRELOAD = "/run/current-system/sw/lib/librm2fb_client.so"; };
+  // lib.optionalAttrs preloadRm2fb {
+    LD_PRELOAD = "/run/current-system/sw/lib/librm2fb_client.so";
+  };
 
   # Generate '${FOO+FOO="$FOO"}' which ensures it's not an error if the variable isn't set.
   getValue =
@@ -23,7 +25,7 @@ let
   envList = lib.attrsets.mapAttrsToList getValue envAttr;
   envStr = lib.concatStringsSep " " envList;
 in
-writeShellApplication {
+writeShellApplication rec {
   name = "xochitl-env";
 
   runtimeInputs = [
@@ -32,16 +34,17 @@ writeShellApplication {
   ];
 
   text = ''
+    self="${placeholder "out"}/bin/${name}"
     if [ "$EUID" -ne 0 ]; then
       echo "Not running as root. Re-executing with sudo..."
-      exec sudo "$0" "$@"
+      exec /run/wrappers/bin/sudo "$self" "$@"
     fi
 
     # Unshare the mount namespace, so mounts don't leak and are cleaned up.
     # Adapted from nixos-enter.
     if [ -z "''${UNSHARED:-}" ]; then
       export UNSHARED=1
-      exec unshare --mount -- "$0" "$@"
+      exec unshare --mount -- "$self" "$@"
     else
       mount --make-rprivate /
     fi
@@ -66,6 +69,12 @@ writeShellApplication {
 
     # Mount /home rw, to allow document access.
     mount /dev/mmcblk2p4 $root/home
+    if [ -n "''${SUDO_HOME:-}" ]; then
+      # Run blkid on /dev/mmcblk2p4 as root, otherwise xochitl fails.
+      blkid /dev/mmcblk2p4
+      mount -o remount,ro,bind $root/home
+      mount -o bind "$SUDO_HOME" $root/home/root
+    fi
 
     # Mount special fs
     mount --rbind /dev $root/dev
@@ -82,6 +91,10 @@ writeShellApplication {
     mount -o bind /run $root/run
 
     # Start xochitl
-    exec chroot $root /usr/bin/env -i ${envStr} "$@"
+    if [ -z "''${SUDO_USER:-}" ]; then
+      exec chroot $root /usr/bin/env -i ${envStr} "$@"
+    else
+      exec chroot --userspec="$SUDO_USER" $root /usr/bin/env -i ${envStr} "$@"
+    fi
   '';
 }

@@ -88,4 +88,12 @@ TODO
  - [x] Fix koreader spamming 'WARN  Polling for input events returned an error:'
  - [x] Make vm that starts rm2-emu automatically.
  - [x] NixOS tests.
+
+ - [ ] Correctly start user session for Rocket.
+ - [ ] Make xochitl run as a user?
+
+ - [ ] Minimize size
+  - [ ] Drop nixos tools, don't use `-ng` to lose python dep.
+  - [ ] Build overlayfs kernel module, use instead of perl etc activation.
+
  - [ ] Usb ethernet.

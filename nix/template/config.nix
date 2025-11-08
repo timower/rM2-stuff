@@ -11,16 +11,18 @@
   services = {
     rm2fb.enable = true;
     openssh.enable = true;
-
-    getty.autologinUser = "rM";
   };
 
   programs = {
     yaft.enable = true;
     tilem.enable = true;
-    rocket.enable = true;
     xochitl.enable = true;
     koreader.enable = true;
+
+    rocket = {
+      enable = true;
+      loginUser = "rM";
+    };
   };
 
   users.mutableUsers = false;
@@ -35,7 +37,6 @@
 
     password = "rM";
   };
-  security.sudo.wheelNeedsPassword = false;
 
   # Add sudo users as trusted, so nixos-rebuild works.
   nix.settings.trusted-users = [ "@wheel" ];

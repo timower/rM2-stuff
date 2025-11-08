@@ -5,13 +5,14 @@
   ...
 }:
 let
-  # TODO: use nixpkgs overlay
   rm2-pkgs = pkgs.rm2-stuff;
   mkWrapper = pkgs.callPackage ../pkgs/wrapWithClient.nix { };
 
   tilem = mkWrapper rm2-pkgs.tilem;
   yaft = mkWrapper rm2-pkgs.yaft;
   rocket = mkWrapper rm2-pkgs.rocket;
+
+  rocketUser = config.programs.rocket.loginUser;
 in
 {
   options = {
@@ -22,8 +23,16 @@ in
       tilem = {
         enable = lib.mkEnableOption "Enable TilEm";
       };
+
       rocket = {
         enable = lib.mkEnableOption "Enable Rocket Launcher";
+        loginUser = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = "root";
+          description = ''
+            Username of the account that will be automatically logged in.
+          '';
+        };
       };
     };
   };
@@ -58,26 +67,53 @@ in
     })
 
     (lib.mkIf config.programs.rocket.enable {
+
       environment.systemPackages = [ rocket ];
-      systemd.services."rocket" = {
-        description = "Rocket launcher";
-        serviceConfig = {
-          Type = "simple";
-          # Kill yaft_reader that might still be running from the nixos launch script.
-          ExecStartPre = "-${lib.getExe' pkgs.procps "pkill"} yaft_reader";
-          ExecStart = lib.getExe' rocket "rocket";
+      systemd.services."rocket" = lib.mkMerge [
+        {
+          description = "Rocket launcher";
+          serviceConfig = {
+            Type = "simple";
+            # Kill yaft_reader that might still be running from the nixos launch script.
+            ExecStartPre = "-${lib.getExe' pkgs.procps "pkill"} yaft_reader";
+            ExecStart = lib.getExe' rocket "rocket";
 
-          Restart = "on-failure";
-          RestartSec = "5";
-        };
+            Restart = "on-failure";
+            RestartSec = "5";
+          };
 
-        environment = {
-          HOME = "%h";
-        };
+          wantedBy = [ "multi-user.target" ];
+          aliases = [ "launcher.service" ];
+        }
+        (lib.mkIf (rocketUser == null) {
+          environment = {
+            HOME = "%h";
+          };
+        })
+        (lib.mkIf (rocketUser != null) {
+          serviceConfig = {
+            User = rocketUser;
+            WorkingDirectory = "~";
+            PAMName = "login";
+            UnsetEnvironment = "TERM";
 
-        wantedBy = [ "multi-user.target" ];
-        aliases = [ "launcher.service" ];
-      };
+            # Grab tty1, this will allow us to suspend via polkit.
+            TTYPath = "/dev/tty1";
+            StandardOutput = "journal";
+          };
+
+          # conflicts = [ "getty@tty1.service" ];
+          after = [
+            # "getty@tty1.service"
+            "systemd-user-sessions.service"
+          ];
+        })
+      ];
+    })
+
+    (lib.mkIf (rocketUser != null) {
+      # Enable polkit, so users can suspend.
+      security.polkit.enable = true;
     })
   ];
 }

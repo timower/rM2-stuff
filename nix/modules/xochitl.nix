@@ -12,9 +12,13 @@ let
     name = "xochitl";
     runtimeInputs = [ pkgs.systemd ];
     text = ''
-      systemctl start rm-sync
+      ctlCmd="systemctl"
+      if [ "$EUID" -ne "0" ]; then
+        ctlCmd="systemctl --user"
+      fi
+      $ctlCmd start rm-sync
       ${lib.getExe xochitl-env} /usr/bin/xochitl
-      systemctl stop rm-sync
+      $ctlCmd stop rm-sync
     '';
   };
 
@@ -24,16 +28,41 @@ let
       <!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
         "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
       <busconfig>
-        <policy user="root">
+        <policy context="default">
           <allow own="no.remarkable.sync" />
           <allow send_destination="no.remarkable.sync" />
-        </policy>
-        <policy context="default">
-          <deny send_destination="no.remarkable.sync" />
         </policy>
       </busconfig>
     '';
     destination = "/share/dbus-1/system.d/no.remarkable.sync.conf";
+  };
+
+  wpa-dbus = pkgs.writeTextFile {
+    name = "wpa-dbus-policy";
+    text = ''
+      <!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
+       "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+      <busconfig>
+        <policy context="default">
+          <allow send_destination="fi.w1.wpa_supplicant1"/>
+          <allow send_interface="fi.w1.wpa_supplicant1"/>
+          <allow receive_sender="fi.w1.wpa_supplicant1" receive_type="signal"/>
+        </policy>
+      </busconfig>
+    '';
+    destination = "/share/dbus-1/system.d/wpa-dbus.conf";
+  };
+
+  rm-sync-service = {
+    description = "Helper for the rm-sync service";
+    serviceConfig = {
+
+      # Do NOT make this dbus, systemd will kill the service when it should be
+      # running otherwise.
+      Type = "simple";
+      BusName = "no.remarkable.sync";
+      ExecStart = "${lib.getExe xochitl-env} /usr/bin/rm-sync";
+    };
   };
 in
 {
@@ -42,6 +71,24 @@ in
   };
 
   config = lib.mkIf config.programs.xochitl.enable {
+
+    # We need sudo to start the xochitl-env script as root.
+    # Security wrappers doesn't work with shell scripts.
+    security.sudo = {
+      enable = true;
+      extraRules = [
+        {
+          users = [ "ALL" ];
+          commands = [
+            {
+              command = lib.getExe xochitl-env;
+              options = [ "NOPASSWD" ];
+            }
+          ];
+        }
+      ];
+    };
+
     environment = {
       etc."draft/xochitl.draft".text = ''
         name=xochitl
@@ -61,20 +108,13 @@ in
       ];
     };
 
-    systemd.services.rm-sync = {
-      description = "Helper for the rm-sync service";
-      serviceConfig = {
+    # Add rm-sync as both a user and system service
+    systemd.user.services.rm-sync = rm-sync-service;
+    systemd.services.rm-sync = rm-sync-service;
 
-        # Do NOT make this dbus, systemd will kill the service when it should be
-        # running otherwise.
-        Type = "simple";
-        BusName = "no.remarkable.sync";
-        ExecStart = "${lib.getExe xochitl-env} /usr/bin/rm-sync";
-        # Restart = "on-failure";
-        # RestartForceExitStatus=SIGHUP SIGINT SIGTERM SIGPIPE
-      };
-    };
-
-    services.dbus.packages = [ xochitl-dbus ];
+    services.dbus.packages = [
+      xochitl-dbus
+      wpa-dbus
+    ];
   };
 }
