@@ -11,6 +11,7 @@
     ./xochitl.nix
     ./koreader.nix
     ./overlay.nix
+    ./console.nix
   ];
 
   fileSystems."/" = {
