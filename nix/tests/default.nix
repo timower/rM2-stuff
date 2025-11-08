@@ -26,7 +26,8 @@ let
 
       vm-nixos = system.config.system.build.vm-nixos.override {
         setupCommands = ''
-          while ! ssh -o StrictHostKeyChecking=no -i ${./id_ed25519} -p 2222 test@localhost true; do
+          while ! ssh -o StrictHostKeyChecking=no -i ${./id_ed25519} \
+                      -p 2222 test@localhost test -e /dev/input/event0; do
             sleep 1
           done
         '';
