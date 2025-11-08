@@ -22,7 +22,6 @@
           pkgs = nixpkgs.legacyPackages."${system}";
           pkgsLinux = nixpkgs.legacyPackages."${linuxSystem}";
 
-          pkgsCross = pkgs.pkgsCross.remarkable2;
           pkgsArmv7 = pkgs.pkgsCross.armv7l-hf-multiplatform;
 
           nix-installer = pkgsArmv7.callPackage ./nix/pkgs/nix-installer.nix { };
@@ -36,7 +35,7 @@
           default = pkgs.callPackage ./nix/pkgs/rm2-stuff.nix { };
           rm2-toolchain = pkgs.callPackage ./nix/pkgs/rm2-toolchain.nix { };
 
-          dev-cross = pkgsCross.callPackage ./nix/pkgs/rm2-stuff.nix { };
+          dev-cross = pkgsArmv7.callPackage ./nix/pkgs/rm2-stuff.nix { };
           dev-rm2-toolchain = pkgs.callPackage ./nix/pkgs/rm2-stuff.nix {
             toolchain_root = "${rm2-toolchain}";
           };
