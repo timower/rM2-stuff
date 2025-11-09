@@ -22,7 +22,7 @@ jobs:
         name: rm2-stuff
         authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
         # Skip qcow2 vm images and system tarballs.
-        pushFilter: '(\.qcow2$|tarball-armv7l-unknown-linux-gnueabihf$)'
+        pushFilter: '(qcow2$|tarball-armv7l-unknown-linux-gnueabihf$|-rm-emu-|rm-nix-test|test-driver)'
     - run: nix build
     - run: nix build .#dev-cross
     - run: nix build .#dev-rm2-toolchain
