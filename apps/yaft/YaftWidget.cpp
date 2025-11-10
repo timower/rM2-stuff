@@ -33,7 +33,7 @@ void
 initSignalHandler(AppContext& ctx) {
   globalCtx = &ctx;
 
-  struct sigaction sigact {};
+  struct sigaction sigact{};
   memset(&sigact, 0, sizeof(struct sigaction));
   sigact.sa_handler = sigHandler;
   sigact.sa_flags = SA_RESTART;
@@ -47,7 +47,7 @@ forkAndExec(int* master,
             int lines,
             int cols) {
   pid_t pid = 0;
-  struct winsize ws {};
+  struct winsize ws{};
   ws.ws_row = lines;
   ws.ws_col = cols;
   /* XXX: this variables are UNUSED (man tty_ioctl),

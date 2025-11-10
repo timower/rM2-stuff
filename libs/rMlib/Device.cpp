@@ -131,7 +131,7 @@ isPogoConnected() {
   constexpr auto path = "/tmp/pogo";
 #endif
 
-  return unistdpp::open(path, O_RDWR)
+  return unistdpp::open(path, O_RDONLY)
     .and_then([](unistdpp::FD fd) {
       return fd.readAll<char>().transform([&](char buf) { return buf == '1'; });
     })
