@@ -61,6 +61,17 @@
               libllvm
             ];
           };
+
+          rm2-kernel = pkgs.mkShell {
+            inputsFrom = [ pkgs.linux ];
+            packages = [
+              packages.rm2-toolchain
+              pkgs.libyaml
+            ];
+            shellHook = ''
+              source "${packages.rm2-toolchain}/environment-setup-cortexa7hf-neon-remarkable-linux-gnueabi"
+            '';
+          };
         }
       );
 
