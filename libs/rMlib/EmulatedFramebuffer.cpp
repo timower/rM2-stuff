@@ -76,7 +76,6 @@ makeEmulatedCanvas(Size size) {
 
 void
 updateEmulatedCanvas(const Canvas& canvas, Rect region) {
-  std::cout << "Update: " << region << "\n";
   if (rmlibDisableWindow) {
     return;
   }
@@ -287,7 +286,6 @@ FrameBuffer::close() {
 
 void
 FrameBuffer::doUpdate(Rect region, Waveform waveform, UpdateFlags flags) const {
-  std::cout << getStr(waveform) << " ";
   updateEmulatedCanvas(canvas, region);
 }
 

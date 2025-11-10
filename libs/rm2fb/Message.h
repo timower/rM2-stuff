@@ -33,7 +33,11 @@ operator<<(std::ostream& stream, const UpdateParams& msg) {
                 << std::setw(4) << msg.x1 << ", " << std::setw(4) << msg.y1
                 << "; "
                 << std::setw(4) << msg.x2 << ", " << std::setw(4) << msg.y2
-                << " }, wave: " << msg.waveform << " flags: " << msg.flags
+                << " },"
+                << std::hex
+                << " wave: " << msg.waveform
+                << " flags: " << msg.flags
+                << std::dec
                 << " temp: " << msg.temperatureOverride
                 << " mode: " << msg.extraMode << " }";
   // clang-format on

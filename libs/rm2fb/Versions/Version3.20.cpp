@@ -34,6 +34,8 @@ createThreadsHook(ImageInfo* info) {
   info->zero1 = 0;
   info->zero2 = 0;
   info->data = static_cast<uint16_t*>(fb.mem.get());
+
+  // This seems to be the buffer that gets used when extraMode == 7.
   info->backBuffer = (char*)fb.getGrayBuffer();
   return 0;
 }
@@ -159,8 +161,7 @@ struct AddressInfo : public AddressInfoBase {
     auto lockFn = SimpleFunction{ base + addrs.funcLock };
     auto unlockFn = SimpleFunction{ base + addrs.funcUnlock };
 
-    UpdateParams mappedParams = params;
-    mappedParams.waveform = mapNewWaveform(params.waveform);
+    UpdateParams mappedParams = mapUpdate(params);
 
     lockFn.call<void>();
     updateFn.call<void, const UpdateParams*>(&mappedParams);
@@ -216,25 +217,46 @@ struct AddressInfo : public AddressInfoBase {
   /// key/UI  | 6    | 0     | 6
   /// Shape   | 6    | 0     | 6
   ///
-  static int mapNewWaveform(int waveform) {
-    if ((waveform & UpdateParams::ioctl_waveform_flag) == 0) {
-      return waveform;
+  static UpdateParams mapUpdate(const UpdateParams& update) {
+    UpdateParams res = update;
+    if ((update.waveform & UpdateParams::ioctl_waveform_flag) == 0) {
+      return res;
     }
 
-    waveform &= ~UpdateParams::ioctl_waveform_flag;
-    switch (waveform) {
-      case WAVEFORM_MODE_INIT:
-        return 2;
-      case WAVEFORM_MODE_DU:
-      default:
-        return 1;
-      case WAVEFORM_MODE_GC16:
-        return 2;
-      case WAVEFORM_MODE_GL16:
-        return 3;
-      case WAVEFORM_MODE_A2:
-        return 6;
+    res.waveform &= ~UpdateParams::ioctl_waveform_flag;
+    res.waveform = [&] {
+      switch (res.waveform) {
+        case WAVEFORM_MODE_INIT:
+          return 2;
+        case WAVEFORM_MODE_DU:
+        default:
+          return 1;
+        case WAVEFORM_MODE_GC16:
+          return 2;
+        case WAVEFORM_MODE_GL16:
+          return 3;
+        case WAVEFORM_MODE_A2:
+          return 6;
+      }
+    }();
+
+    // If the 'priority' bit is set.
+    if ((update.flags & 4) != 0) {
+      // Match the 'pen' modes in xochitl.
+      res.flags = 2;
+      // Don't use 7, as that'd use the backBuffer, which is not set.
+      res.extraMode = 6;
+    } else if ((update.flags & 0x1) == 0) {
+      // Not full update, set the default 'extraMode' to 6.
+      res.flags = 0;
+      res.extraMode = 6;
+    } else {
+      // Full update
+      res.flags = 1;
+      res.extraMode = 9;
     }
+
+    return res;
   }
 };
 

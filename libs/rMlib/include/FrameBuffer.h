@@ -10,7 +10,7 @@ namespace rmlib::fb {
 // Waveform ints that match rm2 'actual' updates
 enum class Waveform { DU = 0, GC16 = 1, GC16Fast = 2, A2 = 3 };
 
-enum UpdateFlags { None = 0, FullRefresh = 1, Sync = 2, Priority = 4 };
+enum UpdateFlags { None = 0, FullRefresh = 1, /*Sync = 2,*/ Priority = 4 };
 
 struct FrameBuffer {
   enum Type { rM1, Shim, rM2Stuff }; // NOLINT

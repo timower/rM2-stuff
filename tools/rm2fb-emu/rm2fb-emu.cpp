@@ -48,9 +48,9 @@ struct UpdateMsg {
 Result<UpdateMsg>
 readUpdate(const FD& sock) {
   auto msg = TRY(sock.readAll<UpdateParams>());
-  if ((msg.flags & 4) == 0) {
-    std::cout << "Got msg: " << msg << "\n";
-  }
+  // if ((msg.flags & 4) == 0) {
+  std::cout << "Got msg: " << msg << "\n";
+  //}
 
   rmlib::Rect region = { .topLeft = { msg.x1, msg.y1 },
                          .bottomRight = { msg.x2, msg.y2 } };
