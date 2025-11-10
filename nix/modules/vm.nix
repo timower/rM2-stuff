@@ -3,6 +3,7 @@
   pkgs,
   options,
   config,
+  extendModules,
   ...
 }:
 let
@@ -14,6 +15,11 @@ let
   };
 
   inherit (emu-pkg) rm-emu;
+
+  vm-config =
+    (extendModules {
+      modules = [ { systemd.targets.sleep.enable = false; } ];
+    }).config;
 
   vm-init = pkgs.writeScript "vm-stage-1" ''
     #!${pkgs.runtimeShell}
@@ -42,7 +48,7 @@ let
     rootfs = prev.rootfs.override {
       extraCommands = ''
         mkdir -p /mnt/home
-        tar -C /mnt/home -xJf ${config.system.build.image}/tarball/*.tar.xz
+        tar -C /mnt/home -xJf ${vm-config.system.build.image}/tarball/*.tar.xz
         cp ${vm-init} /mnt/home/sbin/vm-init
       '';
     };
@@ -52,7 +58,7 @@ let
     rootfs = prev.rootfs.override {
       extraCommands = ''
         mkdir -p /mnt/home/root/nixos
-        tar -C /mnt/home/root/nixos -xJf ${config.system.build.image}/tarball/*.tar.xz
+        tar -C /mnt/home/root/nixos -xJf ${vm-config.system.build.image}/tarball/*.tar.xz
 
         # Mount home on startup, makes debugging faster.
         sed -i 's|/dev/unknown|/dev/mmcblk2p4|' /mnt/root/etc/fstab
