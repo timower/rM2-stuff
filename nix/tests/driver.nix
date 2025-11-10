@@ -28,6 +28,15 @@ writeShellScript "test-driver" ''
   vmAddr="127.0.0.1 8888"
   mkdir -p $out/screensots $out/diffs
 
+  in_nixos() {
+    ssh -o StrictHostKeyChecking=no -i ${./id_ed25519} -p 2222 test@localhost "$@"
+  }
+
+  fail() {
+    in_nixos journalctl --no-pager
+    exit 1
+  }
+
   check_screenshot() {
     NAME="$1"
     rm2fb-test $vmAddr screenshot $out/screensots/$NAME
@@ -48,17 +57,14 @@ writeShellScript "test-driver" ''
       fi
       sleep 1
     done
-    ${if golden then "echo NOK" else "exit 1"}
-
+    ${if golden then "echo NOK" else "fail"}
   }
 
   tap_at() {
     rm2fb-test $vmAddr pen "$1" "$2"
   }
 
-  in_nixos() {
-    ssh -o StrictHostKeyChecking=no -i ${./id_ed25519} -p 2222 test@localhost "$@"
-  }
+
 
   # Start the VM
   run_vm -daemonize
