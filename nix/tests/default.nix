@@ -17,6 +17,7 @@ let
           {
             services.openssh.enable = true;
             users.users.test = {
+              extraGroups = [ "systemd-journal" ];
               isNormalUser = true;
               openssh.authorizedKeys.keyFiles = [ ./id_ed25519.pub ];
             };
