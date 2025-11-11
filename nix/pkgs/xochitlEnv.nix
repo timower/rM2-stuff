@@ -44,7 +44,7 @@ writeShellApplication rec {
     # Adapted from nixos-enter.
     if [ -z "''${UNSHARED:-}" ]; then
       export UNSHARED=1
-      exec unshare --mount -- "$self" "$@"
+      exec -a "$1" unshare --mount -- "$self" "$@"
     else
       mount --make-rprivate /
     fi
