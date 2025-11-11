@@ -9,8 +9,14 @@
   libgcc,
 
   coreutils,
-  dbus,
+  writeShellScriptBin,
 }:
+let
+  fake-dbus = writeShellScriptBin "dbus-monitor" ''
+    export PATH="${lib.makeBinPath [ coreutils ]}"
+    sleep infinity
+  '';
+in
 stdenv.mkDerivation {
   pname = "koreader";
   version = "2025.08";
@@ -46,7 +52,7 @@ stdenv.mkDerivation {
       --set PATH ${
         lib.makeBinPath [
           coreutils
-          dbus
+          fake-dbus
         ]
       }
   '';
