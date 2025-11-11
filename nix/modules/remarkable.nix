@@ -47,6 +47,14 @@
     # services.wpa_supplicant.startLimitBurst = 5;
     # services.wpa_supplicant.startLimitIntervalSec = 600;
     shutdownRamfs.enable = false;
+
+    oomd.enable = false;
+    suppressedSystemUnits = [
+      # Kernel module loading.
+      "systemd-modules-load.service"
+      "kmod-static-nodes.service"
+      "modprobe@.service"
+    ];
   };
 
   networking = {
@@ -62,6 +70,7 @@
   };
 
   boot = {
+    bcache.enable = false;
 
     # We soft-reboot into nixos, no bootloader needed.
     loader.grub.enable = false;
@@ -70,6 +79,14 @@
     # Kernel and init are managed by xochitl 'host'.
     kernel.enable = false;
     initrd.enable = false;
+  };
+
+  system = {
+    rebuild.enableNg = false;
+    tools = {
+      nixos-generate-config.enable = false;
+      nixos-option.enable = false;
+    };
   };
 
   # Cross compile for armv7l on x86_64 by default.
