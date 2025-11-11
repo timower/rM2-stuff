@@ -315,12 +315,27 @@ const AddressInfo version_3_23_0_info = AddressInfo::Addresses{
   .globalInit = (bool*)0x12ebd00,
   .hasShutdown = (bool*)0x12e7584,
 };
+
+const AddressInfo version_3_23_0_64_info = AddressInfo::Addresses{
+  .createThreads = SimpleFunction{ 0x717388 },
+  .update = SimpleFunction{ 0x74a118 },
+  .shutdownFn = SimpleFunction{ 0x70fca0 },
+
+  .funcEPFramebufferSwtconUpdate = 0x38b00,
+  .funcUpdate = 0x3ccac,
+  .funcLock = 0x3b690,
+  .funcUnlock = 0x3dd90,
+
+  .globalInit = (bool*)0x130dd00,
+  .hasShutdown = (bool*)0x1309584,
+};
 } // namespace
 
 const AddressInfoBase* const version_3_20_0 = &version_3_20_info;
 const AddressInfoBase* const version_3_22_0 = &version_3_22_0_info;
 const AddressInfoBase* const version_3_22_4 = &version_3_22_4_info;
-const AddressInfoBase* const version_3_23_0 = &version_3_23_0_info;
+const AddressInfoBase* const version_3_23_0_54 = &version_3_23_0_info;
+const AddressInfoBase* const version_3_23_0_64 = &version_3_23_0_64_info;
 
 extern "C" {
 
