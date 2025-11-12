@@ -18,8 +18,8 @@ struct KeyboardParams {
   const Layout& layout;
   const KeyMap& keymap;
 
-  std::chrono::milliseconds repeatDelay = std::chrono::seconds(1);
-  std::chrono::milliseconds repeatTime = std::chrono::milliseconds(100);
+  std::chrono::milliseconds repeatDelay;
+  std::chrono::milliseconds repeatTime;
 };
 
 /// Keyboard widget, displays a virtual keyboard of the given layout.

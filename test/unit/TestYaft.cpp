@@ -99,7 +99,7 @@ TEST_CASE("Keyboard", "[yaft][ui]") {
 
   // Test key feedback when pressing.
   doKey(ctx, kbd, "a", true);
-  ctx.pump(params.repeatDelay + 2 * params.repeatTime + params.repeatTime / 2);
+  ctx.pump(params.repeatDelay + 3 * params.repeatTime);
   REQUIRE_THAT(kbd, ctx.matchesGolden("yaft-keyboard-down.png"));
   doKey(ctx, kbd, "a", false);
   REQUIRE(lastCallback == 1);

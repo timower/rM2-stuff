@@ -116,7 +116,8 @@ getKeyCodeStr(int scancode, bool shift, bool alt, bool ctrl, bool appCursor) {
       buf[1] = 0;
     }
     return buf.data();
-  } if (scancode == 0x3) {
+  }
+  if (scancode == 0x3) {
     buf[0] = char(scancode);
     buf[1] = 0;
     return buf.data();
@@ -163,9 +164,8 @@ KeyboardRenderObject::update(const Keyboard& keyboard) {
 void
 KeyboardRenderObject::doRebuild(rmlib::AppContext& ctx,
                                 const rmlib::BuildContext& /*buildContext*/) {
-  const auto duration = getWidget().params.repeatTime / 10;
-  repeatTimer = ctx.addTimer(
-    duration, [this]() { updateRepeat(); }, duration);
+  const auto duration = getWidget().params.repeatTime;
+  repeatTimer = ctx.addTimer(duration, [this]() { updateRepeat(); }, duration);
 }
 
 rmlib::Size
@@ -545,5 +545,5 @@ KeyboardRenderObject::drawKey(rmlib::Point pos,
   }
 
   state.dirty = false;
-  return {keyRect, fb::Waveform::DU, fb::UpdateFlags::Priority};
+  return { keyRect, fb::Waveform::DU, fb::UpdateFlags::Priority };
 }

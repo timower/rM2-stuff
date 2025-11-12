@@ -19,7 +19,7 @@ public:
     , cmd(cmd)
     , argv(argv) {}
 
-  static YaftState createState() ;
+  static YaftState createState();
 
 private:
   friend class YaftState;
@@ -46,7 +46,9 @@ public:
              const rmlib::BuildContext& buildCtx) const {
     using namespace rmlib;
 
-    const auto& layout = [this]() -> const Layout& {
+    const auto& cfg = getWidget().config;
+
+    const auto& layout = [this, &cfg]() -> const Layout& {
       if (isLandscape) {
         return empty_layout;
       }
@@ -55,15 +57,22 @@ public:
         return hidden_layout;
       }
 
-      return *getWidget().config.layout;
+      return *cfg.layout;
     }();
 
+    const auto repeatRateMs = std::chrono::milliseconds(1000) / cfg.repeatRate;
     return Column(
-      Expanded(Screen(term.get(), isLandscape, getWidget().config.autoRefresh)),
-      Keyboard(
-        term.get(), { layout, *getWidget().config.keymap }, [this](int num) {
-          setState([](auto& self) { self.hidden = !self.hidden; });
-        }));
+      Expanded(Screen(term.get(), isLandscape, cfg.autoRefresh)),
+      Keyboard(term.get(),
+               KeyboardParams{
+                 .layout = layout,
+                 .keymap = *cfg.keymap,
+                 .repeatDelay = std::chrono::milliseconds(cfg.repeatDelay),
+                 .repeatTime = repeatRateMs,
+               },
+               [this](int num) {
+                 setState([](auto& self) { self.hidden = !self.hidden; });
+               }));
   }
 
 private:

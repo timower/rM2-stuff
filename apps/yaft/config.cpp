@@ -22,6 +22,11 @@ orientation = "auto"
 # Do a full refresh after 1024 updates.
 # Set to 0 to disable auto refresh.
 auto-refresh = 1024
+
+# Repeat delay for keyboards.
+repeat-delay = 600
+# Repeat rate in chars per second.
+repeat-rate = 25
 )";
 
 std::filesystem::path
@@ -43,50 +48,87 @@ getConfigPath() {
   return configDir / "config.toml";
 }
 
+void
+addError(std::optional<YaftConfigError>& error, YaftConfigError err) {
+  if (!error.has_value()) {
+    error = err;
+    return;
+  }
+  error->msg += "\r\n" + err.msg;
+}
+
 template<typename Value>
-ErrorOr<Value, YaftConfigError>
+void
+parseValue(std::optional<YaftConfigError>& error,
+           Value& value,
+           toml::table& tbl,
+           std::string_view name) {
+  value = tbl[name].value_or(value);
+  tbl.erase(name);
+}
+
+template<typename Value>
+void
 parseMapping(
-  const toml::table& tbl,
+  std::optional<YaftConfigError>& error,
+  Value& value,
+  toml::table& tbl,
   std::string_view name,
-  Value defaultVal,
   std::initializer_list<std::pair<std::string_view, Value>> mapping) {
+
   auto entry = tbl[name].value<std::string_view>();
   if (!entry.has_value()) {
-    return defaultVal;
+    return;
   }
+  tbl.erase(name);
 
   auto it = std::find_if(mapping.begin(), mapping.end(), [&](const auto& pair) {
     return pair.first == *entry;
   });
 
   if (it == mapping.end()) {
-    return tl::unexpected(YaftConfigError{
-      YaftConfigError::Syntax,
-      "Invalid " + std::string(name) + ": " + std::string(*entry),
-    });
+    addError(
+      error,
+      {
+        YaftConfigError::Syntax,
+        "error: Invalid " + std::string(name) + ": " + std::string(*entry),
+      });
+    return;
   }
 
-  return it->second;
+  value = it->second;
 }
 
-ErrorOr<YaftConfig, YaftConfigError>
-getConfig(const toml::table& tbl) {
+YaftConfigAndError
+getConfig(const toml::table& input) {
+  auto tbl = input;
+
+  std::optional<YaftConfigError> errors;
   YaftConfig cfg;
 
-  cfg.layout = TRY(parseMapping(tbl, "layout", cfg.layout, layouts));
-  cfg.keymap = TRY(parseMapping(tbl, "keymap", cfg.keymap, keymaps));
+  parseMapping(errors, cfg.layout, tbl, "layout", layouts);
+  parseMapping(errors, cfg.keymap, tbl, "keymap", keymaps);
+  parseMapping(errors,
+               cfg.orientation,
+               tbl,
+               "orientation",
+               { { "auto", YaftConfig::Orientation::Auto },
+                 { "portrait", YaftConfig::Orientation::Protrait },
+                 { "landscape", YaftConfig::Orientation::Landscape } });
 
-  cfg.orientation =
-    TRY(parseMapping(tbl,
-                     "orientation",
-                     cfg.orientation,
-                     { { "auto", YaftConfig::Orientation::Auto },
-                       { "portrait", YaftConfig::Orientation::Protrait },
-                       { "landscape", YaftConfig::Orientation::Landscape } }));
+  parseValue(errors, cfg.autoRefresh, tbl, "auto-refresh");
+  parseValue(errors, cfg.repeatDelay, tbl, "repeat-delay");
+  parseValue(errors, cfg.repeatRate, tbl, "repeat-rate");
 
-  cfg.autoRefresh = tbl["auto-refresh"].value_or(cfg.autoRefresh);
+  if (!tbl.empty()) {
+    for (const auto& [key, _] : tbl) {
+      addError(errors,
+               { YaftConfigError::Syntax,
+                 "warning: Unknown key: " + std::string(key) });
+    }
+  }
 
-  return cfg;
+  return { cfg, errors };
 }
 
 } // namespace
@@ -94,26 +136,26 @@ getConfig(const toml::table& tbl) {
 YaftConfig
 YaftConfig::getDefault() {
   auto tbl = toml::parse(default_config);
-  return getConfig(tbl).value();
+  return getConfig(tbl).config;
 }
 
-ErrorOr<YaftConfig, YaftConfigError>
+YaftConfigAndError
 loadConfig() {
   toml::table tbl;
 
   const auto path = getConfigPath();
   if (!std::filesystem::exists(path)) {
-    return tl::unexpected(
-      YaftConfigError{ YaftConfigError::Missing, path.string() });
+    return { YaftConfig::getDefault(),
+             YaftConfigError{ YaftConfigError::Missing, path.string() } };
   }
 
   try {
     tbl = toml::parse_file(getConfigPath().c_str());
   } catch (const toml::parse_error& err) {
-    return tl::unexpected(
-      YaftConfigError{ YaftConfigError::Syntax,
-                       std::to_string(err.source().begin.line) + ": " +
-                         std::string(err.description()) });
+    return { YaftConfig::getDefault(),
+             YaftConfigError{ YaftConfigError::Syntax,
+                              std::to_string(err.source().begin.line) + ": " +
+                                std::string(err.description()) } };
   }
 
   return getConfig(tbl);
@@ -124,36 +166,42 @@ saveDefaultConfig() {
   const auto path = getConfigPath();
   const auto dir = path.parent_path();
 
+  std::error_code ec;
+
   if (!std::filesystem::is_directory(dir)) {
-    std::filesystem::create_directories(dir);
+    std::filesystem::create_directories(dir, ec);
+  }
+
+  if (ec) {
+    return Error::make(ec.message());
   }
 
   std::ofstream ofs(path);
   ofs << default_config;
+
+  if (ofs.fail()) {
+    return Error::make("Error writing config");
+  }
 
   return {};
 }
 
 YaftConfigAndError
 loadConfigOrMakeDefault() {
-  auto cfgOrErr = loadConfig().transform([](auto val) {
-    return YaftConfigAndError{ std::move(val), {} };
-  });
-  if (cfgOrErr.has_value()) {
-    return *cfgOrErr;
+  auto result = loadConfig();
+  if (!result.err.has_value()) {
+    return result;
   }
 
-  auto err = cfgOrErr.error();
+  auto& err = *result.err;
   if (err.type == YaftConfigError::Missing) {
     err.msg = "No config, creating new one\r\n";
     if (const auto optErr = saveDefaultConfig(); !optErr.has_value()) {
       err.msg += optErr.error().msg + "\r\n";
     }
   } else {
-    std::stringstream ss;
-    ss << "Config syntax error: " << err.msg << "\r\n";
-    err.msg = ss.str();
+    err.msg = "Config syntax issues:\r\n" + err.msg;
   }
 
-  return { YaftConfig::getDefault(), std::move(err) };
+  return result;
 }

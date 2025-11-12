@@ -12,16 +12,21 @@ struct YaftConfig {
   enum class Orientation { Auto, Protrait, Landscape };
 
   // Layout for virtual keyboard.
-  const Layout* layout = nullptr;
+  const Layout* layout = layouts.begin()->second;
 
   // Keymap of physical keyboard.
-  const KeyMap* keymap = nullptr;
+  const KeyMap* keymap = keymaps.begin()->second;
 
   Orientation orientation = Orientation::Auto;
 
   // Auto refresh full screen after 1024 updates.
   // Set to 0 to disable.
   int autoRefresh = 0;
+
+  // Key repeat delay in ms
+  int repeatDelay = 600;
+  // Key repeat rate in chars / sec.
+  int repeatRate = 25;
 
   static YaftConfig getDefault();
 };
@@ -38,7 +43,7 @@ struct YaftConfigAndError {
 };
 
 /// Load the config from the `~/.config/yaft/config.toml` location.
-ErrorOr<YaftConfig, YaftConfigError>
+YaftConfigAndError
 loadConfig();
 
 OptError<>
