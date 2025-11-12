@@ -85,6 +85,10 @@ in
         startLimitIntervalSec = 600;
         startLimitBurst = 4;
 
+        # Don't take down the rm2fb server on config changes, as it'd break
+        # any running clients.
+        restartIfChanged = false;
+
         serviceConfig = {
           Type = "simple";
 

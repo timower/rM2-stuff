@@ -84,6 +84,9 @@ in
 
           wantedBy = [ "multi-user.target" ];
           aliases = [ "launcher.service" ];
+
+          # Don't kill the launcher on config changes.
+          restartIfChanged = false;
         }
         (lib.mkIf (rocketUser == null) {
           environment = {
