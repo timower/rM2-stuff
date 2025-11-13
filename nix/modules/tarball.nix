@@ -44,5 +44,14 @@
       ${config.nix.package.out}/bin/nix-env -p /nix/var/nix/profiles/system --set /run/current-system
       rm /nix-path-registration
     fi
+
+    # Unmount any potential left over cgroup v1s
+    for f in /sys/fs/cgroup/*; do
+      echo "Unmounting $f"
+      umount $f || true
+    done
+
+    echo "Unmounting cgroups"
+    umount /sys/fs/cgroup
   '';
 }

@@ -49,7 +49,7 @@
           withGcrypt = false;
           withHomed = false;
           withImportd = false;
-          withIptables = false;
+          # withIptables = false;
           withKmod = false;
           withLibBPF = false;
           withLibidn2 = false;
