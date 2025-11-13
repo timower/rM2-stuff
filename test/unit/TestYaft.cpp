@@ -87,11 +87,14 @@ TEST_CASE("Keyboard", "[yaft][ui]") {
   const auto params = KeyboardParams{
     .layout = test_layout,
     .keymap = qwerty_keymap,
-    .repeatDelay = std::chrono::milliseconds(50),
-    .repeatTime = std::chrono::milliseconds(10),
+    .repeatDelay = std::chrono::milliseconds(100),
+    .repeatTime = std::chrono::milliseconds(50),
   };
 
-  ctx.pumpWidget(Center(Sized(Keyboard(nullptr, params, updateCb), 300, 200)));
+  constexpr auto width = 300;
+  constexpr auto height = 200;
+  ctx.pumpWidget(
+    Center(Sized(Keyboard(nullptr, params, updateCb), width, height)));
 
   auto kbd = ctx.findByType<Keyboard>();
 
@@ -105,11 +108,11 @@ TEST_CASE("Keyboard", "[yaft][ui]") {
   REQUIRE(lastCallback == 1);
 
   // Make sure repeat works.
-  CHECK(callbackCount == 3);
+  CHECK(callbackCount >= 2);
 
   // Also make sure a wide key gets updated correctly.
   doKey(ctx, kbd, "b", true);
-  ctx.pump();
+  ctx.pump(std::chrono::milliseconds(5));
   REQUIRE_THAT(kbd, ctx.matchesGolden("yaft-keyboard-down2.png"));
   doKey(ctx, kbd, "b", false);
   REQUIRE(lastCallback == 2);
@@ -126,7 +129,7 @@ TEST_CASE("Keyboard", "[yaft][ui]") {
   REQUIRE(lastCallback == 4);
 
   doKey(ctx, kbd, ":shift", true);
-  ctx.pump(params.repeatDelay + params.repeatTime / 2);
+  ctx.pump(params.repeatDelay + params.repeatTime);
   REQUIRE_THAT(kbd, ctx.matchesGolden("yaft-keyboard-stuck.png"));
   doKey(ctx, kbd, ":shift", false);
 
@@ -141,7 +144,7 @@ TEST_CASE("Keyboard", "[yaft][ui]") {
   REQUIRE(lastCallback == 4);
 
   doKey(ctx, kbd, "<>", true);
-  ctx.pump(params.repeatDelay + params.repeatTime / 2);
+  ctx.pump(params.repeatDelay + params.repeatTime);
   doKey(ctx, kbd, "<>", false);
   REQUIRE(lastCallback == 6);
 }

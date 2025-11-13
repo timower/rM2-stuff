@@ -103,20 +103,19 @@ stdenv.mkDerivation {
       libevdev-static
     ];
 
-  nativeBuildInputs =
-    lib.optionals (!isCross) [
-      clang
-      ninja
-      ctestCheckHook
-    ]
-    ++ lib.optionals (!isRMToolchain) [
-      pkg-config
-    ]
-    ++ [
-      xxd
-      cmake
-      ncurses
-    ];
+  nativeBuildInputs = [
+    xxd
+    cmake
+    ncurses
+  ]
+  ++ lib.optionals (!isCross) [
+    clang
+    ninja
+    ctestCheckHook
+  ]
+  ++ lib.optionals (!isRMToolchain) [
+    pkg-config
+  ];
 
   dontFixCmake = isRMToolchain;
 
@@ -159,5 +158,4 @@ stdenv.mkDerivation {
   '';
 
   doCheck = !isCross;
-  # nativeCheckInputs = [ wget ];
 }
