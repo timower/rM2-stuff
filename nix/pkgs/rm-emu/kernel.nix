@@ -1,41 +1,60 @@
 {
   lib,
+  pkgs,
   pkgsCross,
 }:
 let
-  kernelNoMods = pkgsCross.armv7l-hf-multiplatform.linux_5_4.overrideAttrs (
-    final: prev: {
-      # Add a device tree with machine name set to 'reMarkable 2.0'
-      preConfigure = ''
-        cp ${./imx7d-rm.dts} arch/arm/boot/dts/imx7d-rm.dts
-        sed -i 's/imx7d-sbc-imx7.dtb/imx7d-sbc-imx7.dtb imx7d-rm.dtb/' arch/arm/boot/dts/Makefile
-      '';
+  config = pkgs.stdenvNoCC.mkDerivation {
+    name = "rm-defconfig";
+    version = "5.4.70_v1.6";
+    src = pkgs.fetchurl {
+      url = "https://raw.githubusercontent.com/reMarkable/linux/d54fe67bf86e918468b936f97a2ec39f4f87a3d9/arch/arm/configs/zero-sugar_defconfig";
+      hash = "sha256-t1L4QscCMO8Zo62fKfaWq95O4rF0we3GRq/EvpxazXw=";
+    };
 
-      # Disable all modules
-      postConfigure = ''
-        sed -i 's/=m/=n/' $buildRoot/.config
-      '';
-    }
-  );
-in
-kernelNoMods.override {
-  defconfig = "imx_v6_v7_defconfig";
+    buildCommand = ''
+      cat $src > $out
 
-  autoModules = false;
+      # Add E1000E so qemu ethernet works.
+      echo 'CONFIG_E1000E=y' >> $out
+      sed -i 's/# CONFIG_ETHERNET/CONFIG_ETHERNET=y/' $out
 
-  # TODO: figure out which setting is needed for docker builds to work.
-  # enableCommonConfig = false;
+      # rM rootfs modules won't match anyway, so disable.
+      sed -i 's/=m/=n/' $out
 
-  structuredExtraConfig = with lib.kernel; {
-    INPUT_UINPUT = yes;
-    KERNEL_LZO = no;
-    KERNEL_GZIP = yes;
+      # Disable some extra firmware set in the defconfig.
+      sed -i 's/CONFIG_EXTRA_FIRMWARE=/#CONFIG_EXTRA_FIRMWARE=/' $out
 
-    NLS_CODEPAGE_437 = lib.mkForce yes;
-    NLS_ISO8859_1 = lib.mkForce yes;
-
-    # rM kernels don't have this :(
-    TMPFS_XATTR = lib.mkForce no;
-    TMPFS_POSIX_ACL = lib.mkForce no;
+      # Add uinput, rM has it as a module.
+      sed -i 's/CONFIG_INPUT_UINPUT=n/CONFIG_INPUT_UINPUT=y/' $out
+    '';
   };
-}
+
+  kernelNoMods = pkgsCross.armv7l-hf-multiplatform.linuxManualConfig rec {
+    version = "5.4.70";
+    src = pkgs.fetchurl {
+      url = "https://cdn.kernel.org/pub/linux/kernel/v5.x/linux-${version}.tar.xz";
+      hash = "sha256-wLPYCFxbojXfOLALdA4FNllwnopcohlXojn2vCLEUAc=";
+    };
+    configfile = config;
+
+    allowImportFromDerivation = true;
+    kernelPatches = [
+      {
+        name = "compile-fix";
+        patch = ./kernel-compile-fix.patch;
+      }
+    ];
+  };
+in
+kernelNoMods.overrideAttrs (
+  final: prev: {
+    # Add a device tree with machine name set to 'reMarkable 2.0'
+    preConfigure = ''
+      cp ${./imx7d-rm.dts} arch/arm/boot/dts/imx7d-rm.dts
+      sed -i 's/imx7d-sbc-imx7.dtb/imx7d-sbc-imx7.dtb imx7d-rm.dtb/' arch/arm/boot/dts/Makefile
+    '';
+
+    nativeBuildInputs = prev.nativeBuildInputs ++ [ pkgs.lzop ];
+  }
+)

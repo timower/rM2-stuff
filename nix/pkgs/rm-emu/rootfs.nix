@@ -132,6 +132,10 @@ vmTools.runInLinuxVM (
       ln -s /dev/null /mnt/root/etc/systemd/system/swupdate.service
       ln -fs /dev/null /mnt/root/etc/systemd/system/update-engine.service
 
+      ln -fs /dev/null /mnt/root/etc/systemd/system/dropbear-usb0.socket
+      ln -fs /dev/null /mnt/root/etc/systemd/system/dropbear-usb1.socket
+      ln -fs /dev/null /mnt/root/etc/systemd/system/dropbear-wlan.socket
+
       ${lib.optionalString needsPatchDhcpcd "sed -i 's/wlan/eth/' /mnt/root/lib/systemd/system/dhcpcd.service"}
 
       # 3.22 stopped shipping dropbear.socket on all interfaces.

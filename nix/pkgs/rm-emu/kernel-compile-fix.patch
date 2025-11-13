@@ -1,0 +1,55 @@
+diff --git i/arch/arm/boot/compressed/head.S w/arch/arm/boot/compressed/head.S
+index 93dffed0a..8f940319e 100644
+--- i/arch/arm/boot/compressed/head.S
++++ w/arch/arm/boot/compressed/head.S
+@@ -140,7 +140,7 @@
+ #endif
+ 		.endm
+ 
+-		.section ".start", #alloc, #execinstr
++		.section ".start", "ax"
+ /*
+  * sort out different calling conventions
+  */
+@@ -975,7 +975,7 @@ proc_types:
+ 		W(b)	__armv3_mpu_cache_on
+ 		W(b)	__armv3_mpu_cache_off
+ 		W(b)	__armv3_mpu_cache_flush
+-		
++
+ 		.word	0x41009400		@ ARM94x
+ 		.word	0xff00ff00
+ 		W(b)	__armv4_mpu_cache_on
+@@ -1189,7 +1189,7 @@ __armv4_mpu_cache_flush:
+ 		mcrne	p15, 0, ip, c7, c5, 0	@ invalidate I cache
+ 		mcr	p15, 0, ip, c7, c10, 4	@ drain WB
+ 		mov	pc, lr
+-		
++
+ __fa526_cache_flush:
+ 		tst	r4, #1
+ 		movne	pc, lr
+diff --git i/arch/arm/boot/compressed/piggy.S w/arch/arm/boot/compressed/piggy.S
+index 0284f84dc..27577644e 100644
+--- i/arch/arm/boot/compressed/piggy.S
++++ w/arch/arm/boot/compressed/piggy.S
+@@ -1,5 +1,5 @@
+ /* SPDX-License-Identifier: GPL-2.0 */
+-	.section .piggydata,#alloc
++	.section .piggydata, "a"
+ 	.globl	input_data
+ input_data:
+ 	.incbin	"arch/arm/boot/compressed/piggy_data"
+diff --git i/arch/arm/mm/proc-v7.S w/arch/arm/mm/proc-v7.S
+index c4e8006a1..48e0ef6f0 100644
+--- i/arch/arm/mm/proc-v7.S
++++ w/arch/arm/mm/proc-v7.S
+@@ -644,7 +644,7 @@ __v7_setup_stack:
+ 	string	cpu_elf_name, "v7"
+ 	.align
+ 
+-	.section ".proc.info.init", #alloc
++	.section ".proc.info.init", "a"
+ 
+ 	/*
+ 	 * Standard v7 proc info content
