@@ -15,6 +15,7 @@
   ncurses,
   wget,
   ctestCheckHook,
+  catch2_3,
 
   lib,
   ...
@@ -53,10 +54,6 @@ let
   expected = fetchzip {
     url = "https://github.com/TartanLlama/expected/archive/refs/tags/v1.1.0.tar.gz";
     hash = "sha256-AuRU8VI5l7Th9fJ5jIc/6mPm0Vqbbt6rY8QCCNDOU50=";
-  };
-  catch2 = fetchzip {
-    url = "https://github.com/catchorg/Catch2/archive/refs/tags/v3.4.0.tar.gz";
-    hash = "sha256-DqGGfNjKPW9HFJrX9arFHyNYjB61uoL6NabZatTWrr0=";
   };
   utfcpp = fetchzip {
     url = "https://github.com/nemtrif/utfcpp/archive/refs/tags/v4.0.0.tar.gz";
@@ -97,6 +94,7 @@ stdenv.mkDerivation {
   buildInputs =
     lib.optionals (!isCross) [
       sdl2-compat.dev
+      catch2_3
     ]
     ++ lib.optionals (!isRMToolchain && !isDarwin) [
       systemdLibs.dev
@@ -124,7 +122,6 @@ stdenv.mkDerivation {
   cmakeFlags = [
     "-DFETCHCONTENT_SOURCE_DIR_FRIDA-GUM=${frida_gum}"
     "-DFETCHCONTENT_SOURCE_DIR_EXPECTED=${expected}"
-    "-DFETCHCONTENT_SOURCE_DIR_CATCH2=${catch2}"
     "-DFETCHCONTENT_SOURCE_DIR_UTFCPP=${utfcpp}"
   ]
   ++ lib.optionals isRMToolchain [

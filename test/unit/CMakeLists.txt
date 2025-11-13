@@ -15,8 +15,8 @@ target_link_libraries(
 
 # From:
 # https://github.com/catchorg/Catch2/blob/devel/docs/cmake-integration.md#catchcmake-and-catchaddtestscmake
-FetchContent_MakeAvailable(catch2)
-list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
+FetchContent_MakeAvailable(Catch2)
+list(APPEND CMAKE_MODULE_PATH ${Catch2_SOURCE_DIR}/extras)
 include(Catch)
 
 catch_discover_tests(${PROJECT_NAME} EXTRA_ARGS "--allow-running-no-tests")
