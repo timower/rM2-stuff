@@ -73,6 +73,26 @@ doInput(unistdpp::FD& sock, int x, int y, bool touch) {
 }
 
 bool
+doMovePen(unistdpp::FD& sock, std::vector<std::string_view> args) {
+  if (args.size() != 3) {
+    std::cerr << "Move requires 3 args\n";
+    return false;
+  }
+
+  auto input = Input{
+    .x = atoi(args[1].data()),
+    .y = atoi(args[2].data()),
+    .type = Input::Move,
+    .touch = args[0] == "touch",
+  };
+
+  fatalOnError(sendMessage(sock, ClientMsg(input)));
+  usleep(tap_wait);
+
+  return true;
+}
+
+bool
 doTouch(unistdpp::FD& sock, std::vector<std::string_view> args) {
   if (args.size() != 2) {
     std::cerr << "Touch requires 2 args, x and y\n";
@@ -112,6 +132,7 @@ const std::unordered_map<std::string_view, decltype(&doScreenshot)> actions = {
     { "touch", doTouch },
     { "pen", doPen },
     { "power", doPower },
+    { "move", doMovePen },
   }
 };
 } // namespace

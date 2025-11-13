@@ -25,12 +25,16 @@ let
         ];
       };
 
+      rm2fb-test = lib.getExe' rm2-stuff.tools "rm2fb-test";
       vm-nixos = system.config.system.build.vm-nixos.override {
         setupCommands = ''
           while ! ssh -o StrictHostKeyChecking=no -i ${./id_ed25519} \
                       -p 2222 test@localhost test -e /dev/input/event0; do
             sleep 1
           done
+
+          # Send a dummy move event, to make sure uinput is detected.
+          ${rm2fb-test} 127.0.0.1 8888 move pen 0 0
         '';
       };
 
