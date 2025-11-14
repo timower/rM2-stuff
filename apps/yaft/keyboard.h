@@ -108,8 +108,9 @@ private:
   std::unordered_map<const KeyInfo*, KeyState> keyState;
 
   struct PhysKeyState {
-    bool down = false;
     TimeSource::time_point nextRepeat;
+    bool down = false;
+    bool tap = false;
   };
   std::unordered_map<const EvKeyInfo*, PhysKeyState> physKeyState;
 

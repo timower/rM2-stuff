@@ -271,11 +271,16 @@ KeyboardRenderObject::updateRepeat() {
     }
 
     if (time > state.nextRepeat) {
-      if (!isModifier(key->scancode)) {
-        sendKeyDown(*key, /* repeat */ true);
-      }
+      // Tap timer expired.
+      state.tap = false;
 
-      state.nextRepeat += repeatTime;
+      if (key->holdCode == 0) {
+        if (!isModifier(key->scancode)) {
+          sendKeyDown(*key, /* repeat */ true);
+        }
+
+        state.nextRepeat += repeatTime;
+      }
     }
   }
 }
@@ -345,19 +350,33 @@ KeyboardRenderObject::sendKeyDown(const KeyInfo& key, bool repeat) {
   }
   sendKeyDown(scancode, shift, alt, ctrl);
 }
+
 void
 KeyboardRenderObject::sendKeyDown(const EvKeyInfo& key, bool repeat) {
   if (isModifier(key.scancode)) {
     return;
   }
 
-  const auto anyKeyDown = [this](int scancode) {
-    return std::any_of(physKeyState.begin(),
-                       physKeyState.end(),
-                       [scancode](const auto& codeAndKey) {
-                         return codeAndKey.first->scancode == scancode &&
-                                codeAndKey.second.down;
-                       });
+  const auto anyKeyDown = [this, &key](int scancode) {
+    return std::any_of(
+      physKeyState.begin(),
+      physKeyState.end(),
+      [&key, scancode](auto& codeAndKey) {
+        // is the main scancode a modifier that's held.
+        if (codeAndKey.first->scancode == scancode && codeAndKey.second.down) {
+          return true;
+        }
+
+        // Or a tap hold key that's down and not within the tap
+        // delay.
+        if (codeAndKey.first != &key &&
+            codeAndKey.first->holdCode == scancode &&
+            codeAndKey.second.down /*&& !codeAndKey.second.tap*/) {
+          return true;
+        }
+
+        return false;
+      });
   };
 
   bool shift = anyKeyDown(Shift);
@@ -379,6 +398,7 @@ KeyboardRenderObject::sendKeyDown(const EvKeyInfo& key, bool repeat) {
 
     return key.scancode;
   }();
+
   sendKeyDown(scancode, shift, alt, ctrl);
 }
 
@@ -468,17 +488,32 @@ KeyboardRenderObject::handleKeyEvent(const rmlib::input::KeyEvent& ev) {
 
   auto it = keymap.find(ev.keyCode);
   if (it == keymap.end()) {
-    std::cout << "Unknown physical key: " << ev.keyCode << "\n";
+    std::cerr << "Unknown physical key: " << ev.keyCode << "\n";
     return;
   }
   const auto& key = it->second;
   auto& state = physKeyState[&key];
 
+  const bool isTapHold = key.holdCode != 0;
+
   if (ev.type == input::KeyEvent::Press) {
     state.down = true;
-    state.nextRepeat = TimeSource::now() + getWidget().params.repeatDelay;
-    sendKeyDown(key);
+    state.tap = true;
+
+    // TODO: make configurable.
+    const auto delay = isTapHold ? std::chrono::milliseconds(200)
+                                 : getWidget().params.repeatDelay;
+    state.nextRepeat = TimeSource::now() + delay;
+
+    // Tap hold keys only trigger after tap delay.
+    if (!isTapHold) {
+      sendKeyDown(key);
+    }
   } else if (ev.type == input::KeyEvent::Release) {
+    if (isTapHold && state.tap) {
+      sendKeyDown(key);
+    }
+
     state.down = false;
   }
 }
