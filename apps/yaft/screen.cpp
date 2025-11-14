@@ -10,7 +10,8 @@ inline int
 myCeil(int val, int div) {
   if (div == 0) {
     return 0;
-  }     return (val + div - 1) / div;
+  }
+  return (val + div - 1) / div;
 }
 
 inline uint16_t
@@ -132,7 +133,7 @@ ScreenRenderObject::doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) {
   if (shouldRefresh()) {
     term.shouldClear = false;
     numUpdates = 0;
-    return {rect, fb::Waveform::GC16, fb::UpdateFlags::FullRefresh};
+    return { rect, fb::Waveform::GC16, fb::UpdateFlags::FullRefresh };
   }
 
   return {};
@@ -154,7 +155,7 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
 
   for (int col = 0; col < term.cols; col++) {
     int marginLeft = term.marginLeft + col * CELL_WIDTH +
-                      (isLandscape ? rect.topLeft.y : rect.topLeft.x);
+                     (isLandscape ? rect.topLeft.y : rect.topLeft.x);
 
     auto& cell = term.cells[line][col];
 
@@ -171,7 +172,7 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
       myCeil(glyphWidth, BITS_PER_BYTE) * BITS_PER_BYTE - glyphWidth;
     if (cell.width == WIDE) {
       bdfPadding += CELL_WIDTH;
-}
+    }
 
     /* check cursor position */
     if ((((term.mode & MODE_CURSOR) != 0U) && line == term.cursor.y) &&
@@ -179,8 +180,9 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
          (cell.width == WIDE && (col + 1) == term.cursor.x) ||
          (cell.width == NEXT_TO_WIDE && (col - 1) == term.cursor.x))) {
       colorPair.fg = DEFAULT_BG;
-      colorPair.bg = (/*!vt_active &&*/ BACKGROUND_DRAW) != 0U ? PASSIVE_CURSOR_COLOR
-                                                          : ACTIVE_CURSOR_COLOR;
+      colorPair.bg = (/*!vt_active &&*/ BACKGROUND_DRAW) != 0U
+                       ? PASSIVE_CURSOR_COLOR
+                       : ACTIVE_CURSOR_COLOR;
     }
 
     // lookup pixels
@@ -243,8 +245,11 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
             break;
         }
 
-        /* update copy buffer only */
-        memcpy(canvas.getMemory() + pos, &pixel, canvas.components());
+        // We only care about rgb555, as we assume that format above.
+        // So do a direct assign instead of memcpy.
+        // memcpy(canvas.getMemory() + pos, &pixel, canvas.components());
+        assert(canvas.components() == 2);
+        *(uint16_t*)(canvas.getMemory() + pos) = (uint16_t)pixel;
       }
     }
   }
@@ -252,10 +257,10 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
   term.line_dirty[line] =
     ((term.mode & MODE_CURSOR) != 0u) && term.cursor.y == line;
 
-  return isLandscape ? Rect{ { zStart - CELL_HEIGHT, 0 },
-                             { zStart, rect.height() - 1 } }
-                     : Rect{ { 0, zStart },
-                             { rect.width() - 1, zStart + CELL_HEIGHT - 1 } };
+  return isLandscape
+           ? Rect{ { zStart - CELL_HEIGHT, 0 }, { zStart, rect.height() - 1 } }
+           : Rect{ { 0, zStart },
+                   { rect.width() - 1, zStart + CELL_HEIGHT - 1 } };
 }
 
 template<typename Ev>
@@ -287,9 +292,8 @@ ScreenRenderObject::handleTouchEvent(const Ev& ev) {
 
   const auto scaledLoc = ev.location - getRect().topLeft;
   const auto rotatedLoc =
-    widget->isLandscape
-      ? Point{ scaledLoc.y, getRect().width() - scaledLoc.x }
-      : scaledLoc;
+    widget->isLandscape ? Point{ scaledLoc.y, getRect().width() - scaledLoc.x }
+                        : scaledLoc;
 
   std::array<char, 6> buf{};
   initMouseBuf(buf, rotatedLoc);
@@ -335,6 +339,7 @@ ScreenRenderObject::handleInput(const rmlib::input::Event& ev) {
 }
 
 void
-ScreenRenderObject::doRebuild(AppContext& ctx, const BuildContext& /*buildContext*/) {
+ScreenRenderObject::doRebuild(AppContext& ctx,
+                              const BuildContext& /*buildContext*/) {
   this->fb = &ctx.getFramebuffer();
 }
