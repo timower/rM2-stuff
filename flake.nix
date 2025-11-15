@@ -1,6 +1,13 @@
 {
   inputs.nixpkgs.url = "nixpkgs/nixos-unstable";
 
+  nixConfig = {
+    extra-substituters = [ "https://rm2-stuff.cachix.org" ];
+    extra-trusted-public-keys = [
+      "rm2-stuff.cachix.org-1:fl0LpfR74xZyeR4s94jljviKfoljLlxC4tdadeNRHcg="
+    ];
+  };
+
   outputs =
     { self, nixpkgs }:
     let
