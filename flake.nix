@@ -13,36 +13,39 @@
       ];
 
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
+      mkLinux = system: builtins.replaceStrings [ "darwin" ] [ "linux" ] system;
     in
     {
       packages = forAllSystems (
         system:
         let
-          linuxSystem = builtins.replaceStrings [ "darwin" ] [ "linux" ] system;
+          linuxSystem = mkLinux system;
+          lib = nixpkgs.lib;
+
           pkgs = nixpkgs.legacyPackages."${system}";
           pkgsLinux = nixpkgs.legacyPackages."${linuxSystem}";
-
           pkgsArmv7 = pkgs.pkgsCross.armv7l-hf-multiplatform;
 
-          nix-installer = pkgsArmv7.callPackage ./nix/pkgs/nix-installer.nix { };
+          isDarwin = pkgs.stdenv.isDarwin;
 
+          nix-installer = pkgsArmv7.callPackage ./nix/pkgs/nix-installer.nix { };
           rm-emu-packages = import ./nix/pkgs/rm-emu/default.nix {
             inherit (nixpkgs) lib;
             inherit pkgs pkgsLinux;
           };
         in
-        rec {
+        {
           default = pkgs.callPackage ./nix/pkgs/rm2-stuff.nix { };
-          rm2-toolchain = pkgs.callPackage ./nix/pkgs/rm2-toolchain.nix { };
-
           dev-cross = pkgsArmv7.callPackage ./nix/pkgs/rm2-stuff.nix { };
-          dev-rm2-toolchain = pkgs.callPackage ./nix/pkgs/rm2-stuff.nix {
-            toolchain_root = "${rm2-toolchain}";
-          };
 
           koreader = pkgsArmv7.callPackage ./nix/pkgs/koreader.nix { };
-
           inherit nix-installer;
+        }
+        // lib.optionalAttrs (!isDarwin) rec {
+          rm2-toolchain = pkgsLinux.callPackage ./nix/pkgs/rm2-toolchain.nix { };
+          dev-rm2-toolchain = pkgsLinux.callPackage ./nix/pkgs/rm2-stuff.nix {
+            toolchain_root = "${rm2-toolchain}";
+          };
         }
         // rm-emu-packages
       );
@@ -52,6 +55,7 @@
         let
           pkgs = nixpkgs.legacyPackages."${system}";
           packages = self.packages."${system}";
+          isDarwin = pkgs.stdenv.isDarwin;
         in
         {
           default = pkgs.mkShell {
@@ -61,7 +65,8 @@
               libllvm
             ];
           };
-
+        }
+        // nixpkgs.lib.optionalAttrs (!isDarwin) {
           rm2-kernel = pkgs.mkShell {
             inputsFrom = [ pkgs.linux ];
             packages = [
@@ -109,6 +114,7 @@
           inherit (nixpkgs) lib;
           pkgs = nixpkgs.legacyPackages."${system}";
           rm2-stuff = self.packages."${system}".default;
+          buildPlatform = mkLinux system;
         }
       );
     };

@@ -2,6 +2,7 @@
   lib,
   pkgs,
   rm2-stuff,
+  buildPlatform ? "x86_64-linux",
 }:
 let
   mkTest = lib.makeOverridable (
@@ -21,6 +22,10 @@ let
               isNormalUser = true;
               openssh.authorizedKeys.keyFiles = [ ./id_ed25519.pub ];
             };
+          }
+          {
+            virtualisation.host.pkgs = pkgs;
+            nixpkgs.buildPlatform = buildPlatform;
           }
         ];
       };
