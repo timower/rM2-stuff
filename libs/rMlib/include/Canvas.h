@@ -13,6 +13,9 @@
 #include <iostream>
 
 namespace rmlib {
+namespace fb {
+struct FrameBuffer;
+}
 
 constexpr auto default_text_size = 48;
 
@@ -40,6 +43,7 @@ greyFromRGB565(uint16_t rgb) {
 bool
 getGlyph(uint32_t code, uint8_t* bitmap, int height, int* width);
 
+// TODO: drop compoments, hardcode to 2 / uint16_t in rgb565 format.
 class Canvas {
 public:
   Canvas() = default;
@@ -61,20 +65,6 @@ public:
 
   Rect rect() const { return { { 0, 0 }, { mWidth - 1, mHeight - 1 } }; }
 
-  template<typename T = uint8_t>
-  const T* getPtr(int x, int y) const {
-    assert(sizeof(T) == 1 || sizeof(T) == mComponents);
-    // NOLINTNEXTLINE
-    return reinterpret_cast<T*>(memory + y * mLineSize + x * mComponents);
-  }
-
-  template<typename T = uint8_t>
-  T* getPtr(int x, int y) {
-    assert(sizeof(T) == 1 || sizeof(T) == mComponents);
-    // NOLINTNEXTLINE
-    return reinterpret_cast<T*>(memory + y * mLineSize + x * mComponents);
-  }
-
   int getPixel(int x, int y) const {
     assert(rect().contains(Point{ x, y }));
     int result = 0;
@@ -86,7 +76,14 @@ public:
   void setPixel(Point p, int val) {
     assert(rect().contains(p));
     auto* pixel = getPtr(p.x, p.y);
-    memcpy(pixel, &val, mComponents);
+    switch (mComponents) {
+      case 2:
+        *(uint16_t*)pixel = (uint16_t)val;
+        break;
+      default:
+        memcpy(pixel, &val, mComponents);
+        break;
+    }
   }
 
   template<typename Func>
@@ -136,7 +133,7 @@ public:
 
   void set(int value) { set(rect(), value); }
 
-  static Point getTextSize(std::string_view text, int size = default_text_size);
+  static Size getTextSize(std::string_view text, int size = default_text_size);
 
   void drawText(std::string_view text,
                 Point location,
@@ -159,7 +156,6 @@ public:
   int width() const { return mWidth; }
   int height() const { return mHeight; }
   int lineSize() const { return mLineSize; }
-  uint8_t* getMemory() const { return memory; }
 
   Canvas subCanvas(Rect rect) {
     return { getPtr(rect.topLeft.x, rect.topLeft.y),
@@ -169,7 +165,7 @@ public:
              mComponents };
   }
 
-  bool operator==(const Canvas& other) const {
+  bool compare(const Canvas& other) const {
     if (memory == other.memory) {
       return true;
     }
@@ -202,9 +198,70 @@ public:
     return true;
   }
 
+  void copy(const Point& destOffset, const Canvas& src, const Rect& srcRect) {
+    assert(components() == src.components());
+    assert(src.rect().contains(srcRect));
+    assert(rect().contains(srcRect + destOffset));
+
+    for (int y = srcRect.topLeft.y; y <= srcRect.bottomRight.y; y++) {
+      const auto* srcPixel = src.getPtr<>(srcRect.topLeft.x, y);
+      auto* destPixel =
+        getPtr<>(destOffset.x, (y - srcRect.topLeft.y + destOffset.y));
+      memcpy(destPixel, srcPixel, srcRect.width() * src.components());
+    }
+  }
+
+  template<typename Func>
+  void transform(const Point& destOffset,
+                 const Canvas& src,
+                 const Rect& srcRect,
+                 const Func& f) {
+    assert(src.rect().contains(srcRect));
+    assert(rect().contains(srcRect + destOffset));
+
+    for (int y = srcRect.topLeft.y; y <= srcRect.bottomRight.y; y++) {
+      for (int x = srcRect.topLeft.x; x <= srcRect.bottomRight.x; x++) {
+        const auto* srcPixel = src.getPtr<>(x, y);
+        // TODO: correct offsets
+        auto* destPixel = getPtr<>((x + destOffset.x - srcRect.topLeft.x),
+                                   (y + destOffset.y - srcRect.topLeft.y));
+        int value = 0;
+        memcpy(&value, srcPixel, src.components());
+        value = f(x, y, value);
+        memcpy(destPixel, &value, components());
+      }
+    }
+  }
+
+  OptError<> writeImage(const char* path) const;
+
+  bool operator==(const Canvas& other) const {
+    return memory == other.memory && mWidth == other.mWidth &&
+           mHeight == other.mHeight && mComponents == other.mComponents &&
+           mLineSize == other.mLineSize;
+  }
   bool operator!=(const Canvas& other) const { return !(*this == other); }
 
 private:
+  friend struct ImageCanvas;
+  friend struct fb::FrameBuffer;
+
+  uint8_t* getMemory() const { return memory; }
+
+  template<typename T = uint8_t>
+  const T* getPtr(int x, int y) const {
+    assert(sizeof(T) == 1 || sizeof(T) == mComponents);
+    // NOLINTNEXTLINE
+    return reinterpret_cast<T*>(memory + y * mLineSize + x * mComponents);
+  }
+
+  template<typename T = uint8_t>
+  T* getPtr(int x, int y) {
+    assert(sizeof(T) == 1 || sizeof(T) == mComponents);
+    // NOLINTNEXTLINE
+    return reinterpret_cast<T*>(memory + y * mLineSize + x * mComponents);
+  }
+
   template<typename ValueType, typename Func>
   void transformImpl(const Func& f, Rect r) {
     for (int y = r.topLeft.y; y <= r.bottomRight.y; y++) {
@@ -262,49 +319,5 @@ struct MemoryCanvas {
   std::unique_ptr<uint8_t[]> memory; // NOLINT
   Canvas canvas;
 };
-
-inline void
-copy(Canvas& dest,
-     const Point& destOffset,
-     const Canvas& src,
-     const Rect& srcRect) {
-  assert(dest.components() == src.components());
-  assert(src.rect().contains(srcRect));
-  assert(dest.rect().contains(srcRect + destOffset));
-
-  for (int y = srcRect.topLeft.y; y <= srcRect.bottomRight.y; y++) {
-    const auto* srcPixel = src.getPtr<>(srcRect.topLeft.x, y);
-    auto* destPixel =
-      dest.getPtr<>(destOffset.x, (y - srcRect.topLeft.y + destOffset.y));
-    memcpy(destPixel, srcPixel, srcRect.width() * src.components());
-  }
-}
-
-template<typename Func>
-void
-transform(Canvas& dest,
-          const Point& destOffset,
-          const Canvas& src,
-          const Rect& srcRect,
-          const Func& f) {
-  assert(src.rect().contains(srcRect));
-  assert(dest.rect().contains(srcRect + destOffset));
-
-  for (int y = srcRect.topLeft.y; y <= srcRect.bottomRight.y; y++) {
-    for (int x = srcRect.topLeft.x; x <= srcRect.bottomRight.x; x++) {
-      const auto* srcPixel = src.getPtr<>(x, y);
-      // TODO: correct offsets
-      auto* destPixel = dest.getPtr<>((x + destOffset.x - srcRect.topLeft.x),
-                                      (y + destOffset.y - srcRect.topLeft.y));
-      int value = 0;
-      memcpy(&value, srcPixel, src.components());
-      value = f(x, y, value);
-      memcpy(destPixel, &value, dest.components());
-    }
-  }
-}
-
-OptError<>
-writeImage(const char* path, const Canvas& canvas);
 
 } // namespace rmlib

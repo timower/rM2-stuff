@@ -6,7 +6,6 @@
 
 #include <utf8.h>
 
-#include <array>
 #include <climits>
 #include <iostream>
 #include <vector>
@@ -66,7 +65,7 @@ getFont() {
 }
 } // namespace
 
-Point
+Size
 Canvas::getTextSize(std::string_view text, int size) {
   const auto* font = getFont();
   auto scale = stbtt_ScaleForPixelHeight(font, float(size));
@@ -313,7 +312,7 @@ MemoryCanvas::MemoryCanvas(const Canvas& other, Rect rect) {
                                        other.components());
   canvas =
     Canvas(memory.get(), rect.width(), rect.height(), other.components());
-  copy(canvas, { 0, 0 }, other, rect);
+  canvas.copy({ 0, 0 }, other, rect);
 }
 
 MemoryCanvas::MemoryCanvas(int width, int height, int components) {
@@ -323,10 +322,10 @@ MemoryCanvas::MemoryCanvas(int width, int height, int components) {
 }
 
 OptError<>
-writeImage(const char* path, const Canvas& canvas) {
-  MemoryCanvas test(canvas.width(), canvas.height(), 1);
+Canvas::writeImage(const char* path) const {
+  MemoryCanvas test(width(), height(), 1);
 
-  canvas.forEach([&](auto x, auto y, auto pixel) {
+  forEach([&](auto x, auto y, auto pixel) {
     test.canvas.setPixel({ x, y }, greyFromRGB565(pixel));
   });
 

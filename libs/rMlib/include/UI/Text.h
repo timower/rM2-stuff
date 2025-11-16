@@ -45,20 +45,20 @@ protected:
 
     Size result{};
 
-    if (textSize.x > constraints.max.width) {
+    if (textSize.width > constraints.max.width) {
       result.width = constraints.max.width;
-    } else if (textSize.x < constraints.min.width) {
+    } else if (textSize.width < constraints.min.width) {
       result.width = constraints.min.width;
     } else {
-      result.width = textSize.x;
+      result.width = textSize.width;
     }
 
-    if (textSize.y > constraints.max.height) {
+    if (textSize.height > constraints.max.height) {
       result.height = constraints.max.height;
-    } else if (textSize.y < constraints.min.height) {
+    } else if (textSize.height < constraints.min.height) {
       result.height = constraints.min.height;
     } else {
-      result.height = textSize.y;
+      result.height = textSize.height;
     }
 
     return result;
@@ -67,13 +67,14 @@ protected:
   UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) override {
     const auto textSize =
       rmlib::Canvas::getTextSize(widget->text, widget->fontSize);
-    const auto x = std::max(0, (rect.width() - textSize.x) / 2);
-    const auto y = std::max(0, (rect.height() - textSize.y) / 2);
+    const auto x = std::max(0, (rect.width() - textSize.width) / 2);
+    const auto y = std::max(0, (rect.height() - textSize.height) / 2);
 
     const auto point = rect.topLeft + rmlib::Point{ x, y };
 
     // TODO: intersect with rect, fix size - 1:
-    const auto drawRect = rmlib::Rect{ point, point + textSize } & rect;
+    const auto drawRect =
+      rmlib::Rect{ point, point + textSize.toPoint() } & rect;
 
     canvas.set(drawRect, rmlib::white);
     canvas.drawText(widget->text,

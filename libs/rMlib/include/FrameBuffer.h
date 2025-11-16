@@ -37,7 +37,7 @@ struct FrameBuffer {
                 UpdateFlags flags = UpdateFlags::None) {
     auto textSize = Canvas::getTextSize(text, size);
     canvas.drawText(text, location, size);
-    doUpdate({ location, location + textSize }, waveform, flags);
+    doUpdate({ location, location + textSize.toPoint() }, waveform, flags);
   }
 
   void clear() {

@@ -217,10 +217,8 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
       }
 
       for (int w = 0; w < CELL_WIDTH; w++) {
-        int pos = isLandscape ? (marginLeft + w) * canvas.lineSize() +
-                                  (zStart - h) * canvas.components()
-                              : (marginLeft + w) * canvas.components() +
-                                  (zStart + h) * canvas.lineSize();
+        const auto pos = isLandscape ? Point{ zStart - h, marginLeft + w }
+                                     : Point{ marginLeft + w, zStart + h };
 
         /* set fg or bg */
         const auto* glyph = (cell.attribute & ATTR_BOLD) != 0
@@ -247,9 +245,7 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
 
         // We only care about rgb555, as we assume that format above.
         // So do a direct assign instead of memcpy.
-        // memcpy(canvas.getMemory() + pos, &pixel, canvas.components());
-        assert(canvas.components() == 2);
-        *(uint16_t*)(canvas.getMemory() + pos) = (uint16_t)pixel;
+        canvas.setPixel(pos, pixel);
       }
     }
   }

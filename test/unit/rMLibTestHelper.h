@@ -51,7 +51,7 @@ struct TestContext : rmlib::AppContext {
         return false;
       }
 
-      return canvas == goldenCanvas->canvas;
+      return canvas.compare(goldenCanvas->canvas);
     }
 
     std::string describe() const override { return "Matches image"; }
@@ -144,7 +144,7 @@ struct TestContext : rmlib::AppContext {
 
   void writeImage(std::filesystem::path path, const rmlib::RenderObject& ro) {
     const auto canvas = framebuffer.canvas.subCanvas(ro.getRect());
-    REQUIRE(rmlib::writeImage(path.c_str(), canvas).has_value());
+    REQUIRE(canvas.writeImage(path.c_str()).has_value());
   }
 
   GoldenImageMatcher matchesGolden(std::string_view name) {

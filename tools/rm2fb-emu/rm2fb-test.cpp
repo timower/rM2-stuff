@@ -48,7 +48,7 @@ doScreenshot(unistdpp::FD& sock, std::vector<std::string_view> args) {
 
   const auto name =
     args.empty() ? std::string_view("screenshot.png") : args.front();
-  fatalOnError(rmlib::writeImage(name.data(), canvas));
+  fatalOnError(canvas.writeImage(name.data()));
 
   return true;
 }

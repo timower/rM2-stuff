@@ -127,7 +127,7 @@ getKeyCodeStr(int scancode, bool shift, bool alt, bool ctrl, bool appCursor) {
 }
 
 template<typename Ev>
-static int
+int
 getSlot(const Ev& ev) {
   return ev.slot;
 }
@@ -519,15 +519,16 @@ KeyboardRenderObject::drawKey(rmlib::Point pos,
   }();
 
   const auto textSize = Canvas::getTextSize(printName, 32);
-  canvas.drawText(printName,
-                  { keyRect.topLeft.x + keyWidth / 2 - textSize.x / 2,
-                    keyRect.topLeft.y + keyHeight / 2 - textSize.y / 2 },
-                  32);
+  canvas.drawText(
+    printName,
+    { keyRect.topLeft.x + (keyWidth / 2) - (textSize.width / 2),
+      keyRect.topLeft.y + (keyHeight / 2) - (textSize.height / 2) },
+    32);
 
   if (!key.altName.empty()) {
     const auto altTextSize = Canvas::getTextSize(key.altName, 26);
     canvas.drawText(key.altName,
-                    { keyRect.topLeft.x + keyWidth - altTextSize.x - 4,
+                    { keyRect.topLeft.x + keyWidth - altTextSize.width - 4,
                       keyRect.topLeft.y + 3 },
                     26);
   }

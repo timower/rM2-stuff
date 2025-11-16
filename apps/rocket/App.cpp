@@ -208,7 +208,7 @@ App::resume(rmlib::fb::FrameBuffer* fb) {
   assert(isPaused());
 
   if (savedFb.has_value() && fb != nullptr) {
-    copy(fb->canvas, { 0, 0 }, savedFb->canvas, fb->canvas.rect());
+    fb->canvas.copy({ 0, 0 }, savedFb->canvas, fb->canvas.rect());
     fb->doUpdate(
       fb->canvas.rect(), fb::Waveform::GC16Fast, fb::UpdateFlags::FullRefresh);
     savedFb.reset();

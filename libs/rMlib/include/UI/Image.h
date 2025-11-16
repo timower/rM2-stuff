@@ -76,7 +76,7 @@ public:
   using LeafRenderObject<Image>::LeafRenderObject;
 
   void update(const Image& newWidget) {
-    if (newWidget.canvas.getMemory() != widget->canvas.getMemory()) {
+    if (newWidget.canvas != widget->canvas) {
       markNeedsDraw();
     }
     widget = &newWidget;
@@ -96,7 +96,7 @@ protected:
     const auto& image = widget->canvas;
 
     if (image.rect().size() == rect.size()) {
-      copy(canvas, rect.topLeft, image, image.rect());
+      canvas.copy(rect.topLeft, image, image.rect());
       return UpdateRegion{ rect };
     }
 

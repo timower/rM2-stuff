@@ -83,7 +83,7 @@ updateEmulatedCanvas(const Canvas& canvas, Rect region) {
   auto* surface = SDL_GetWindowSurface(window);
 
   const auto getPixel = [&canvas](int x, int y) {
-    const auto rgb = *canvas.getPtr<uint16_t>(x, y);
+    const auto rgb = canvas.getPixel(x, y);
     const auto b = (rgb & 0x1f) << 3;
     const auto g = ((rgb >> 5) & 0x3f) << 2;
     const auto r = ((rgb >> 11) & 0x1f) << 3;

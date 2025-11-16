@@ -136,7 +136,7 @@ public:
   using LeafRenderObject<FB>::LeafRenderObject;
 
   void update(const FB& newWidget) {
-    if (newWidget.canvas.getMemory() != widget->canvas.getMemory()) {
+    if (newWidget.canvas != widget->canvas) {
       markNeedsDraw(true);
     }
     if (!newWidget.updateRegions->empty()) {
@@ -159,7 +159,7 @@ protected:
   UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) override {
     auto result = UpdateRegion{ rect };
 
-    copy(canvas, rect.topLeft, widget->canvas, widget->canvas.rect());
+    canvas.copy(rect.topLeft, widget->canvas, widget->canvas.rect());
 
     if (!isFullDraw()) {
       result = std::accumulate(widget->updateRegions->begin(),
@@ -223,10 +223,9 @@ public:
     }
     setState([&](auto& self) {
       auto [updateRegion, updateCanvas] = std::move(*msgOrErr);
-      copy(self.memCanvas.canvas,
-           updateRegion.region.topLeft,
-           updateCanvas.canvas,
-           updateCanvas.canvas.rect());
+      self.memCanvas.canvas.copy(updateRegion.region.topLeft,
+                                 updateCanvas.canvas,
+                                 updateCanvas.canvas.rect());
       self.pendingUpdates->push_back(updateRegion);
     });
   }

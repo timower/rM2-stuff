@@ -81,27 +81,20 @@ ScreenRenderObject::doDraw(Rect rect, Canvas& canvas) {
     float incX = float(lcd->width) / rect.width();
     float incY = float(lcd->height) / rect.height();
 
-    const auto canvasStride = canvas.lineSize() / sizeof(uint16_t);
-    auto* canvasLinePtr =
-      canvas.getPtr<uint16_t>(rect.topLeft.x, rect.topLeft.y);
-
     float subY = 0;
     for (int y = rect.topLeft.y; y <= rect.bottomRight.y; y++) {
       const uint8_t* lcdRow = &lcd->data[int(subY) * lcd->rowstride];
-      auto* canvasPtr = canvasLinePtr;
+      // auto* canvasPtr = canvasLinePtr;
 
       float subX = 0;
       for (int x = rect.topLeft.x; x <= rect.bottomRight.x; x++) {
         const uint8_t data = lcdRow[int(subX)];
         const uint16_t pixel = data != 0U ? black : white;
-
-        *canvasPtr = pixel;
+        canvas.setPixel({ x, y }, pixel);
 
         subX += incX;
-        canvasPtr += 1;
       }
       subY += incY;
-      canvasLinePtr += canvasStride;
     }
   }
   std::swap(lcd, oldLcd);

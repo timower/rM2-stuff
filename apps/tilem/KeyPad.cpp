@@ -111,7 +111,7 @@ KeypadRenderObject::doLayout(const Constraints& constraints) {
   const auto height = std::clamp(keyHeight * int(widget->numRows),
                                  constraints.min.height,
                                  constraints.max.height);
-  padding = int(constraints.max.width - keyWidth * widget->maxRowSize);
+  padding = int(constraints.max.width - (keyWidth * widget->maxRowSize));
 
   return { width, height };
 }
@@ -132,9 +132,9 @@ KeypadRenderObject::drawKey(rmlib::Canvas& canvas,
       frontLabelHeight, int(key_aspect * keyWidth / double(key.front.size())));
     const auto fontSizes = Canvas::getTextSize(key.front, fontSize);
 
-    const auto xOffset = (keyWidth - fontSizes.x) / 2;
+    const auto xOffset = (keyWidth - fontSizes.width) / 2;
     const auto yOffset =
-      upperLabelHeight + (frontLabelHeight - fontSizes.y) / 2;
+      upperLabelHeight + ((frontLabelHeight - fontSizes.height) / 2);
     const auto position = pos + Point{ xOffset, yOffset };
 
     canvas.drawText(key.front, position, fontSize);
@@ -157,8 +157,8 @@ KeypadRenderObject::drawKey(rmlib::Canvas& canvas,
 
     const auto fontSizes = Canvas::getTextSize(testStr, fontSize);
 
-    const auto xOffset = (keyWidth - fontSizes.x) / 2;
-    const auto yOffset = (upperLabelHeight - fontSizes.y) / 2;
+    const auto xOffset = (keyWidth - fontSizes.width) / 2;
+    const auto yOffset = (upperLabelHeight - fontSizes.height) / 2;
 
     const auto position = pos + Point{ xOffset, yOffset };
 
@@ -167,7 +167,7 @@ KeypadRenderObject::drawKey(rmlib::Canvas& canvas,
     if (!key.alpha.empty()) {
       const auto spacing =
         Canvas::getTextSize(std::string(key.shift) + " ", fontSize);
-      const auto positonA = pos + Point{ xOffset + spacing.x, yOffset };
+      const auto positonA = pos + Point{ xOffset + spacing.width, yOffset };
       canvas.drawText(key.alpha, positonA, fontSize, alpha_color);
     }
   }();
