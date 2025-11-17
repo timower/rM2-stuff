@@ -95,30 +95,27 @@ protected:
     return result;
   }
 
-  UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) override {
+  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
     UpdateRegion result;
 
-    const auto maxSize = isVertical() ? rect.height() : rect.width();
+    const auto mySize = this->getSize();
+    const auto maxSize = isVertical() ? mySize.height : mySize.width;
     auto offset = (maxSize - totalSize) / 2;
 
     for (auto i = 0U; i < num_children; i++) {
       const auto& size = childSizes[i];
       const auto& child = this->children[i];
 
-      const auto otherOffset = isVertical() ? (rect.width() - size.width) / 2
-                                            : (rect.height() - size.height) / 2;
+      const auto otherOffset = isVertical() ? (mySize.width - size.width) / 2
+                                            : (mySize.height - size.height) / 2;
       const auto offsetPoint = isVertical()
                                  ? rmlib::Point{ otherOffset, offset }
                                  : rmlib::Point{ offset, otherOffset };
 
-      const auto topLeft = rect.topLeft + offsetPoint;
-      const auto bottomRight = topLeft + size.toPoint();
-      const auto subRect = rmlib::Rect{ topLeft, bottomRight };
-
       if (i == 0) {
-        result = child->draw(subRect, canvas);
+        result = child->draw(canvas, offsetPoint);
       } else {
-        result |= child->draw(subRect, canvas);
+        result |= child->draw(canvas, offsetPoint);
       }
       offset += isVertical() ? size.height : size.width;
     }

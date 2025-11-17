@@ -18,7 +18,7 @@ TEST_CASE("Tilem", "[tilem][ui]") {
 
   auto ctx = TestContext::make();
 
-  ctx.pumpWidget(Navigator(Calculator(romPath)));
+  ctx.pumpWidget(Center(Navigator(Calculator(romPath))));
 
   auto calc = ctx.findByType<Calculator>();
 

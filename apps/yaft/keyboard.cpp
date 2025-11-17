@@ -197,12 +197,12 @@ KeyboardRenderObject::doLayout(const rmlib::Constraints& constraints) {
 }
 
 rmlib::UpdateRegion
-KeyboardRenderObject::doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) {
-  Point pos = rect.topLeft;
+KeyboardRenderObject::doDraw(rmlib::Canvas& canvas) {
+  Point pos = { 0, 0 };
 
   UpdateRegion result;
   for (const auto& row : widget->params.layout.rows) {
-    pos.x = rect.topLeft.x;
+    pos.x = 0;
 
     for (const auto& key : row) {
       result |= drawKey(pos, key, canvas);
@@ -221,12 +221,12 @@ KeyboardRenderObject::doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) {
 }
 
 void
-KeyboardRenderObject::handleInput(const rmlib::input::Event& ev) {
+KeyboardRenderObject::doHandleInput(const rmlib::input::Event& ev) {
   std::visit(
     [this](const auto& ev) {
       if constexpr (rmlib::input::is_pointer_event<
                       std::decay_t<decltype(ev)>>) {
-        if (getRect().contains(ev.location) || ev.isUp()) {
+        if (getLocalRect().contains(ev.location) || ev.isUp()) {
           handleTouchEvent(ev);
         }
       } else {
@@ -384,12 +384,12 @@ KeyboardRenderObject::sendKeyDown(const EvKeyInfo& key, bool repeat) {
 
 const KeyInfo*
 KeyboardRenderObject::getKey(const rmlib::Point& point) {
-  if (!getRect().contains(point)) {
+  if (!getLocalRect().contains(point)) {
     return nullptr;
   }
 
-  const auto rowIdx = int((point.y - getRect().topLeft.y) / keyHeight);
-  const auto columnIdx = int((point.x - getRect().topLeft.x) / keyWidth);
+  const auto rowIdx = int(point.y / keyHeight);
+  const auto columnIdx = int(point.x / keyWidth);
   const auto& row = widget->params.layout.rows[rowIdx];
 
   int keyCounter = 0;

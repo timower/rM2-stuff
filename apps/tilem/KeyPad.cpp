@@ -176,15 +176,15 @@ KeypadRenderObject::drawKey(rmlib::Canvas& canvas,
 }
 
 rmlib::UpdateRegion
-KeypadRenderObject::doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) {
+KeypadRenderObject::doDraw(rmlib::Canvas& canvas) {
   keyLocations.clear();
-  canvas.set(rect, white);
+  canvas.set(white);
 
-  int y = rect.topLeft.y;
+  int y = 0;
   for (const auto& row : keymap) {
 
     int padding = this->padding;
-    int x = rect.topLeft.x;
+    int x = 0;
     for (const auto& key : row) {
       auto keyW = int(float(keyWidth) * key.width);
       if (padding > 0) {
@@ -204,11 +204,11 @@ KeypadRenderObject::doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) {
     y += keyHeight;
   }
 
-  return { rect };
+  return { canvas.rect() };
 }
 
 void
-KeypadRenderObject::handleInput(const Event& ev) {
+KeypadRenderObject::doHandleInput(const Event& ev) {
   if (widget->calc == nullptr) {
     return;
   }

@@ -13,7 +13,8 @@ main(int argc, char* argv[]) {
                             : std::string(home) + "/ti84plus.rom";
   const auto* calcName = argc > 1 ? argv[1] : defaultRom.c_str();
 
-  unistdpp::fatalOnError(runApp(Navigator(tilem::Calculator(calcName))));
+  unistdpp::fatalOnError(
+    runApp(Center(Navigator(tilem::Calculator(calcName)))));
 
   return EXIT_SUCCESS;
 }

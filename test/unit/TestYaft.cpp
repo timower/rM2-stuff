@@ -24,7 +24,7 @@ const Layout test_layout = { {
 template<typename RO>
 void
 doKey(TestContext& ctx,
-      const FindResult<RO>& ros,
+      const FindResults<RO>& ros,
       std::string_view name,
       bool down,
       const Layout& layout = test_layout) {
@@ -62,7 +62,7 @@ doKey(TestContext& ctx,
 template<typename RO>
 void
 tapKey(TestContext& ctx,
-       const FindResult<RO>& ros,
+       const FindResults<RO>& ros,
        std::string_view name,
        const Layout& layout = test_layout) {
   doKey(ctx, ros, name, true, layout);

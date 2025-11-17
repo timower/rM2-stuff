@@ -66,6 +66,7 @@
         in
         {
           default = pkgs.mkShell {
+            hardeningDisable = [ "all" ];
             inputsFrom = [ packages.default ];
             packages = with pkgs; [
               clang-tools

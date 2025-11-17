@@ -117,12 +117,12 @@ updateEmulatedCanvas(const Canvas& canvas, Rect region) {
       int g = pixel[1];
       int b = pixel[2];
 
-      // if (y == surfStart.y || y == surfEnd.y || x == surfStart.x ||
-      //     x == surfEnd.x) {
-      //   r = color == 2 ? UINT8_MAX : 0x00;
-      //   g = color == 1 ? UINT8_MAX : 0x00;
-      //   b = color == 0 ? UINT8_MAX : 0x00;
-      // }
+      if (y == surfStart.y || y == surfEnd.y || x == surfStart.x ||
+          x == surfEnd.x) {
+        r = color == 2 ? UINT8_MAX : 0x00;
+        g = color == 1 ? UINT8_MAX : 0x00;
+        b = color == 0 ? UINT8_MAX : 0x00;
+      }
 
       putpixel(surface, x, y, SDL_MapRGB(surface->format, r, g, b));
     }

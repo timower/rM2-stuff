@@ -133,12 +133,10 @@ public:
 
   void step() {
     rootRO->rebuild(*this, nullptr);
-
-    const auto size = rootRO->layout(rootConstraints);
-    const auto rect = rmlib::Rect{ { 0, 0 }, size.toPoint() };
+    rootRO->layout(rootConstraints);
 
     auto updateRegion = rootRO->cleanup(framebuffer.canvas);
-    updateRegion |= rootRO->draw(rect, framebuffer.canvas);
+    updateRegion |= rootRO->draw(framebuffer.canvas, { 0, 0 });
 
     if (!updateRegion.region.empty()) {
       framebuffer.doUpdate(

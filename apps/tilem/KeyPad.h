@@ -31,15 +31,13 @@ public:
 
 protected:
   rmlib::Size doLayout(const rmlib::Constraints& constraints) final;
+  void doHandleInput(const rmlib::input::Event& ev) final;
+  rmlib::UpdateRegion doDraw(rmlib::Canvas& canvas) final;
 
   void drawKey(rmlib::Canvas& canvas,
                rmlib::Point pos,
                const Key& key,
                int keyWidth) const;
-
-  rmlib::UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) final;
-
-  void handleInput(const rmlib::input::Event& ev) final;
 
 private:
   constexpr static auto key_aspect = 1.5;

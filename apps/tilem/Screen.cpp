@@ -61,7 +61,7 @@ ScreenRenderObject::doLayout(const Constraints& constraints) {
 }
 
 UpdateRegion
-ScreenRenderObject::doDraw(Rect rect, Canvas& canvas) {
+ScreenRenderObject::doDraw(Canvas& canvas) {
   if (widget->calc == nullptr) {
     return {};
   }
@@ -76,18 +76,18 @@ ScreenRenderObject::doDraw(Rect rect, Canvas& canvas) {
   }
 
   if (lcd->contrast == 0) {
-    canvas.set(rect, black);
+    canvas.set(black);
   } else {
-    float incX = float(lcd->width) / rect.width();
-    float incY = float(lcd->height) / rect.height();
+    float incX = float(lcd->width) / canvas.width();
+    float incY = float(lcd->height) / canvas.height();
 
     float subY = 0;
-    for (int y = rect.topLeft.y; y <= rect.bottomRight.y; y++) {
+    for (int y = 0; y < canvas.height(); y++) {
       const uint8_t* lcdRow = &lcd->data[int(subY) * lcd->rowstride];
       // auto* canvasPtr = canvasLinePtr;
 
       float subX = 0;
-      for (int x = rect.topLeft.x; x <= rect.bottomRight.x; x++) {
+      for (int x = 0; x < canvas.width(); x++) {
         const uint8_t data = lcdRow[int(subX)];
         const uint16_t pixel = data != 0U ? black : white;
         canvas.setPixel({ x, y }, pixel);
@@ -99,7 +99,7 @@ ScreenRenderObject::doDraw(Rect rect, Canvas& canvas) {
   }
   std::swap(lcd, oldLcd);
 
-  return { rect, fb::Waveform::DU, fb::UpdateFlags::Priority };
+  return { canvas.rect(), fb::Waveform::DU, fb::UpdateFlags::Priority };
 }
 
 std::unique_ptr<RenderObject>

@@ -60,19 +60,27 @@ public:
 
   virtual UpdateRegion cleanup(rmlib::Canvas& canvas) {
     if (isFullDraw()) {
-      canvas.set(this->rect, rmlib::white);
-      return UpdateRegion{ this->rect, rmlib::fb::Waveform::DU };
+      canvas.set(cleanupRect, rmlib::white);
+      return UpdateRegion{ cleanupRect, rmlib::fb::Waveform::DU };
     }
     return {};
   }
 
-  UpdateRegion draw(rmlib::Rect rect, rmlib::Canvas& canvas) {
+  UpdateRegion draw(rmlib::Canvas& canvas, Point offset) {
     auto result = UpdateRegion{};
 
     // TODO: do we need to distinguish when cleanup is used?
     if (needsDraw()) {
-      this->rect = rect;
-      result |= doDraw(rect, canvas);
+      const auto rect = Rect{ offset, offset + lastSize.toPoint() };
+      this->cleanupRect = rect;
+      this->lastOffset = offset;
+
+      auto subCanvas = canvas.subCanvas(rect);
+      auto subRes = doDraw(subCanvas);
+      subRes.region += offset;
+      assert(subRes.region.empty() || rect.contains(subRes.region));
+
+      result |= subRes;
 
       mNeedsDraw = No;
     }
@@ -80,7 +88,17 @@ public:
     return result;
   }
 
-  virtual void handleInput(const rmlib::input::Event& ev) {}
+  virtual void doHandleInput(const input::Event& ev) {}
+  void handleInput(input::Event ev) {
+    std::visit(
+      [this](auto& ev) {
+        if constexpr (input::is_pointer_event<decltype(ev)>) {
+          ev.location -= lastOffset;
+        }
+      },
+      ev);
+    doHandleInput(ev);
+  }
 
   virtual void rebuild(AppContext& context, const BuildContext* parent) {
     buildContext.emplace(*this, parent);
@@ -106,7 +124,9 @@ public:
     return needsLayoutCache.getOrSetTo([this] { return getNeedsLayout(); });
   }
 
-  const rmlib::Rect& getRect() const { return rect; }
+  Rect getLocalRect() const { return { { 0, 0 }, lastSize.toPoint() }; }
+  rmlib::Rect getSubRect() const { return getLocalRect() + lastOffset; }
+  Rect getCleanupRect() const { return cleanupRect; }
 
   const Size& getSize() const { return lastSize; }
 
@@ -131,7 +151,7 @@ public:
 
 protected:
   virtual Size doLayout(const Constraints& constraints) = 0;
-  virtual UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) = 0;
+  virtual UpdateRegion doDraw(rmlib::Canvas& canvas) = 0;
   virtual void doRebuild(AppContext& context,
                          const BuildContext& buildContext) {}
 
@@ -149,10 +169,10 @@ private:
   int mID;
   type_id::TypeIdT mTypeID;
 
-  rmlib::Rect rect;
-
   Size lastSize = { 0, 0 };
   Constraints lastConstraints = {};
+  Point lastOffset;
+  Rect cleanupRect;
 
   // TODO: are both needed?
   CachedBool needsLayoutCache;
@@ -212,15 +232,19 @@ public:
   //                         typeID::type_id_t typeID)
   //   : RenderObject(typeID), child(std::move(child)) {}
 
-  void handleInput(const rmlib::input::Event& ev) override {
+  void doHandleInput(const rmlib::input::Event& ev) override {
     child->handleInput(ev);
   }
 
-  UpdateRegion cleanup(rmlib::Canvas& canvas) override {
+  UpdateRegion cleanup(rmlib::Canvas& canvas) final {
     if (isFullDraw()) {
       return RenderObject::cleanup(canvas);
     }
-    return child->cleanup(canvas);
+
+    auto subCanvas = canvas.subCanvas(getCleanupRect());
+    auto subRes = child->cleanup(subCanvas);
+    subRes.region += getCleanupRect().topLeft;
+    return subRes;
   }
 
   void markNeedsLayout() override {
@@ -261,8 +285,8 @@ protected:
     return child->layout(constraints);
   }
 
-  UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) override {
-    return child->draw(rect, canvas);
+  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
+    return child->draw(canvas, { 0, 0 });
   }
 
   bool getNeedsDraw() const override {
@@ -301,20 +325,24 @@ public:
   MultiChildRenderObject(std::vector<std::unique_ptr<RenderObject>> children)
     : RenderObject(type_id::typeId<Widget>()), children(std::move(children)) {}
 
-  void handleInput(const rmlib::input::Event& ev) override {
+  void doHandleInput(const rmlib::input::Event& ev) override {
     for (const auto& child : children) {
       child->handleInput(ev);
     }
   }
 
-  UpdateRegion cleanup(rmlib::Canvas& canvas) override {
+  UpdateRegion cleanup(rmlib::Canvas& canvas) final {
     if (isFullDraw()) {
       return RenderObject::cleanup(canvas);
     }
 
     auto result = UpdateRegion{};
+    auto subCanvas = canvas.subCanvas(getCleanupRect());
+    const auto offset = getCleanupRect().topLeft;
     for (const auto& child : children) {
-      result |= child->cleanup(canvas);
+      auto subRes = child->cleanup(subCanvas);
+      subRes.region += offset;
+      result |= subRes;
     }
     return result;
   }

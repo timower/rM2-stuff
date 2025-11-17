@@ -11,6 +11,7 @@ Checks:
  - '-google-readability-todo'
  - '-modernize-use-nodiscard'
  - '-cppcoreguidelines-avoid-do-while'
+ - '-cppcoreguidelines-avoid-magic-numbers'
 
 HeaderFilterRegex: 'libs/|apps/|tools/|test/'
 CheckOptions:

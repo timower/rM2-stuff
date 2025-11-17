@@ -156,35 +156,33 @@ protected:
                    h, constraints.min.height, constraints.max.height) };
   }
 
-  UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) override {
-    auto result = UpdateRegion{ rect };
+  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
+    auto result = UpdateRegion{ canvas.rect() };
 
-    canvas.copy(rect.topLeft, widget->canvas, widget->canvas.rect());
+    canvas.copy({ 0, 0 }, widget->canvas, widget->canvas.rect());
 
     if (!isFullDraw()) {
       result = std::accumulate(widget->updateRegions->begin(),
                                widget->updateRegions->end(),
                                UpdateRegion{},
                                std::bit_or<UpdateRegion>{});
-      result.region += rect.topLeft;
+      // result.region += rect.topLeft;
     }
 
     widget->updateRegions->clear();
     return result;
   }
 
-  void handleInput(const Event& ev) final {
+  void doHandleInput(const Event& ev) final {
     if (!std::holds_alternative<PenEvent>(ev)) {
       return;
     }
     const auto& touchEv = std::get<PenEvent>(ev);
-    if (!getRect().contains(touchEv.location)) {
+    if (!getLocalRect().contains(touchEv.location)) {
       return;
     }
 
-    auto movedEv = touchEv;
-    movedEv.location -= getRect().topLeft;
-    getWidget().onInput(movedEv);
+    getWidget().onInput(touchEv);
   }
 };
 

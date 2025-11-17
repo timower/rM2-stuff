@@ -46,9 +46,9 @@ protected:
     return result;
   }
 
-  UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) override {
-    canvas.set(rect, widget->color);
-    return UpdateRegion{ rect };
+  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
+    canvas.set(widget->color);
+    return UpdateRegion{ canvas.rect() };
   }
 };
 
@@ -92,7 +92,8 @@ protected:
                    h, constraints.min.height, constraints.max.height) };
   }
 
-  UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) override {
+  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
+    const auto& rect = canvas.rect();
     const auto& image = widget->canvas;
 
     if (image.rect().size() == rect.size()) {

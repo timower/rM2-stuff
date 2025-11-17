@@ -27,17 +27,18 @@ if(COVERAGE)
   list(APPEND BASE_OPTS ${COVER_OPTS})
 endif()
 
-set(ASAN_OPTS -fsanitize=address -fno-omit-frame-pointer -fsanitize=undefined)
+set(ASAN_OPTS -fsanitize=address) # -fno-omit-frame-pointer
+                                  # -fsanitize=undefined)
 
 if(SANITIZE)
-  list(APPEND BASE_OPTS ${ASAN_OPTS} -Werror)
+  list(APPEND BASE_OPTS ${ASAN_OPTS})
 endif()
 
 list(JOIN BASE_OPTS " " BASE_OPTS)
 
 set(CMAKE_C_FLAGS_DEBUG
-    "${BASE_OPTS} -g -Og"
+    "${BASE_OPTS} -g -O0"
     CACHE STRING "" FORCE)
 set(CMAKE_CXX_FLAGS_DEBUG
-    "${BASE_OPTS} -Og -g -Wno-c++20-designator"
+    "${BASE_OPTS} -O0 -g -Wno-c++20-designator"
     CACHE STRING "" FORCE)

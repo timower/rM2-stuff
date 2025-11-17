@@ -59,9 +59,9 @@ protected:
                  const rmlib::BuildContext& /*buildContext*/) final;
 
   rmlib::Size doLayout(const rmlib::Constraints& constraints) final;
-  rmlib::UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) final;
+  rmlib::UpdateRegion doDraw(rmlib::Canvas& canvas) final;
 
-  void handleInput(const rmlib::input::Event& ev) final;
+  void doHandleInput(const rmlib::input::Event& ev) final;
 
 private:
   void updateRepeat();

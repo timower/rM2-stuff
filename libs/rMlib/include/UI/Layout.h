@@ -32,13 +32,13 @@ public:
   }
 
 protected:
-  UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) override {
-    const auto xOffset = (rect.width() - childSize.width) / 2;
-    const auto yOffset = (rect.height() - childSize.height) / 2;
+  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
+    const auto size = this->getSize();
 
-    const auto topLeft = rect.topLeft + rmlib::Point{ xOffset, yOffset };
-    const auto bottomRight = topLeft + childSize.toPoint();
-    return this->child->draw(rmlib::Rect{ topLeft, bottomRight }, canvas);
+    const auto xOffset = (size.width - childSize.width) / 2;
+    const auto yOffset = (size.height - childSize.height) / 2;
+
+    return this->child->draw(canvas, Point{ xOffset, yOffset });
   }
 
 private:
@@ -82,11 +82,9 @@ protected:
     return constraints.expand(childSize, this->widget->insets);
   }
 
-  UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) override {
-    const auto childRect = this->widget->insets.shrink(rect);
-    auto childRegion = this->child->draw(childRect, canvas);
-
-    return childRegion;
+  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
+    const auto insets = this->widget->insets;
+    return this->child->draw(canvas, { insets.left, insets.top });
   }
 };
 
@@ -141,8 +139,9 @@ protected:
     return newSize;
   }
 
-  UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) override {
-    auto result = this->child->draw(this->widget->size.shrink(rect), canvas);
+  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
+    const auto insets = this->widget->size;
+    auto result = this->child->draw(canvas, { insets.left, insets.top });
 
     /// Only redraw the border if we're marked for redrawing, ignore our child.
     if (RenderObject::getNeedsDraw()) {
@@ -155,24 +154,18 @@ protected:
         }
       };
 
-      drawLine(rect.topLeft,
-               { rect.bottomRight.x, rect.topLeft.y },
-               { 0, 1 },
-               this->widget->size.top);
-      drawLine(rect.topLeft,
-               { rect.topLeft.x, rect.bottomRight.y },
-               { 1, 0 },
-               this->widget->size.left);
-      drawLine({ rect.bottomRight.x, rect.topLeft.y },
-               rect.bottomRight,
-               { -1, 0 },
-               this->widget->size.right);
-      drawLine({ rect.topLeft.x, rect.bottomRight.y },
-               rect.bottomRight,
+      const Point zero = { 0, 0 };
+      const auto bottomRight = this->getSize().toPoint();
+      drawLine(zero, { bottomRight.x, 0 }, { 0, 1 }, this->widget->size.top);
+      drawLine(zero, { 0, bottomRight.y }, { 1, 0 }, this->widget->size.left);
+      drawLine(
+        { bottomRight.x, 0 }, bottomRight, { -1, 0 }, this->widget->size.right);
+      drawLine({ 0, bottomRight.y },
+               bottomRight,
                { 0, -1 },
                this->widget->size.bottom);
 
-      result |= UpdateRegion{ rect, rmlib::fb::Waveform::DU };
+      result |= UpdateRegion{ canvas.rect(), rmlib::fb::Waveform::DU };
     }
 
     return result;
@@ -236,10 +229,6 @@ protected:
     const auto childSize = this->child->layout(childConstraints);
     return childSize;
   }
-
-  UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) override {
-    return this->child->draw(rect, canvas);
-  }
 };
 
 template<class Child>
@@ -294,15 +283,15 @@ protected:
     return this->child->layout(constraints);
   }
 
-  UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) override {
+  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
     auto region = UpdateRegion{};
 
     if (this->isFullDraw()) {
-      canvas.set(rect, this->widget->color);
-      region = UpdateRegion{ rect };
+      canvas.set(this->widget->color);
+      region = UpdateRegion{ canvas.rect() };
     }
 
-    return region | this->child->draw(rect, canvas);
+    return region | this->child->draw(canvas, { 0, 0 });
   }
 };
 
@@ -362,10 +351,8 @@ protected:
     return result;
   }
 
-  UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) override {
-    const auto topLeft = rect.topLeft + this->widget->position;
-    const auto bottomRight = topLeft + childSize.toPoint();
-    return this->child->draw({ topLeft, bottomRight }, canvas);
+  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
+    return this->child->draw(canvas, this->widget->position);
   }
 
 private:

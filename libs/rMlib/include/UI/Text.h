@@ -64,7 +64,8 @@ protected:
     return result;
   }
 
-  UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) override {
+  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
+    const auto rect = canvas.rect();
     const auto textSize =
       rmlib::Canvas::getTextSize(widget->text, widget->fontSize);
     const auto x = std::max(0, (rect.width() - textSize.width) / 2);
