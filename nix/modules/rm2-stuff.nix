@@ -73,7 +73,7 @@ in
         {
           description = "Rocket launcher";
           serviceConfig = {
-            Type = "simple";
+            Type = "notify";
             # Kill yaft_reader that might still be running from the nixos launch script.
             ExecStartPre = "-${lib.getExe' pkgs.procps "pkill"} yaft_reader";
             ExecStart = lib.getExe' rocket "rocket";

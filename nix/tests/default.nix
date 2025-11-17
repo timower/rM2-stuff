@@ -17,6 +17,11 @@ let
         modules = modules ++ [
           {
             services.openssh.enable = true;
+
+            systemd.services."rocket".environment = {
+              ROCKET_WAIT_FOR_INPUT = "1";
+            };
+
             users.users.test = {
               extraGroups = [ "systemd-journal" ];
               isNormalUser = true;
@@ -34,12 +39,9 @@ let
       vm-nixos = system.config.system.build.vm-nixos.override {
         setupCommands = ''
           while ! ssh -o StrictHostKeyChecking=no -i ${./id_ed25519} \
-                      -p 2222 test@localhost test -e /dev/input/event0; do
+                      -p 2222 test@localhost systemctl is-active rocket; do
             sleep 1
           done
-
-          # Send a dummy move event, to make sure uinput is detected.
-          ${rm2fb-test} 127.0.0.1 8888 move pen 0 0
         '';
       };
 

@@ -14,6 +14,7 @@ let
 
     # Pass through the socket activation env vars.
     extraEnv = {
+      NOTIFY_SOCKET = null;
       LISTEN_PID = null;
       LISTEN_FDS = null;
       LISTEN_FDNAMES = null;
