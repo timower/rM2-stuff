@@ -2,7 +2,9 @@
 
 #include <UI.h>
 
+#ifdef __linux__
 #include <systemd/sd-daemon.h>
+#endif
 
 using namespace rmlib;
 
@@ -19,7 +21,9 @@ main(int argc, char* argv[]) {
     }
   }
 
+#ifdef __linux__
   sd_notify(0, "READY=1");
+#endif
 
   unistdpp::fatalOnError(runApp(LauncherWidget(), {}, /*clearOnExit=*/true));
   return EXIT_SUCCESS;
