@@ -1,3 +1,4 @@
+#include "UI/Rotate.h"
 #include <functional>
 #include <iostream>
 #include <type_traits>
@@ -81,15 +82,17 @@ class CounterTest : public StatefulWidget<CounterTest> {
 public:
   class State : public StateBase<CounterTest> {
   public:
-    void init(AppContext& context) {}
+    void init(AppContext& context, const BuildContext& /* unused*/) {}
 
     DynamicWidget build(AppContext& context,
                         const BuildContext& /*unused*/) const {
       if (count < 5) {
-        return Column(LabledInt("Counter: ", count),
-                      Row(Button("-1", [this] { decrease(); }),
-                          Button("+1", [this] { increase(); })),
-                      TimerTest(std::to_string(count)));
+        const auto rot = static_cast<Rotation>(count % 4);
+        return Rotated(rot,
+                       Column(LabledInt("Counter: ", count),
+                              Row(Button("-1", [this] { decrease(); }),
+                                  Button("+1", [this] { increase(); }))));
+        //, TimerTest(std::to_string(count))
       }
       return Row(Button("reset", [this]() { reset(); }), ToggleTest());
     }
@@ -298,9 +301,15 @@ Drawer::createRenderObject() const {
 
 int
 main() {
-  // auto optErr = runApp(Center(Row(Text("Test:"), CounterTest())));
+  auto optErr = runApp(Center(Row(Text("Test:"), CounterTest())));
   // auto optErr = runApp(Cleared(Drawer()));
-  auto optErr = runApp(Center(navTest()));
+  // auto optErr = runApp(Center(navTest()));
+  // auto optErr = runApp(
+  //   Center(Column(Rotated(Rotation::None, Text("Hello world")),
+  //                 Rotated(Rotation::Clockwise, Text("Hello world")),
+  //                 Rotated(Rotation::Inverted, Text("Hello world")),
+  //                 Rotated(Rotation::CounterClockwise, Text("Hello
+  //                 world")))));
 
   if (!optErr.has_value()) {
     std::cerr << optErr.error().msg << "\n";

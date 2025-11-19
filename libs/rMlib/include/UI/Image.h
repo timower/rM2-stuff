@@ -96,8 +96,9 @@ protected:
     const auto& rect = canvas.rect();
     const auto& image = widget->canvas;
 
-    if (image.rect().size() == rect.size()) {
-      canvas.copy(rect.topLeft, image, image.rect());
+    if (image.rect().size() == rect.size() &&
+        image.rotation() == canvas.rotation()) {
+      canvas.copy(image);
       return UpdateRegion{ rect };
     }
 

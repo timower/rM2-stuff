@@ -48,22 +48,14 @@ class Canvas {
 public:
   Canvas() = default;
   Canvas(uint8_t* mem, int width, int height, int components)
-    : memory(mem)
-    , mWidth(width)
-    , mHeight(height)
+    : mMemory(mem)
+    , mLineSize(width * components)
     , mComponents(components)
-    , mLineSize(width * components) {}
+    , mSize(Size{ width, height }) {}
 
-  Canvas(uint8_t* mem, int width, int height, int stride, int components)
-    : memory(mem)
-    , mWidth(width)
-    , mHeight(height)
-    , mComponents(components)
-    , mLineSize(stride) {}
+  int totalSize() const { return mLineSize * numLines(); }
 
-  int totalSize() const { return mLineSize * mHeight; }
-
-  Rect rect() const { return { { 0, 0 }, { mWidth - 1, mHeight - 1 } }; }
+  Rect rect() const { return { { 0, 0 }, mSize.toPoint() }; }
 
   int getPixel(int x, int y) const {
     assert(rect().contains(Point{ x, y }));
@@ -153,44 +145,50 @@ public:
   }
 
   int components() const { return mComponents; }
-  int width() const { return mWidth; }
-  int height() const { return mHeight; }
+  int width() const { return mSize.width; }
+  int height() const { return mSize.height; }
+  Size size() const { return mSize; }
   int lineSize() const { return mLineSize; }
 
-  Canvas subCanvas(Rect rect) {
-    return { getPtr(rect.topLeft.x, rect.topLeft.y),
-             rect.width(),
-             rect.height(),
+  Rotation rotation() const { return mRotation; }
+
+  Canvas subCanvas(Rect rect, Rotation rot = Rotation::None) {
+    const auto localRect = rotate(size(), mRotation, rect);
+    const auto topleft = localRect.topLeft;
+    const auto newSize = rotate(rot, rect.size());
+    return { mMemory + (topleft.y * mLineSize) + (topleft.x * mComponents),
+             newSize.width,
+             newSize.height,
              mLineSize,
-             mComponents };
+             mComponents,
+             rotate(mRotation, rot) };
   }
 
   bool compare(const Canvas& other) const {
-    if (memory == other.memory) {
+    if (mMemory == nullptr || other.mMemory == nullptr) {
+      return false;
+    }
+
+    if (mMemory == other.mMemory) {
       return true;
     }
 
-    if (memory == nullptr || other.memory == nullptr) {
+    if (mSize != other.mSize) {
       return false;
     }
-
-    if (mWidth != other.mWidth) {
-      return false;
-    }
-
-    if (mHeight != other.mHeight) {
-      return false;
-    }
-
     if (mComponents != other.mComponents) {
       return false;
     }
 
-    for (int y = 0; y < mHeight; y++) {
-      const auto* line = getPtr(0, y);
-      const auto* otherLine = other.getPtr(0, y);
-      if (memcmp(line, otherLine, mWidth * mComponents) != 0) {
-        std::cout << "Diff at line " << y << "\n";
+    if (mRotation != other.mRotation) {
+      return false;
+    }
+
+    for (int n = 0; n < numLines(); n++) {
+      const auto* line = getLine(n);
+      const auto* otherLine = other.getLine(n);
+      if (memcmp(line, otherLine, lineWidth() * mComponents) != 0) {
+        std::cout << "Diff at line " << n << "\n";
         return false;
       }
     }
@@ -198,47 +196,25 @@ public:
     return true;
   }
 
-  void copy(const Point& destOffset, const Canvas& src, const Rect& srcRect) {
+  void copy(const Canvas& src) {
     assert(components() == src.components());
-    assert(src.rect().contains(srcRect));
-    assert(rect().contains(srcRect + destOffset));
+    assert(rotation() == src.rotation());
+    assert(size() == src.size());
 
-    for (int y = srcRect.topLeft.y; y <= srcRect.bottomRight.y; y++) {
-      const auto* srcPixel = src.getPtr<>(srcRect.topLeft.x, y);
-      auto* destPixel =
-        getPtr<>(destOffset.x, (y - srcRect.topLeft.y + destOffset.y));
-      memcpy(destPixel, srcPixel, srcRect.width() * src.components());
-    }
-  }
-
-  template<typename Func>
-  void transform(const Point& destOffset,
-                 const Canvas& src,
-                 const Rect& srcRect,
-                 const Func& f) {
-    assert(src.rect().contains(srcRect));
-    assert(rect().contains(srcRect + destOffset));
-
-    for (int y = srcRect.topLeft.y; y <= srcRect.bottomRight.y; y++) {
-      for (int x = srcRect.topLeft.x; x <= srcRect.bottomRight.x; x++) {
-        const auto* srcPixel = src.getPtr<>(x, y);
-        // TODO: correct offsets
-        auto* destPixel = getPtr<>((x + destOffset.x - srcRect.topLeft.x),
-                                   (y + destOffset.y - srcRect.topLeft.y));
-        int value = 0;
-        memcpy(&value, srcPixel, src.components());
-        value = f(x, y, value);
-        memcpy(destPixel, &value, components());
-      }
+    const auto linewidth = lineWidth();
+    for (int n = 0; n < numLines(); n++) {
+      const auto* srcLine = src.getLine(n);
+      auto* destLine = getLine(n);
+      memcpy(destLine, srcLine, linewidth * mComponents);
     }
   }
 
   OptError<> writeImage(const char* path) const;
 
   bool operator==(const Canvas& other) const {
-    return memory == other.memory && mWidth == other.mWidth &&
-           mHeight == other.mHeight && mComponents == other.mComponents &&
-           mLineSize == other.mLineSize;
+    return mMemory == other.mMemory && mSize == other.mSize &&
+           mComponents == other.mComponents && mLineSize == other.mLineSize &&
+           mRotation == other.mRotation;
   }
   bool operator!=(const Canvas& other) const { return !(*this == other); }
 
@@ -246,20 +222,40 @@ private:
   friend struct ImageCanvas;
   friend struct fb::FrameBuffer;
 
-  uint8_t* getMemory() const { return memory; }
+  Canvas(uint8_t* mem,
+         int width,
+         int height,
+         int stride,
+         int components,
+         Rotation rot = Rotation::None)
+    : mMemory(mem)
+    , mLineSize(stride)
+    , mComponents(components)
+    , mSize(Size{ width, height })
+    , mRotation(rot) {}
+
+  uint8_t* memory() const { return mMemory; }
+
+  uint8_t* getLine(int n) const { return mMemory + (n * mLineSize); }
+  int lineWidth() const { return rotate(mRotation, mSize).width; }
+  int numLines() const { return rotate(mRotation, mSize).height; }
 
   template<typename T = uint8_t>
   const T* getPtr(int x, int y) const {
     assert(sizeof(T) == 1 || sizeof(T) == mComponents);
+    const auto lp = rotate(mSize, mRotation, Point{ x, y });
     // NOLINTNEXTLINE
-    return reinterpret_cast<T*>(memory + y * mLineSize + x * mComponents);
+    return reinterpret_cast<T*>(mMemory + (lp.y * mLineSize) +
+                                (lp.x * mComponents));
   }
 
   template<typename T = uint8_t>
   T* getPtr(int x, int y) {
     assert(sizeof(T) == 1 || sizeof(T) == mComponents);
+    const auto lp = rotate(mSize, mRotation, Point{ x, y });
     // NOLINTNEXTLINE
-    return reinterpret_cast<T*>(memory + y * mLineSize + x * mComponents);
+    return reinterpret_cast<T*>(mMemory + (lp.y * mLineSize) +
+                                (lp.x * mComponents));
   }
 
   template<typename ValueType, typename Func>
@@ -272,12 +268,11 @@ private:
     }
   }
 
-  uint8_t* memory = nullptr;
-
-  int mWidth = 0;
-  int mHeight = 0;
-  int mComponents = 0;
+  uint8_t* mMemory = nullptr;
   int mLineSize = 0;
+  int mComponents = 0;
+  Size mSize = { 0, 0 };
+  Rotation mRotation = Rotation::None;
 };
 
 struct ImageCanvas {

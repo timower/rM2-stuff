@@ -89,6 +89,11 @@ struct Constraints {
   }
 };
 
+inline Constraints
+rotate(const Rotation& rotation, const Constraints& c) {
+  return { rotate(rotation, c.min), rotate(rotation, c.max) };
+}
+
 struct UpdateRegion {
   constexpr UpdateRegion() : region(), waveform(fb::Waveform::DU) {}
 

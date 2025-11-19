@@ -175,7 +175,7 @@ struct Rect {
   constexpr int height() const { return bottomRight.y - topLeft.y + 1; }
   constexpr Size size() const { return { width(), height() }; }
 
-  constexpr bool empty() const { return width() == 0 && height() == 0; }
+  constexpr bool empty() const { return width() == 0 || height() == 0; }
 
   /// Scale the rect by an integer.
   constexpr Rect& operator*=(int val) {
@@ -212,6 +212,9 @@ struct Rect {
   }
 
   constexpr bool contains(const Rect& r) const {
+    if (empty() && r.empty() && r.topLeft == topLeft) {
+      return true;
+    }
     return contains(r.topLeft) && (r.empty() || contains(r.bottomRight));
   }
 
@@ -270,6 +273,67 @@ std::basic_ostream<char, T>&
 operator<<(std::basic_ostream<char, T>& os, const Size& p) {
   os << "{ " << p.width << ", " << p.height << " }";
   return os;
+}
+
+enum class Rotation {
+  None = 0,
+  Clockwise = 1,
+  Inverted = 2,
+  CounterClockwise = 3,
+};
+
+inline Rotation
+rotate(Rotation a, Rotation b) {
+  return static_cast<Rotation>((static_cast<int>(a) + static_cast<int>(b)) % 4);
+}
+
+inline Rotation
+invert(Rotation rot) {
+  switch (rot) {
+    case Rotation::None:
+      return Rotation::None;
+    case Rotation::Clockwise:
+      return Rotation::CounterClockwise;
+    case Rotation::CounterClockwise:
+      return Rotation::Clockwise;
+    case Rotation::Inverted:
+      return Rotation::Inverted;
+  };
+}
+
+inline Point
+rotate(const Size& size, Rotation rotation, const Point& p) {
+  const auto sizePoint = size.toPoint();
+  switch (rotation) {
+    case Rotation::None:
+      return p;
+    case Rotation::Clockwise:
+      return { p.y, sizePoint.x - p.x };
+    case Rotation::CounterClockwise:
+      return { sizePoint.y - p.y, p.x };
+    case Rotation::Inverted:
+      return { sizePoint.x - p.x, sizePoint.y - p.y };
+  };
+}
+
+inline Size
+rotate(Rotation rotation, const Size& s) {
+  switch (rotation) {
+    case Rotation::None:
+    case Rotation::Inverted:
+      return s;
+    case Rotation::Clockwise:
+    case Rotation::CounterClockwise:
+      return { s.height, s.width };
+  };
+}
+
+inline Rect
+rotate(const Size& size, Rotation rotation, const Rect& r) {
+  const auto a = rotate(size, rotation, r.topLeft);
+  const auto b = rotate(size, rotation, r.bottomRight);
+  return { { std::min(a.x, b.x), std::min(a.y, b.y) },
+           { std::max(a.x, b.x), std::max(a.y, b.y) } };
 }
 
 } // namespace rmlib

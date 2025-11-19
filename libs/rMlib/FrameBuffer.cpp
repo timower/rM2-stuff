@@ -87,8 +87,8 @@ FrameBuffer::open(std::optional<Size> requestedSize) {
 
 void
 FrameBuffer::close() {
-  if (canvas.getMemory() != nullptr && fd.isValid()) {
-    munmap(canvas.getMemory(), canvas.totalSize());
+  if (canvas.memory() != nullptr && fd.isValid()) {
+    munmap(canvas.memory(), canvas.totalSize());
   }
   canvas = Canvas{};
 }

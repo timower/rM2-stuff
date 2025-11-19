@@ -78,6 +78,7 @@ public:
       auto subCanvas = canvas.subCanvas(rect);
       auto subRes = doDraw(subCanvas);
       subRes.region += offset;
+
       assert(subRes.region.empty() || rect.contains(subRes.region));
 
       result |= subRes;

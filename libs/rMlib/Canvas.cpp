@@ -300,8 +300,8 @@ ImageCanvas::load(uint8_t* data, int size, int background) {
 
 void
 ImageCanvas::release() {
-  if (canvas.getMemory() != nullptr) {
-    stbi_image_free(canvas.getMemory());
+  if (canvas.memory() != nullptr) {
+    stbi_image_free(canvas.memory());
   }
   canvas = Canvas{};
 }
@@ -312,7 +312,7 @@ MemoryCanvas::MemoryCanvas(const Canvas& other, Rect rect) {
                                        other.components());
   canvas =
     Canvas(memory.get(), rect.width(), rect.height(), other.components());
-  canvas.copy({ 0, 0 }, other, rect);
+  canvas.copy(other);
 }
 
 MemoryCanvas::MemoryCanvas(int width, int height, int components) {
@@ -333,7 +333,7 @@ Canvas::writeImage(const char* path) const {
                      test.canvas.width(),
                      test.canvas.height(),
                      test.canvas.components(),
-                     test.canvas.getMemory(),
+                     test.canvas.memory(),
                      test.canvas.lineSize()) == 0) {
     return Error::make("Error writing image");
   }

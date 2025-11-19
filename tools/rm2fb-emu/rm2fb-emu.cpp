@@ -159,7 +159,7 @@ protected:
   UpdateRegion doDraw(rmlib::Canvas& canvas) override {
     auto result = UpdateRegion{ canvas.rect() };
 
-    canvas.copy({ 0, 0 }, widget->canvas, widget->canvas.rect());
+    canvas.copy(widget->canvas);
 
     if (!isFullDraw()) {
       result = std::accumulate(widget->updateRegions->begin(),
@@ -221,9 +221,8 @@ public:
     }
     setState([&](auto& self) {
       auto [updateRegion, updateCanvas] = std::move(*msgOrErr);
-      self.memCanvas.canvas.copy(updateRegion.region.topLeft,
-                                 updateCanvas.canvas,
-                                 updateCanvas.canvas.rect());
+      auto subCanvas = self.memCanvas.canvas.subCanvas(updateRegion.region);
+      subCanvas.copy(updateCanvas.canvas);
       self.pendingUpdates->push_back(updateRegion);
     });
   }
