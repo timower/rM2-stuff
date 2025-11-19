@@ -332,8 +332,18 @@ inline Rect
 rotate(const Size& size, Rotation rotation, const Rect& r) {
   const auto a = rotate(size, rotation, r.topLeft);
   const auto b = rotate(size, rotation, r.bottomRight);
-  return { { std::min(a.x, b.x), std::min(a.y, b.y) },
-           { std::max(a.x, b.x), std::max(a.y, b.y) } };
+  switch (rotation) {
+    case Rotation::None:
+      return { a, b };
+    case Rotation::Clockwise:
+      return { { a.x, b.y }, { b.x, a.y } };
+
+    case Rotation::Inverted:
+      return { b, a };
+
+    case Rotation::CounterClockwise:
+      return { { b.x, a.y }, { a.x, b.y } };
+  };
 }
 
 } // namespace rmlib

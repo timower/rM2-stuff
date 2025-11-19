@@ -237,7 +237,7 @@ public:
     child->handleInput(ev);
   }
 
-  UpdateRegion cleanup(rmlib::Canvas& canvas) final {
+  UpdateRegion cleanup(rmlib::Canvas& canvas) override {
     if (isFullDraw()) {
       return RenderObject::cleanup(canvas);
     }

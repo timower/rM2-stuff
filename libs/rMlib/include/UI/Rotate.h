@@ -13,6 +13,10 @@ public:
   using SingleChildRenderObject<Rotated<Child>>::SingleChildRenderObject;
 
   void update(const Rotated<Child>& newWidget) {
+    if (this->widget->rot != newWidget.rot) {
+      this->markNeedsLayout();
+      this->markNeedsDraw();
+    }
     this->widget = &newWidget;
     this->widget->child.update(*this->child);
   }
@@ -31,7 +35,7 @@ public:
     return res;
   }
 
-  virtual void doHandleInput(const input::Event& inEv) {
+  void doHandleInput(const input::Event& inEv) override {
     auto ev = inEv;
     std::visit(
       [this](auto& ev) {
@@ -42,6 +46,19 @@ public:
       },
       ev);
     this->child->handleInput(ev);
+  }
+
+  UpdateRegion cleanup(rmlib::Canvas& canvas) override {
+    if (this->isFullDraw()) {
+      return RenderObject::cleanup(canvas);
+    }
+
+    const auto rot = this->getWidget().rot;
+    auto subCanvas = canvas.subCanvas(this->getCleanupRect(), invert(rot));
+    auto subRes = this->child->cleanup(subCanvas);
+    subRes.region = rotate(subCanvas.rect().size(), invert(rot), subRes.region);
+    subRes.region += this->getCleanupRect().topLeft;
+    return subRes;
   }
 };
 
