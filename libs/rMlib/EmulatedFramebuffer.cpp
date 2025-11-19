@@ -4,13 +4,13 @@
 #include <SDL.h>
 
 #include <array>
-#include <atomic>
 #include <csignal>
-#include <iostream>
-#include <thread>
 
 #if EMULATE_UINPUT
 #include <libevdev/libevdev-uinput.h>
+
+#include <atomic>
+#include <thread>
 #endif
 
 bool rmlibDisableWindow = false; // NOLINT
@@ -21,6 +21,10 @@ namespace {
 constexpr auto canvas_components = 2;
 
 constexpr int emulated_fd = 1337;
+
+const bool show_updates = [] {
+  return getenv("RM2_SHOW_UPDATES") != nullptr;
+}();
 
 // Global window for emulation.
 SDL_Window* window = nullptr;      // NOLINT
@@ -37,41 +41,6 @@ putpixel(SDL_Surface* surface, int x, int y, Uint32 pixel) {
   auto* p = // NOLINTNEXTLINE
     reinterpret_cast<Uint8*>(surface->pixels) + y * surface->pitch + x * bpp;
   memcpy(p, &pixel, bpp);
-}
-
-ErrorOr<Canvas>
-makeEmulatedCanvas(Size size) {
-  if (!rmlibDisableWindow) {
-    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-      return Error::make(std::string("could not initialize sdl2:") +
-                         SDL_GetError());
-    }
-
-    window = SDL_CreateWindow("rM emulator",
-                              SDL_WINDOWPOS_UNDEFINED,
-                              SDL_WINDOWPOS_UNDEFINED,
-                              size.width / EMULATE_SCALE,
-                              size.height / EMULATE_SCALE,
-                              SDL_WINDOW_SHOWN);
-    if (window == nullptr) {
-      return Error::make(std::string("could not create window:") +
-                         SDL_GetError());
-    }
-
-    constexpr auto clear_color = 0x1f << 3;
-    auto* screenSurface = SDL_GetWindowSurface(window);
-    SDL_FillRect(
-      screenSurface,
-      nullptr,
-      SDL_MapRGB(screenSurface->format, clear_color, clear_color, clear_color));
-    SDL_UpdateWindowSurface(window);
-  }
-
-  constexpr auto clear_color = 0xaa;
-  const auto memSize = size.width * size.height * canvas_components;
-  emuMem = std::make_unique<uint8_t[]>(memSize); // NOLINT
-  memset(emuMem.get(), clear_color, memSize);
-  return Canvas(emuMem.get(), size.width, size.height, canvas_components);
 }
 
 void
@@ -117,8 +86,8 @@ updateEmulatedCanvas(const Canvas& canvas, Rect region) {
       int g = pixel[1];
       int b = pixel[2];
 
-      if (y == surfStart.y || y == surfEnd.y || x == surfStart.x ||
-          x == surfEnd.x) {
+      if (show_updates && (y == surfStart.y || y == surfEnd.y ||
+                           x == surfStart.x || x == surfEnd.x)) {
         r = color == 2 ? UINT8_MAX : 0x00;
         g = color == 1 ? UINT8_MAX : 0x00;
         b = color == 0 ? UINT8_MAX : 0x00;
@@ -134,6 +103,46 @@ updateEmulatedCanvas(const Canvas& canvas, Rect region) {
   rect.w = region.width() / EMULATE_SCALE + 1;
   rect.h = region.height() / EMULATE_SCALE + 1;
   SDL_UpdateWindowSurfaceRects(window, &rect, 1);
+}
+
+ErrorOr<Canvas>
+makeEmulatedCanvas(Size size) {
+  if (!rmlibDisableWindow) {
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+      return Error::make(std::string("could not initialize sdl2:") +
+                         SDL_GetError());
+    }
+
+    window = SDL_CreateWindow("rM emulator",
+                              SDL_WINDOWPOS_UNDEFINED,
+                              SDL_WINDOWPOS_UNDEFINED,
+                              size.width / EMULATE_SCALE,
+                              size.height / EMULATE_SCALE,
+                              SDL_WINDOW_SHOWN);
+    if (window == nullptr) {
+      return Error::make(std::string("could not create window:") +
+                         SDL_GetError());
+    }
+
+    constexpr auto clear_color = 0x1f << 3;
+    auto* screenSurface = SDL_GetWindowSurface(window);
+    SDL_FillRect(
+      screenSurface,
+      nullptr,
+      SDL_MapRGB(screenSurface->format, clear_color, clear_color, clear_color));
+    SDL_UpdateWindowSurface(window);
+  }
+
+  const auto memSize = size.width * size.height * canvas_components;
+  emuMem = std::make_unique<uint8_t[]>(memSize); // NOLINT
+
+  auto res = Canvas(emuMem.get(), size.width, size.height, canvas_components);
+  res.transform([](auto x, auto y, auto val) {
+    return ((x / 4) % 2 == (y / 4) % 2) ? black : white;
+  });
+  updateEmulatedCanvas(res, res.rect());
+
+  return res;
 }
 
 std::string
