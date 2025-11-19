@@ -353,8 +353,29 @@ InputManager::open(std::string_view input) {
   auto device = makeDevice(
     std::move(fd), std::move(dev), std::string(input), baseTransform);
   auto* devicePtr = device.get();
+
   std::cout << "Got device: " << device->getName() << "\n";
+  auto* devPtr = device.get();
   devices.emplace(devicePtr->path, std::move(device));
+
+  auto baseDev = device::getBaseDevice(devPtr->getName());
+  if (baseDev) {
+    switch (baseDev->type) {
+      case device::InputType::Keyboard:
+        baseDevices.pogoKeyboard = devPtr;
+        break;
+      case device::InputType::Power:
+        baseDevices.key = devPtr;
+        break;
+      case device::InputType::Pen:
+        baseDevices.pen = devPtr;
+        break;
+      case device::InputType::MultiTouch:
+        baseDevices.touch = devPtr;
+        break;
+    }
+  }
+
   return devicePtr;
 }
 
@@ -396,24 +417,6 @@ InputManager::openAll(bool monitor) {
 
   } else {
     this->udevMonitorFd = unistdpp::FD{};
-  }
-
-  for (const auto& [_, dev] : devices) {
-    auto baseDev = device::getBaseDevice(dev->getName());
-    if (!baseDev) {
-      continue;
-    }
-    switch (baseDev->type) {
-      case device::InputType::Key:
-        baseDevices.key = dev.get();
-        break;
-      case device::InputType::Pen:
-        baseDevices.pen = dev.get();
-        break;
-      case device::InputType::MultiTouch:
-        baseDevices.touch = dev.get();
-        break;
-    }
   }
 
   return baseDevices;

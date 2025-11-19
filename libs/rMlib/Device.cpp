@@ -28,7 +28,7 @@ struct BaseDeviceName : BaseDevice {
   std::string_view name;
 };
 
-using BaseDevices = std::array<BaseDeviceName, 3>;
+using BaseDevices = std::array<BaseDeviceName, 4>;
 
 const BaseDevices rm1_paths = { {
   // touch
@@ -42,7 +42,9 @@ const BaseDevices rm1_paths = { {
   { { InputType::Pen, wacom_transform }, "Wacom I2C Digitizer" },
 
   // keys
-  { { InputType::Key, {} }, "gpio-keys" },
+  { { InputType::Power, {} }, "gpio-keys" },
+
+  { { InputType::Keyboard, {} }, "rM_Keyboard" },
 } };
 
 const BaseDevices rm2_paths = { {
@@ -55,7 +57,8 @@ const BaseDevices rm2_paths = { {
   { { InputType::Pen, wacom_transform }, "Wacom I2C Digitizer" },
 
   // keys
-  { { InputType::Key, {} }, "snvs-powerkey" },
+  { { InputType::Power, {} }, "snvs-powerkey" },
+  { { InputType::Keyboard, {} }, "rM_Keyboard" },
 } };
 
 const BaseDevices&

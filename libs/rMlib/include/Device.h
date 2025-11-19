@@ -18,7 +18,7 @@ enum class DeviceType { reMarkable1, reMarkable2 };
 ErrorOr<DeviceType>
 getDeviceType();
 
-enum class InputType { MultiTouch, Pen, Key };
+enum class InputType { MultiTouch, Pen, Power, Keyboard };
 struct BaseDevice {
   InputType type = InputType::MultiTouch;
   Transform transform = {};

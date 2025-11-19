@@ -96,6 +96,8 @@ struct BaseDevices {
   InputDeviceBase* pen = nullptr;
   InputDeviceBase* touch = nullptr;
   InputDeviceBase* key = nullptr;
+
+  InputDeviceBase* pogoKeyboard = nullptr;
 };
 
 struct InputManager {
@@ -128,7 +130,8 @@ struct InputManager {
       std::pair<std::vector<Event>, std::array<bool, sizeof...(ExtraFds)>>>> {
 
     static_assert(((std::is_same_v<ExtraFds, unistdpp::FD> ||
-                    std::is_same_v<ExtraFds, int>)&&...));
+                    std::is_same_v<ExtraFds, int>) &&
+                   ...));
 
     std::vector<pollfd> fds;
 
@@ -160,7 +163,18 @@ struct InputManager {
   BaseDevices getBaseDevices() const { return baseDevices; }
 
   size_t numDevices() const { return devices.size(); }
-  void removeDevice(std::string_view path) { devices.erase(path); }
+  void removeDevice(std::string_view path) {
+    auto it = devices.find(path);
+    if (it == devices.end()) {
+      return;
+    }
+
+    if (it->second.get() == baseDevices.pogoKeyboard) {
+      baseDevices.pogoKeyboard = nullptr;
+    }
+
+    devices.erase(it);
+  }
 
 private:
   /// members
