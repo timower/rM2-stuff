@@ -65,3 +65,15 @@ TEST_CASE("Tilem", "[tilem][ui]") {
     REQUIRE(ctx.shouldStop());
   }
 }
+
+TEST_CASE("Tilem Landscape", "[tilem][ui]") {
+  TemporaryDirectory tmp(/* cwd */ true);
+  const std::string romPath = "unit_test.rom";
+
+  auto ctx = TestContext::make(/*keyboardAttached=*/true);
+
+  ctx.pumpWidget(Center(Navigator(Calculator(romPath))));
+
+  auto calc = ctx.findByType<Calculator>();
+  REQUIRE_THAT(calc, ctx.matchesGolden("tilem-landscape.png"));
+}

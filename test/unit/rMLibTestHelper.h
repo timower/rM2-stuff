@@ -11,6 +11,8 @@
 
 #include <SDL_events.h>
 
+extern bool haveKeyboard;
+
 const std::filesystem::path assets_path = ASSETS_PATH;
 
 using Finder = std::function<bool(const rmlib::RenderObject*)>;
@@ -68,7 +70,9 @@ struct TestContext : rmlib::AppContext {
 
   static constexpr auto default_pump = std::chrono::milliseconds(1);
 
-  static TestContext make() {
+  static TestContext make(bool keyboardAttached = false) {
+    haveKeyboard = keyboardAttached;
+
     auto appCtx = AppContext::makeContext();
     REQUIRE(appCtx.has_value());
     return TestContext(std::move(*appCtx));

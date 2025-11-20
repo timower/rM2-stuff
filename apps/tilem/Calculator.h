@@ -4,6 +4,7 @@
 #include "Screen.h"
 
 #include <UI.h>
+#include <UI/Rotate.h>
 
 #include <tilem.h>
 
@@ -14,7 +15,7 @@ class Calculator : public rmlib::StatefulWidget<Calculator> {
 public:
   Calculator(std::string romPath);
 
-  static CalcState createState() ;
+  static CalcState createState();
 
 private:
   friend class CalcState;
@@ -57,10 +58,11 @@ public:
     constexpr auto height = scale * 64;
 
     return Cleared(
-      Center(Border(Column(header(context, width),
-                           Sized(Screen(mCalc), width, height),
-                           Sized(Keypad(mCalc), width, std::nullopt)),
-                    Insets::all(1))));
+      Center(Rotated(rotation,
+                     Border(Column(header(context, width),
+                                   Sized(Screen(mCalc), width, height),
+                                   Sized(Keypad(mCalc), width, std::nullopt)),
+                            Insets::all(1)))));
   }
 
   ~CalcState();
@@ -69,6 +71,7 @@ private:
   TilemCalc* loadCalc() const;
 
   void updateCalcState();
+  void updateRotation(rmlib::AppContext& context);
 
   TilemCalc* mCalc = nullptr;
 
@@ -76,5 +79,7 @@ private:
   rmlib::TimerHandle popupTimer;
 
   std::chrono::steady_clock::time_point lastUpdateTime;
+
+  rmlib::Rotation rotation = rmlib::Rotation::None;
 };
 } // namespace tilem

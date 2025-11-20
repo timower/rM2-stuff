@@ -11,6 +11,8 @@
 
 #include <SDL.h>
 
+bool haveKeyboard = false;
+
 namespace rmlib::input {
 
 void
@@ -64,6 +66,9 @@ InputManager::openAll(bool monitor) {
   devices.emplace("Test", std::move(fakeDev));
 
   baseDevices = { fakeDevRef, fakeDevRef, fakeDevRef };
+  if (haveKeyboard) {
+    baseDevices.pogoKeyboard = fakeDevRef;
+  }
   return baseDevices;
 }
 
