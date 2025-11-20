@@ -4,6 +4,7 @@
 #include "AppWidgets.h"
 
 #include <UI.h>
+#include <UI/Rotate.h>
 
 class LauncherState;
 
@@ -75,7 +76,8 @@ public:
               self.stopTimer();
             });
           },
-          app.description().path == currentAppPath);
+          app.description().path == currentAppPath,
+          invert(rotation));
       }
     }
     return Wrap(widgets);
@@ -119,7 +121,7 @@ public:
 
     auto ui = [&]() -> DynamicWidget {
       if (visible) {
-        return launcher(context);
+        return Rotated(rotation, launcher(context));
       }
 
       if (background == nullptr) {
@@ -127,8 +129,10 @@ public:
       }
 
       if (backgroundSize.has_value()) {
-        return Center(Sized(
-          Image(*background), backgroundSize->width, backgroundSize->height));
+        return Center(Rotated(rotation,
+                              Sized(Image(*background),
+                                    backgroundSize->width,
+                                    backgroundSize->height)));
       }
       return Image(*background);
     }();
@@ -168,6 +172,8 @@ private:
 
   void resetInactivity() const;
 
+  void updateRotation(rmlib::AppContext& ctx);
+
   std::vector<App> apps;
   std::string currentAppPath;
 
@@ -178,6 +184,8 @@ private:
 
   const rmlib::Canvas* fbCanvas = nullptr;
   rmlib::input::InputDeviceBase* touchDevice = nullptr;
+
+  rmlib::Rotation rotation = rmlib::Rotation::None;
 
   int sleepCountdown = -1;
   mutable int inactivityCountdown = default_inactivity_timeout;

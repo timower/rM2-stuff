@@ -166,8 +166,8 @@ TEST_CASE("AppWidget", "[rocket]") {
 
     bool current = GENERATE(true, false);
 
-    ctx.pumpWidget(Center(
-      RunningAppWidget(app, [&] { tapped++; }, [&] { killed++; }, current)));
+    ctx.pumpWidget(Center(RunningAppWidget(
+      app, [&] { tapped++; }, [&] { killed++; }, current, Rotation::None)));
 
     auto appWidget = ctx.findByType<RunningAppWidget>();
     REQUIRE_THAT(
@@ -183,12 +183,12 @@ TEST_CASE("AppWidget", "[rocket]") {
   }
 }
 
-TEST_CASE("Launcher", "[rocket]") {
+TemporaryDirectory
+makeDrafts() {
   TemporaryDirectory tmp;
 
   const auto configPath = tmp.dir / ".config" / "draft";
   REQUIRE_NOTHROW(std::filesystem::create_directories(configPath));
-  setenv("HOME", tmp.dir.c_str(), true);
 
   writeFile(configPath / "a.draft", R"(
 name=a
@@ -201,6 +201,24 @@ imgFile=a
 name=b
 call=yes
     )");
+
+  return tmp;
+}
+
+TEST_CASE("Landscape", "[rocket]") {
+  auto tmp = makeDrafts();
+  setenv("HOME", tmp.dir.c_str(), true);
+
+  auto ctx = TestContext::make(/*keyboardAttached=*/true);
+  ctx.pumpWidget(Center(LauncherWidget()));
+  auto launcher = ctx.findByType<LauncherWidget>();
+
+  REQUIRE_THAT(launcher, ctx.matchesGolden("rocket-landscape.png"));
+}
+
+TEST_CASE("Launcher", "[rocket]") {
+  auto tmp = makeDrafts();
+  setenv("HOME", tmp.dir.c_str(), true);
 
   auto ctx = TestContext::make();
   ctx.pumpWidget(Center(LauncherWidget()));

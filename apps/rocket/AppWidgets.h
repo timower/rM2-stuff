@@ -1,6 +1,7 @@
 #pragma once
 
 #include <UI.h>
+#include <UI/Rotate.h>
 
 #include "App.h"
 
@@ -12,10 +13,12 @@ public:
   RunningAppWidget(const App& app,
                    rmlib::Callback onTap,
                    rmlib::Callback onKill,
-                   bool isCurrent)
+                   bool isCurrent,
+                   rmlib::Rotation rotation)
     : app(app)
     , onTap(std::move(onTap))
     , onKill(std::move(onKill))
+    , rotation(rotation)
     , isCurrent(isCurrent) {}
 
   auto build(rmlib::AppContext& /*unused*/,
@@ -26,7 +29,7 @@ public:
                                                      : getMissingImage().canvas;
 
     return container(
-      Column(GestureDetector(Sized(Image(canvas), 234, 300),
+      Column(GestureDetector(Rotated(rotation, Sized(Image(canvas), 234, 300)),
                              Gestures{}.onTap(onTap)),
              Row(Text(app.description().name), Button("X", onKill))),
       Insets::all(isCurrent ? 1 : 2),
@@ -38,6 +41,7 @@ private:
   const App& app;
   rmlib::Callback onTap;
   rmlib::Callback onKill;
+  rmlib::Rotation rotation;
   bool isCurrent;
 };
 

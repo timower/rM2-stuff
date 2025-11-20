@@ -109,6 +109,7 @@ LauncherState
 LauncherWidget::createState() {
   return LauncherState{};
 }
+
 void
 LauncherState::init(rmlib::AppContext& context,
                     const rmlib::BuildContext& /*unused*/) {
@@ -139,6 +140,10 @@ LauncherState::init(rmlib::AppContext& context,
       }
     },
     std::chrono::minutes(1));
+
+  updateRotation(context);
+  context.onDeviceUpdate(
+    [this, &context] { modify().updateRotation(context); });
 }
 
 bool
@@ -377,4 +382,11 @@ LauncherState::readApps() {
 void
 LauncherState::resetInactivity() const {
   inactivityCountdown = default_inactivity_timeout;
+}
+
+void
+LauncherState::updateRotation(rmlib::AppContext& ctx) {
+  rotation = ctx.getInputManager().getBaseDevices().pogoKeyboard != nullptr
+               ? Rotation::Clockwise
+               : Rotation::None;
 }
