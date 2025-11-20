@@ -342,8 +342,8 @@ InputManager::open(std::string_view input) {
     return InputDeviceBase::EvDevPtr(dev);
   }());
 
+  auto base = device::getBaseDevice(libevdev_get_name(dev.get()));
   auto baseTransform = [&]() -> Transform {
-    auto base = device::getBaseDevice(libevdev_get_name(dev.get()));
     if (!base) {
       return {};
     }
@@ -358,20 +358,27 @@ InputManager::open(std::string_view input) {
   auto* devPtr = device.get();
   devices.emplace(devicePtr->path, std::move(device));
 
-  auto baseDev = device::getBaseDevice(devPtr->getName());
-  if (baseDev) {
-    switch (baseDev->type) {
+  if (base) {
+    switch (base->type) {
       case device::InputType::Keyboard:
-        baseDevices.pogoKeyboard = devPtr;
+        if (baseDevices.pogoKeyboard == nullptr) {
+          baseDevices.pogoKeyboard = devPtr;
+        }
         break;
       case device::InputType::Power:
-        baseDevices.key = devPtr;
+        if (baseDevices.key == nullptr) {
+          baseDevices.key = devPtr;
+        }
         break;
       case device::InputType::Pen:
-        baseDevices.pen = devPtr;
+        if (baseDevices.pen == nullptr) {
+          baseDevices.pen = devPtr;
+        }
         break;
       case device::InputType::MultiTouch:
-        baseDevices.touch = devPtr;
+        if (baseDevices.touch == nullptr) {
+          baseDevices.touch = devPtr;
+        }
         break;
     }
   }
