@@ -159,7 +159,8 @@ TEST_CASE("Yaft", "[yaft][ui]") {
   cfgAndErr.config = YaftConfig::getDefault();
 
   SECTION("landscape") {
-    cfgAndErr.config.orientation = YaftConfig::Orientation::Landscape;
+    cfgAndErr.config.rotation = rmlib::Rotation::Clockwise;
+    cfgAndErr.config.layout = &empty_layout;
     cfgAndErr.err = YaftConfigError{ YaftConfigError::Missing, "Error test!" };
 
     ctx.pumpWidget(Yaft(args.front(), args.data(), cfgAndErr));
@@ -170,7 +171,7 @@ TEST_CASE("Yaft", "[yaft][ui]") {
   }
 
   SECTION("portrait") {
-    cfgAndErr.config.orientation = YaftConfig::Orientation::Protrait;
+    cfgAndErr.config.rotation = rmlib::Rotation::None;
 
     ctx.pumpWidget(Yaft(args.front(), args.data(), cfgAndErr));
     ctx.pump();

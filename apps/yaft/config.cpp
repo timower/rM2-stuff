@@ -14,10 +14,10 @@ layout = "qwerty"
 keymap = "rm-qwerty"
 
 # Orientation of yaft:
-# - auto: portrait, unless a type folio is connected.
-# - portrait
-# - landscape
-orientation = "auto"
+# Auto rotate if keyboard is connected
+auto-rotate = true
+# Orientation if no keyboard is connected
+rotation = "none"
 
 # Do a full refresh after 1024 updates.
 # Set to 0 to disable auto refresh.
@@ -109,13 +109,15 @@ getConfig(const toml::table& input) {
   parseMapping(errors, cfg.layout, tbl, "layout", layouts);
   parseMapping(errors, cfg.keymap, tbl, "keymap", keymaps);
   parseMapping(errors,
-               cfg.orientation,
+               cfg.rotation,
                tbl,
-               "orientation",
-               { { "auto", YaftConfig::Orientation::Auto },
-                 { "portrait", YaftConfig::Orientation::Protrait },
-                 { "landscape", YaftConfig::Orientation::Landscape } });
+               "rotation",
+               { { "none", rmlib::Rotation::None },
+                 { "clockwise", rmlib::Rotation::Clockwise },
+                 { "inverted", rmlib::Rotation::Inverted },
+                 { "counterclockwise", rmlib::Rotation::CounterClockwise } });
 
+  parseValue(errors, cfg.autoRotate, tbl, "auto-rotate");
   parseValue(errors, cfg.autoRefresh, tbl, "auto-refresh");
   parseValue(errors, cfg.repeatDelay, tbl, "repeat-delay");
   parseValue(errors, cfg.repeatRate, tbl, "repeat-rate");

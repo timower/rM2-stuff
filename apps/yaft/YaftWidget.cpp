@@ -141,15 +141,13 @@ void
 YaftState::checkLandscape(rmlib::AppContext& ctx) {
   const auto& config = getWidget().config;
 
-  if (config.orientation == YaftConfig::Orientation::Auto) {
-
-    // The pogo state updates after a delay, so wait 100 ms before checking.
-    pogoTimer = ctx.addTimer(std::chrono::milliseconds(100), [this] {
-      setState(
-        [](auto& self) { self.isLandscape = device::isPogoConnected(); });
-    });
+  if (config.autoRotate) {
+    const auto hasKeyboard =
+      ctx.getInputManager().getBaseDevices().pogoKeyboard != nullptr;
+    hideKeyboard = hasKeyboard;
+    rotation = hasKeyboard ? Rotation::Clockwise : config.rotation;
   } else {
-    isLandscape = config.orientation == YaftConfig::Orientation::Landscape;
+    rotation = config.rotation;
   }
 }
 

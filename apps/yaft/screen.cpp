@@ -113,7 +113,7 @@ ScreenRenderObject::doDraw(rmlib::Canvas& canvas) {
     bool useA2 = widget->isLandscape
                    ? term.lines * CELL_HEIGHT <= currentRect.width()
                    : term.lines * CELL_HEIGHT <= currentRect.height();
-    fb->doUpdate(currentRect,
+    fb->doUpdate(canvas.subCanvas(currentRect),
                  useA2 ? fb::Waveform::A2 : fb::Waveform::DU,
                  useA2 ? fb::UpdateFlags::None : fb::UpdateFlags::Priority);
 
@@ -133,6 +133,7 @@ ScreenRenderObject::doDraw(rmlib::Canvas& canvas) {
   if (shouldRefresh()) {
     term.shouldClear = false;
     numUpdates = 0;
+    // TODO: sync
     return { canvas.rect(), fb::Waveform::GC16, fb::UpdateFlags::FullRefresh };
   }
 

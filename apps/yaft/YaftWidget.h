@@ -7,6 +7,7 @@
 
 #include <yaft.h>
 
+#include <UI/Rotate.h>
 #include <UI/StatefulWidget.h>
 
 class YaftState;
@@ -49,11 +50,11 @@ public:
     const auto& cfg = getWidget().config;
 
     const auto& layout = [this, &cfg]() -> const Layout& {
-      if (isLandscape) {
+      if (hideKeyboard) {
         return empty_layout;
       }
 
-      if (hidden) {
+      if (smallKeyboard) {
         return hidden_layout;
       }
 
@@ -61,24 +62,28 @@ public:
     }();
 
     const auto repeatRateMs = std::chrono::milliseconds(1000) / cfg.repeatRate;
-    return Column(
-      Expanded(Screen(term.get(), isLandscape, cfg.autoRefresh)),
-      Keyboard(term.get(),
-               KeyboardParams{
-                 .layout = layout,
-                 .keymap = *cfg.keymap,
-                 .repeatDelay = std::chrono::milliseconds(cfg.repeatDelay),
-                 .repeatTime = repeatRateMs,
-               },
-               [this](int num) {
-                 setState([](auto& self) { self.hidden = !self.hidden; });
-               }));
+    return Rotated(rotation,
+                   Column(Expanded(Screen(term.get(), false, cfg.autoRefresh)),
+                          Keyboard(term.get(),
+                                   KeyboardParams{
+                                     .layout = layout,
+                                     .keymap = *cfg.keymap,
+                                     .repeatDelay = std::chrono::milliseconds(
+                                       cfg.repeatDelay),
+                                     .repeatTime = repeatRateMs,
+                                   },
+                                   [this](int num) {
+                                     setState([](auto& self) {
+                                       self.smallKeyboard = !self.smallKeyboard;
+                                     });
+                                   })));
   }
 
 private:
   std::unique_ptr<terminal_t> term;
   rmlib::TimerHandle pogoTimer;
 
-  bool hidden = false;
-  bool isLandscape = false;
+  rmlib::Rotation rotation = rmlib::Rotation::None;
+  bool smallKeyboard = false;
+  bool hideKeyboard = false;
 };
