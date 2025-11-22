@@ -10,7 +10,9 @@
 
 #include <Device.h>
 
-#include <sstream>
+#include <sys/inotify.h>
+
+#include <unistdpp/file.h>
 
 using namespace rmlib;
 
@@ -69,6 +71,15 @@ forkAndExec(int* master,
 }
 } // namespace
 
+YaftConfigAndError
+Yaft::getConfigAndError() const {
+  if (std::holds_alternative<YaftConfigAndError>(configOrPath)) {
+    return std::get<YaftConfigAndError>(configOrPath);
+  }
+
+  return loadConfigOrMakeDefault(std::get<std::filesystem::path>(configOrPath));
+}
+
 YaftState::~YaftState() {
   if (term) {
     term_die(term.get());
@@ -87,13 +98,28 @@ YaftState::init(rmlib::AppContext& ctx, const rmlib::BuildContext& /*unused*/) {
   // term_init needs the maximum size of the terminal.
   int maxSize = std::max(ctx.getFbCanvas().width(), ctx.getFbCanvas().height());
   if (!term_init(term.get(), maxSize, maxSize)) {
-    std::cout << "Error init term\n";
+    std::cerr << "Error init term\n";
     ctx.stop();
     return;
   }
 
-  if (const auto& err = getWidget().configError; err.has_value()) {
+  auto cfgAndError = getWidget().getConfigAndError();
+  config = std::move(cfgAndError.config);
+
+  if (const auto& err = cfgAndError.err; err.has_value()) {
     logTerm(err->msg);
+  }
+
+  if (std::holds_alternative<std::filesystem::path>(getWidget().configOrPath)) {
+    watchPath = std::get<std::filesystem::path>(getWidget().configOrPath);
+    inotifyFd = unistdpp::FD(inotify_init());
+    if (inotifyFd.isValid()) {
+      inotifyWd = inotify_add_watch(inotifyFd.fd,
+                                    watchPath.parent_path().c_str(),
+                                    IN_MODIFY | IN_CREATE | IN_CLOSE_WRITE);
+
+      ctx.listenFd(inotifyFd.fd, [this, &ctx] { readInotify(ctx); });
+    }
   }
 
   initSignalHandler(ctx);
@@ -139,8 +165,6 @@ YaftState::init(rmlib::AppContext& ctx, const rmlib::BuildContext& /*unused*/) {
 
 void
 YaftState::checkLandscape(rmlib::AppContext& ctx) {
-  const auto& config = getWidget().config;
-
   if (config.autoRotate) {
     const auto hasKeyboard =
       ctx.getInputManager().getBaseDevices().pogoKeyboard != nullptr;
@@ -149,6 +173,46 @@ YaftState::checkLandscape(rmlib::AppContext& ctx) {
   } else {
     rotation = config.rotation;
   }
+}
+
+void
+YaftState::readInotify(rmlib::AppContext& ctx) const {
+  union {
+    std::array<char, 4096> buf;
+    inotify_event ev;
+  } evUnion;
+
+  auto read = unistdpp::read(inotifyFd, &evUnion, sizeof(evUnion));
+  if (!read.has_value()) {
+    std::cerr << "inotify read failed: " << to_string(read.error()) << "\n";
+    return;
+  }
+
+  bool shouldReload = false;
+  const inotify_event* event;
+  for (char* ptr = evUnion.buf.begin(); ptr < evUnion.buf.begin() + *read;
+       ptr += sizeof(struct inotify_event) + event->len) {
+    event = (const struct inotify_event*)ptr;
+
+    if (event->wd == inotifyWd && event->name == watchPath.filename()) {
+      shouldReload = true;
+    }
+  }
+
+  if (!shouldReload) {
+    return;
+  }
+
+  std::cerr << "inotify: Config updated, reloading\n";
+  setState([&](auto& self) {
+    auto cfgAndErr = loadConfig(self.watchPath);
+    if (cfgAndErr.err.has_value()) {
+      self.logTerm(cfgAndErr.err->msg);
+    }
+
+    self.config = cfgAndErr.config;
+    self.checkLandscape(ctx);
+  });
 }
 
 YaftState

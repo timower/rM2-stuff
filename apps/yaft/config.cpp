@@ -13,10 +13,11 @@ layout = "qwerty"
 # Keymap for any physical keyboards. Defaults to the us rM pogo keyboard.
 keymap = "rm-qwerty"
 
-# Orientation of yaft:
-# Auto rotate if keyboard is connected
+# Auto rotate if keyboard is connected.
 auto-rotate = true
-# Orientation if no keyboard is connected
+
+# Orientation if no keyboard is connected:
+#  * none, clockwise, inverted, counterclockwise
 rotation = "none"
 
 # Do a full refresh after 1024 updates.
@@ -28,25 +29,6 @@ repeat-delay = 600
 # Repeat rate in chars per second.
 repeat-rate = 25
 )";
-
-std::filesystem::path
-getConfigPath() {
-  const auto configDir = [] {
-    if (const auto* xdgCfg = getenv("XDG_CONFIG_HOME");
-        xdgCfg != nullptr && xdgCfg[0] != 0) {
-      return std::filesystem::path(xdgCfg);
-    }
-
-    const auto* home = getenv("HOME");
-    if (home == nullptr || home[0] == 0) {
-      home = "/home/root";
-    }
-
-    return std::filesystem::path(home) / ".config" / "yaft";
-  }();
-
-  return configDir / "config.toml";
-}
 
 void
 addError(std::optional<YaftConfigError>& error, YaftConfigError err) {
@@ -135,6 +117,25 @@ getConfig(const toml::table& input) {
 
 } // namespace
 
+std::filesystem::path
+getConfigPath() {
+  const auto configDir = [] {
+    if (const auto* xdgCfg = getenv("XDG_CONFIG_HOME");
+        xdgCfg != nullptr && xdgCfg[0] != 0) {
+      return std::filesystem::path(xdgCfg);
+    }
+
+    const auto* home = getenv("HOME");
+    if (home == nullptr || home[0] == 0) {
+      home = "/home/root";
+    }
+
+    return std::filesystem::path(home) / ".config" / "yaft";
+  }();
+
+  return configDir / "config.toml";
+}
+
 YaftConfig
 YaftConfig::getDefault() {
   auto tbl = toml::parse(default_config);
@@ -142,17 +143,16 @@ YaftConfig::getDefault() {
 }
 
 YaftConfigAndError
-loadConfig() {
+loadConfig(const std::filesystem::path& path) {
   toml::table tbl;
 
-  const auto path = getConfigPath();
   if (!std::filesystem::exists(path)) {
     return { YaftConfig::getDefault(),
              YaftConfigError{ YaftConfigError::Missing, path.string() } };
   }
 
   try {
-    tbl = toml::parse_file(getConfigPath().c_str());
+    tbl = toml::parse_file(path.c_str());
   } catch (const toml::parse_error& err) {
     return { YaftConfig::getDefault(),
              YaftConfigError{ YaftConfigError::Syntax,
@@ -164,8 +164,7 @@ loadConfig() {
 }
 
 OptError<>
-saveDefaultConfig() {
-  const auto path = getConfigPath();
+saveDefaultConfig(const std::filesystem::path& path) {
   const auto dir = path.parent_path();
 
   std::error_code ec;
@@ -189,8 +188,8 @@ saveDefaultConfig() {
 }
 
 YaftConfigAndError
-loadConfigOrMakeDefault() {
-  auto result = loadConfig();
+loadConfigOrMakeDefault(const std::filesystem::path& path) {
+  auto result = loadConfig(path);
   if (!result.err.has_value()) {
     return result;
   }
@@ -198,7 +197,7 @@ loadConfigOrMakeDefault() {
   auto& err = *result.err;
   if (err.type == YaftConfigError::Missing) {
     err.msg = "No config, creating new one\r\n";
-    if (const auto optErr = saveDefaultConfig(); !optErr.has_value()) {
+    if (const auto optErr = saveDefaultConfig(path); !optErr.has_value()) {
       err.msg += optErr.error().msg + "\r\n";
     }
   } else {

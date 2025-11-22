@@ -11,6 +11,9 @@ constexpr auto open = FnWrapper<::open, Result<FD>(const char*, int)>{};
 constexpr auto lseek =
   FnWrapper<::lseek, Result<off_t>(const FD&, off_t, int)>{};
 
+constexpr auto read =
+  FnWrapper<::read, Result<int>(const FD&, void*, size_t)>{};
+
 constexpr auto ftruncate =
   FnWrapper<::ftruncate, Result<void>(const FD&, off_t)>{};
 

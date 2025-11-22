@@ -1,8 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "TempFiles.h"
 #include "rMLibTestHelper.h"
 
 #include "YaftWidget.h"
+
+#include <fstream>
 
 using namespace rmlib;
 
@@ -209,4 +212,26 @@ TEST_CASE("Yaft", "[yaft][ui]") {
       REQUIRE(ctx.shouldStop());
     }
   }
+}
+
+TEST_CASE("inotify", "[yaft][ui]") {
+  TemporaryDirectory tmp;
+  setenv("HOME", tmp.dir.c_str(), 1);
+  setenv("XDG_CONFIG_HOME", "", 1);
+
+  std::string program = CAT_EXE;
+  std::vector<char*> args = { program.data(), nullptr };
+
+  auto ctx = TestContext::make();
+  ctx.pumpWidget(Yaft(args.front(), args.data(), getConfigPath()));
+
+  auto yaft = ctx.findByType<Yaft>();
+  REQUIRE_THAT(yaft, ctx.matchesGolden("yaft-new.png"));
+
+  std::ofstream cfgOfs(tmp.dir / ".config" / "yaft" / "config.toml");
+  cfgOfs << "rotation = \"inverted\"";
+  cfgOfs.close();
+
+  ctx.pump();
+  REQUIRE_THAT(yaft, ctx.matchesGolden("yaft-inverted.png"));
 }

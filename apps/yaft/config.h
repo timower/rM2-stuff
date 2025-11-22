@@ -2,6 +2,7 @@
 
 #include "Error.h"
 
+#include <filesystem>
 #include <optional>
 #include <string>
 
@@ -43,16 +44,19 @@ struct YaftConfigAndError {
   std::optional<YaftConfigError> err;
 };
 
+std::filesystem::path
+getConfigPath();
+
 /// Load the config from the `~/.config/yaft/config.toml` location.
 YaftConfigAndError
-loadConfig();
+loadConfig(const std::filesystem::path& path);
 
 OptError<>
-saveDefaultConfig();
+saveDefaultConfig(const std::filesystem::path& path);
 
 /// Always returns a config, either the default one or the one on the file
 /// system. Will also make a new config file if it didn't exist.
 ///
 /// If any error occured during the loading of the config, it's also returned.
 YaftConfigAndError
-loadConfigOrMakeDefault();
+loadConfigOrMakeDefault(const std::filesystem::path& path);

@@ -71,6 +71,7 @@
             packages = with pkgs; [
               clang-tools
               libllvm
+              lldb
             ];
           };
         }

@@ -10,23 +10,26 @@
 #include <UI/Rotate.h>
 #include <UI/StatefulWidget.h>
 
+#include <filesystem>
+
 class YaftState;
 
 class Yaft : public rmlib::StatefulWidget<Yaft> {
 public:
   Yaft(const char* cmd, char* const argv[], YaftConfigAndError config)
-    : config(std::move(config.config))
-    , configError(std::move(config.err))
-    , cmd(cmd)
-    , argv(argv) {}
+    : configOrPath(std::move(config)), cmd(cmd), argv(argv) {}
+
+  Yaft(const char* cmd, char* const argv[], std::filesystem::path configPath)
+    : configOrPath(std::move(configPath)), cmd(cmd), argv(argv) {}
 
   static YaftState createState();
+
+  YaftConfigAndError getConfigAndError() const;
 
 private:
   friend class YaftState;
 
-  YaftConfig config;
-  std::optional<YaftConfigError> configError;
+  std::variant<YaftConfigAndError, std::filesystem::path> configOrPath;
 
   const char* cmd;
   char* const* argv;
@@ -41,15 +44,11 @@ public:
 
   void init(rmlib::AppContext& ctx, const rmlib::BuildContext& /*unused*/);
 
-  void checkLandscape(rmlib::AppContext& ctx);
-
   auto build(rmlib::AppContext& ctx,
              const rmlib::BuildContext& buildCtx) const {
     using namespace rmlib;
 
-    const auto& cfg = getWidget().config;
-
-    const auto& layout = [this, &cfg]() -> const Layout& {
+    const auto& layout = [this]() -> const Layout& {
       if (hideKeyboard) {
         return empty_layout;
       }
@@ -58,31 +57,41 @@ public:
         return hidden_layout;
       }
 
-      return *cfg.layout;
+      return *config.layout;
     }();
 
-    const auto repeatRateMs = std::chrono::milliseconds(1000) / cfg.repeatRate;
-    return Rotated(rotation,
-                   Column(Expanded(Screen(term.get(), false, cfg.autoRefresh)),
-                          Keyboard(term.get(),
-                                   KeyboardParams{
-                                     .layout = layout,
-                                     .keymap = *cfg.keymap,
-                                     .repeatDelay = std::chrono::milliseconds(
-                                       cfg.repeatDelay),
-                                     .repeatTime = repeatRateMs,
-                                   },
-                                   [this](int num) {
-                                     setState([](auto& self) {
-                                       self.smallKeyboard = !self.smallKeyboard;
-                                     });
-                                   })));
+    const auto repeatRateMs =
+      std::chrono::milliseconds(1000) / config.repeatRate;
+    return Rotated(
+      rotation,
+      Column(
+        Expanded(Screen(term.get(), false, config.autoRefresh)),
+        Keyboard(term.get(),
+                 KeyboardParams{
+                   .layout = layout,
+                   .keymap = *config.keymap,
+                   .repeatDelay = std::chrono::milliseconds(config.repeatDelay),
+                   .repeatTime = repeatRateMs,
+                 },
+                 [this](int num) {
+                   setState([](auto& self) {
+                     self.smallKeyboard = !self.smallKeyboard;
+                   });
+                 })));
   }
 
 private:
+  void checkLandscape(rmlib::AppContext& ctx);
+  void readInotify(rmlib::AppContext& ctx) const;
+
   std::unique_ptr<terminal_t> term;
   rmlib::TimerHandle pogoTimer;
 
+  std::filesystem::path watchPath;
+  unistdpp::FD inotifyFd;
+  int inotifyWd;
+
+  YaftConfig config;
   rmlib::Rotation rotation = rmlib::Rotation::None;
   bool smallKeyboard = false;
   bool hideKeyboard = false;

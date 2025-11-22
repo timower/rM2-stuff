@@ -36,9 +36,7 @@ main(int argc, char* argv[]) {
     args = const_cast<char* const*>(shellArgs);
   }
 
-  auto cfg = loadConfigOrMakeDefault();
-
-  unistdpp::fatalOnError(runApp(Yaft(cmd, args, std::move(cfg))));
+  unistdpp::fatalOnError(runApp(Yaft(cmd, args, getConfigPath())));
 
   return 0;
 }
