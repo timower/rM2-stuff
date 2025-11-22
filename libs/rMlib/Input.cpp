@@ -23,30 +23,46 @@ namespace rmlib::input {
 namespace {
 
 constexpr auto touch_flood_size = 8 * 512 * 4;
+constexpr auto key_flood_size = 8 * 64;
+
+auto
+mkEvent(int a, int b, int v) {
+  input_event r{};
+  r.type = a;
+  r.code = b;
+  r.value = v;
+  r.input_event_sec = 0;
+  r.input_event_usec = 0;
+  return r;
+}
 
 auto*
 getTouchFlood() {
   static const auto* floodBuffer = [] {
     // NOLINTNEXTLINE
     static const auto ret = std::make_unique<input_event[]>(touch_flood_size);
-
-    constexpr auto mk_input_ev = [](int a, int b, int v) {
-      input_event r{};
-      r.type = a;
-      r.code = b;
-      r.value = v;
-      r.input_event_sec = 0;
-      r.input_event_usec = 0;
-      return r;
-    };
-
     for (int i = 0; i < touch_flood_size;) {
-      ret[i++] = mk_input_ev(EV_ABS, ABS_DISTANCE, 1);
-      ret[i++] = mk_input_ev(EV_SYN, 0, 0);
-      ret[i++] = mk_input_ev(EV_ABS, ABS_DISTANCE, 2);
-      ret[i++] = mk_input_ev(EV_SYN, 0, 0);
+      ret[i++] = mkEvent(EV_ABS, ABS_DISTANCE, 1);
+      ret[i++] = mkEvent(EV_SYN, 0, 0);
+      ret[i++] = mkEvent(EV_ABS, ABS_DISTANCE, 2);
+      ret[i++] = mkEvent(EV_SYN, 0, 0);
     }
+    return ret.get();
+  }();
+  return floodBuffer;
+}
 
+auto*
+getKeyFlood() {
+  static const auto* floodBuffer = [] {
+    // NOLINTNEXTLINE
+    static const auto ret = std::make_unique<input_event[]>(key_flood_size);
+    for (int i = 0; i < key_flood_size;) {
+      ret[i++] = mkEvent(EV_KEY, KEY_LEFTALT, 1);
+      ret[i++] = mkEvent(EV_SYN, SYN_REPORT, 0);
+      ret[i++] = mkEvent(EV_KEY, KEY_LEFTALT, 0);
+      ret[i++] = mkEvent(EV_SYN, SYN_REPORT, 0);
+    }
     return ret.get();
   }();
   return floodBuffer;
@@ -130,9 +146,8 @@ struct KeyDevice : public InputDevice<KeyDevice> {
   ErrorOr<std::vector<KeyEvent>> handleEvent(input_event /*event*/);
 
   void flood() final {
-    // TODO: this probably doesn't work
-    const auto* buf = getTouchFlood();
-    (void)fd.writeAll(buf, touch_flood_size * sizeof(input_event));
+    const auto* buf = getKeyFlood();
+    (void)fd.writeAll(buf, key_flood_size * sizeof(input_event));
   }
 
   std::vector<KeyEvent> keyEvents;

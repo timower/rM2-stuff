@@ -183,7 +183,7 @@ private:
   rmlib::TimerHandle inactivityTimer;
 
   const rmlib::Canvas* fbCanvas = nullptr;
-  rmlib::input::InputDeviceBase* touchDevice = nullptr;
+  rmlib::input::InputManager* inputManager = nullptr;
 
   rmlib::Rotation rotation = rmlib::Rotation::None;
 

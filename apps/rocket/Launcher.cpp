@@ -119,7 +119,7 @@ LauncherState::init(rmlib::AppContext& context,
   }
 
   fbCanvas = &context.getFbCanvas();
-  touchDevice = context.getInputManager().getBaseDevices().touch;
+  inputManager = &context.getInputManager();
 
   readApps();
 
@@ -276,8 +276,14 @@ LauncherState::switchApp(App& app) {
 
   // resume or launch app
   if (app.isPaused()) {
-    if (touchDevice != nullptr) {
-      touchDevice->flood();
+    if (inputManager != nullptr) {
+      auto baseDevs = inputManager->getBaseDevices();
+      if (baseDevs.touch != nullptr) {
+        baseDevs.touch->flood();
+      }
+      if (baseDevs.pogoKeyboard != nullptr) {
+        baseDevs.pogoKeyboard->flood();
+      }
     }
     app.resume();
   } else if (!app.isRunning()) {
