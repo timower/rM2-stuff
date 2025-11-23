@@ -70,9 +70,10 @@ in
 
           # No access control on the socket, so users can access it.
           SocketMode = "0777";
-          ListenDatagram = "/run/rm2fb.sock";
-
-          ListenStream = "8888";
+          ListenStream = [
+            "/run/rm2fb.sock"
+            "8888"
+          ];
           ReusePort = "true";
         };
 

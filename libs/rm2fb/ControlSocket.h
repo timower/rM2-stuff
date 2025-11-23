@@ -12,7 +12,10 @@ struct ControlSocket {
   unistdpp::FD sock;
 
   unistdpp::Result<void> init(const char* addr);
-  unistdpp::Result<void> connect(const char* addr);
+  unistdpp::Result<void> connect(const char* addr) const;
+
+  unistdpp::Result<unistdpp::FD> accept() const;
+  unistdpp::Result<void> listen(int n) const;
 
   template<typename T,
            typename = std::enable_if_t<std::is_trivially_copyable_v<T>>>

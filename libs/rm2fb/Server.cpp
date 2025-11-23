@@ -80,19 +80,19 @@ getSystemdSockets() {
   if (n == 0) {
     return {};
   }
-  std::cout << "Got " << n << " Sockets from systemd\n";
+  std::cerr << "Got " << n << " Sockets from systemd\n";
 
   Sockets result;
   for (int fd = SD_LISTEN_FDS_START; fd < SD_LISTEN_FDS_START + n; fd++) {
 
     // Check if it's the unix control socket.
-    auto res = sd_is_socket(fd, AF_UNIX, SOCK_DGRAM, /* listening */ -1);
+    auto res = sd_is_socket(fd, AF_UNIX, SOCK_STREAM, /* listening */ -1);
     if (res < 0) {
       std::cerr << "Error getting systemd socket: " << strerror(-res) << "\n";
       continue;
     }
     if (res == 1) {
-      std::cout << "Got control socket from systemd\n";
+      std::cerr << "Got control socket from systemd\n";
       result.controlSock = ControlSocket{ FD{ fd } };
       continue;
     }
@@ -104,7 +104,7 @@ getSystemdSockets() {
       continue;
     }
     if (res == 1) {
-      std::cout << "Got TCP socket from systemd\n";
+      std::cerr << "Got TCP socket from systemd\n";
       result.tcpSock = FD{ fd };
       continue;
     }
@@ -126,7 +126,6 @@ getTcpSocket(int port) {
   TRY(unistdpp::bind(listenfd, Address::fromHostPort(INADDR_ANY, port)));
   TRY(unistdpp::listen(listenfd, 1));
 
-  // return unistdpp::accept(listenfd, nullptr, nullptr);
   return listenfd;
 }
 
@@ -233,7 +232,7 @@ serverMain(char* argv0, const AddressInfoBase* addrs) { // NOLINT
 
   auto serverSock = [&] {
     if (systemdSockets.controlSock.has_value()) {
-      std::cout << "Using control socket from systemd\n";
+      std::cerr << "Using control socket from systemd\n";
       return std::move(*systemdSockets.controlSock);
     }
     // Setup server socket.
@@ -245,12 +244,16 @@ serverMain(char* argv0, const AddressInfoBase* addrs) { // NOLINT
       perror("Failed to create server socket");
       std::exit(EXIT_FAILURE);
     }
+    if (!serverSock.listen(1)) {
+      perror("Failed to create server socket");
+      std::exit(EXIT_FAILURE);
+    }
     return serverSock;
   }();
 
   auto tcpFd = [&]() -> Result<FD> {
     if (systemdSockets.tcpSock.has_value()) {
-      std::cout << "Using TCP socket from systemd\n";
+      std::cerr << "Using TCP socket from systemd\n";
       return std::move(*systemdSockets.tcpSock);
     }
     return getTcpSocket(tcp_port);
@@ -260,6 +263,7 @@ serverMain(char* argv0, const AddressInfoBase* addrs) { // NOLINT
               << "\n";
   }
 
+  std::vector<unistdpp::FD> unixClients;
   std::vector<unistdpp::FD> tcpClients;
 
   // Get addresses
@@ -290,23 +294,33 @@ serverMain(char* argv0, const AddressInfoBase* addrs) { // NOLINT
     addrs->initThreads();
     memcpy(fb.mem.get(), copyBuffer.get(), fb_size);
 
-    std::cout << "SWTCON initalized!\n";
+    std::cerr << "SWTCON initalized!\n";
   } else {
-    std::cout << "In QEMU, not starting SWTCON\n";
+    std::cerr << "In QEMU, not starting SWTCON\n";
   }
 
-  const auto fixedFdNum = 1 + (tcpFd.has_value() ? 1 : 0);
+  const auto numListenFds = 1 + (tcpFd.has_value() ? 1 : 0);
   std::vector<pollfd> pollfds;
 
-  std::cout << "rm2fb-server started!\n";
+  std::cerr << "rm2fb-server started!\n";
   sd_notify(0, "READY=1");
   while (running) {
     pollfds.clear();
-    pollfds.reserve(tcpClients.size() + fixedFdNum);
+
+    const auto numUnixClients = unixClients.size();
+    const auto numTcpClients = tcpClients.size();
+    pollfds.reserve(numListenFds + numUnixClients + numTcpClients);
+
     pollfds.emplace_back(waitFor(serverSock.sock, Wait::Read));
     if (tcpFd) {
       pollfds.emplace_back(waitFor(*tcpFd, Wait::Read));
     }
+
+    std::transform(
+      unixClients.begin(),
+      unixClients.end(),
+      std::back_inserter(pollfds),
+      [](const auto& client) { return waitFor(client, Wait::Read); });
 
     std::transform(
       tcpClients.begin(),
@@ -321,30 +335,50 @@ serverMain(char* argv0, const AddressInfoBase* addrs) { // NOLINT
 
     // Check control socket.
     if (canRead(pollfds.front())) {
-      readControlMessage(serverSock, [&](auto msgAndAddr) {
-        auto [msg, addr] = msgAndAddr;
+      std::cerr << "New unix client!\n";
+      serverSock.accept()
+        .transform(
+          [&](auto client) { unixClients.emplace_back(std::move(client)); })
+        .or_else([](auto err) {
+          std::cerr << "Unix client accept error: " << to_string(err) << "\n";
+        });
+    }
 
-        // Emtpy message, just to check init.
-        if (msg.x1 == msg.x2 && msg.y1 == msg.y2) {
-          std::cerr << "Got init check!\n";
-          return serverSock.sendto(true, addr);
-        }
+    for (size_t i = 0; i < numUnixClients; i++) {
+      if (!canRead(pollfds[numListenFds + i])) {
+        continue;
+      }
 
-        bool res = false;
-        if (!inQemu) {
-          res = addrs->doUpdate(msg);
-        }
-        for (auto& client : tcpClients) {
-          doTCPUpdate(client, fb, msg);
-        }
+      auto& sock = unixClients[i];
+      sock.readAll<UpdateParams>()
+        .and_then([&](auto msg) {
+          // Emtpy message, just to check init.
+          if (msg.x1 == msg.x2 && msg.y1 == msg.y2) {
+            std::cerr << "Got init check!\n";
+            return sock.writeAll(true);
+          }
 
-        // Don't log Stroke updates, unless debug mode is on.
-        if (debugMode) {
-          std::cerr << "UPDATE " << msg << ": " << res << "\n";
-        }
+          bool res = false;
+          if (!inQemu) {
+            res = addrs->doUpdate(msg);
+          }
+          for (auto& client : tcpClients) {
+            doTCPUpdate(client, fb, msg);
+          }
 
-        return serverSock.sendto(res, addr);
-      });
+          // Don't log Stroke updates, unless debug mode is on.
+          if (debugMode) {
+            std::cerr << "UPDATE " << msg << ": " << res << "\n";
+          }
+
+          return sock.writeAll(res);
+        })
+        .or_else([&](auto err) {
+          std::cerr << "Unix read fail: " << to_string(err) << "\n";
+          if (err == unistdpp::FD::eof_error) {
+            sock.close();
+          }
+        });
     }
 
     // If we don't have any tcp clients, there are not other FDs to check.
@@ -353,7 +387,7 @@ serverMain(char* argv0, const AddressInfoBase* addrs) { // NOLINT
     }
 
     if (canRead(pollfds[1])) {
-      std::cout << "Accepting new client!\n";
+      std::cerr << "Accepting new client!\n";
 
       unistdpp::accept(*tcpFd, nullptr, nullptr)
         .transform(
@@ -363,14 +397,14 @@ serverMain(char* argv0, const AddressInfoBase* addrs) { // NOLINT
         });
     }
 
-    for (size_t idx = fixedFdNum; idx < pollfds.size(); idx++) {
-      if (!canRead(pollfds[idx])) {
+    for (size_t i = 0; i < numTcpClients; i++) {
+      if (!canRead(pollfds[numListenFds + numUnixClients + i])) {
         continue;
       }
 
-      auto& clientSock = tcpClients[idx - fixedFdNum];
+      auto& clientSock = tcpClients[i];
       recvMessage<ClientMsg>(clientSock)
-        .map([&](const auto& msg) {
+        .transform([&](const auto& msg) {
           std::visit([&](auto msg) { handleMsg(fb, clientSock, devices, msg); },
                      msg);
         })
@@ -383,11 +417,24 @@ serverMain(char* argv0, const AddressInfoBase* addrs) { // NOLINT
     }
 
     // Remove closed clients
+    unixClients.erase(
+      std::remove_if(unixClients.begin(),
+                     unixClients.end(),
+                     [](const auto& sock) { return !sock.isValid(); }),
+      unixClients.end());
+
     tcpClients.erase(
       std::remove_if(tcpClients.begin(),
                      tcpClients.end(),
                      [](const auto& sock) { return !sock.isValid(); }),
       tcpClients.end());
+
+    // Report number of clients if size changed
+    if (tcpClients.size() != numTcpClients ||
+        unixClients.size() != numUnixClients) {
+      std::cerr << "Unix clients: " << unixClients.size()
+                << " TCP clients: " << tcpClients.size() << "\n";
+    }
   }
 
   return EXIT_SUCCESS;

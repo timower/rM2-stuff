@@ -71,6 +71,7 @@ waitForSleep() {
                            /* interactive */ 1);
   if (res < 0) {
     std::cerr << "Error suspending: " << strerror(-res) << "\n";
+    sd_bus_unref(bus);
     return res;
   }
   sd_bus_message_unref(reply);

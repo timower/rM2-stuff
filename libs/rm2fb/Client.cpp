@@ -11,24 +11,30 @@
 
 #include <dlfcn.h>
 
+#include <csignal>
 #include <cstring>
 #include <linux/limits.h>
 #include <unistd.h>
+
+#include "unistdpp/error.h"
 
 bool inXochitl = false;
 
 namespace {
 
-const unistdpp::Result<ControlSocket>&
+ControlSocket&
 getControlSocket() {
-  static auto socket = []() -> unistdpp::Result<ControlSocket> {
-    ControlSocket res;
-    TRY(res.init(nullptr));
-    TRY(res.connect(default_sock_addr.data()));
-    return res;
-  }();
-
-  return socket;
+  static ControlSocket res;
+  if (!res.sock.isValid()) {
+    res.init(nullptr)
+      .and_then([] { return res.connect(default_sock_addr.data()); })
+      .or_else([](auto err) {
+        std::cerr << "Failed connecting to rm2fb: " << unistdpp::to_string(err)
+                  << "\n";
+        res.sock.close();
+      });
+  }
+  return res;
 }
 
 int
@@ -53,28 +59,38 @@ setupHooks() {
 void
 waitForInit() {
   std::cerr << "Sending init check\n";
-  sendUpdate(UpdateParams{
-    .y1 = 0,
-    .x1 = 0,
-    .y2 = 0,
-    .x2 = 0,
-    .flags = 0,
-    .waveform = 0,
-    .temperatureOverride = 0,
-    .extraMode = 0,
-  });
+  if (!sendUpdate(UpdateParams{
+        .y1 = 0,
+        .x1 = 0,
+        .y2 = 0,
+        .x2 = 0,
+        .flags = 0,
+        .waveform = 0,
+        .temperatureOverride = 0,
+        .extraMode = 0,
+      })) {
+    std::cerr << "Init failed, no server running\n";
+    std::exit(EXIT_FAILURE);
+  }
 }
 
 } // namespace
 
 bool
 sendUpdate(const UpdateParams& params) {
-  const auto& clientSock = unistdpp::fatalOnError(getControlSocket());
+  auto& clientSock = getControlSocket();
+  if (!clientSock.sock.isValid()) {
+    return false;
+  }
 
   return clientSock.sendto(params)
     .and_then([&](auto _) {
       return clientSock.recvfrom<bool>().map(
         [](auto pair) { return pair.first; });
+    })
+    .or_else([&](auto err) {
+      std::cerr << "Error sending: " << unistdpp::to_string(err) << "\n";
+      clientSock.sock.close();
     })
     .value_or(false);
 }
@@ -206,6 +222,10 @@ __libc_start_main(int (*mainFn)(int, char**, char**), // NOLINT
   // We don't support waiting with semaphores yet
   setenv("RM2FB_NO_WAIT_IOCTL", "1", 1);
 
+  // Don't kill ourselves when SIGPIPE happens because rm2fb went down.
+  // It might come back up later!
+  std::signal(SIGPIPE, SIG_IGN);
+
   char pathBuffer[PATH_MAX];
   auto size = readlink("/proc/self/exe", pathBuffer, PATH_MAX);
 
@@ -213,7 +233,6 @@ __libc_start_main(int (*mainFn)(int, char**, char**), // NOLINT
     inXochitl = true;
 
     unistdpp::fatalOnError(SharedFB::getInstance(), "Error making shared FB");
-    unistdpp::fatalOnError(getControlSocket(), "Error creating control socket");
 
     if (setupHooks() != EXIT_SUCCESS) {
       std::cerr << "Seting up hooks failed\n";
