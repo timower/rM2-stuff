@@ -232,6 +232,6 @@ TEST_CASE("inotify", "[yaft][ui]") {
   cfgOfs << "rotation = \"inverted\"";
   cfgOfs.close();
 
-  ctx.pump();
+  ctx.pump(std::chrono::milliseconds(100));
   REQUIRE_THAT(yaft, ctx.matchesGolden("yaft-inverted.png"));
 }
