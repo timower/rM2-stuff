@@ -16,6 +16,9 @@ const char* shellCmd = "/bin/sh";
 
 int
 main(int argc, char* argv[]) {
+  if (auto* shellEnv = getenv("SHELL"); shellEnv != nullptr) {
+    shellCmd = strdup(shellEnv);
+  }
   static const char* shellArgs[3] = { shellCmd, "-l", nullptr };
 
   /* for wcwidth() */
