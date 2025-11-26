@@ -277,15 +277,6 @@ LauncherState::switchApp(App& app) {
 
   // resume or launch app
   if (app.isPaused()) {
-    if (inputManager != nullptr) {
-      auto baseDevs = inputManager->getBaseDevices();
-      if (baseDevs.touch != nullptr) {
-        baseDevs.touch->flood();
-      }
-      if (baseDevs.pogoKeyboard != nullptr) {
-        baseDevs.pogoKeyboard->flood();
-      }
-    }
     app.resume();
   } else if (!app.isRunning()) {
     app.resetSavedFB();

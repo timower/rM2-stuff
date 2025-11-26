@@ -73,6 +73,12 @@ constexpr auto setsockopt =
   FnWrapper<::setsockopt,
             Result<void>(const FD&, int, int, const void*, socklen_t)>{};
 
+// int getsockopt( int sockfd, int level, int optname, void* optval, socklen_t
+// *restrict optlen);
+constexpr auto getsockopt =
+  FnWrapper<::getsockopt,
+            Result<void>(const FD&, int, int, void*, socklen_t*)>{};
+
 // int
 // bind(int socket, const struct sockaddr *address, socklen_t address_len);
 constexpr auto bind_raw =

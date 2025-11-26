@@ -81,7 +81,6 @@ struct InputDeviceBase {
 
   void grab() const;
   void ungrab() const;
-  virtual void flood() = 0;
 
   virtual ~InputDeviceBase() = default;
 

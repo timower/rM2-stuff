@@ -34,13 +34,13 @@ target_link_libraries(rm2fb_lib PUBLIC linux::mxcfb rt dl unistdpp)
 
 add_library(rm2fb_server SHARED ServerLib.cpp Server.cpp ImageHook.cpp)
 target_link_libraries(rm2fb_server PRIVATE rm2fb_lib Systemd::Lib
-                                           Evdev::Dynamic)
+                                           Evdev::Dynamic udev)
 
 add_executable(rm2fb_server_exe ServerExe.cpp Server.cpp ImageHook.cpp)
 set_property(TARGET rm2fb_server_exe PROPERTY OUTPUT_NAME rm2fb_server)
 
 target_link_libraries(rm2fb_server_exe PRIVATE rm2fb_lib Systemd::Lib pthread)
-target_link_libraries(rm2fb_server_exe PRIVATE Evdev::Static)
+target_link_libraries(rm2fb_server_exe PRIVATE Evdev::Static udev)
 
 target_compile_definitions(rm2fb_server_exe PRIVATE USE_QSGEPAPER)
 
