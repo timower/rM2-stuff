@@ -22,16 +22,21 @@ bool inXochitl = false;
 
 namespace {
 
-ControlSocket&
+unistdpp::FD&
 getControlSocket() {
-  static ControlSocket res;
-  if (!res.sock.isValid()) {
-    res.init(nullptr)
-      .and_then([] { return res.connect(default_sock_addr.data()); })
+  static unistdpp::FD res;
+  if (!res.isValid()) {
+    res = unistdpp::fatalOnError(unistdpp::socket(AF_UNIX, SOCK_STREAM, 0));
+
+    unistdpp::bind(res, unistdpp::Address::fromUnixPath(nullptr))
+      .and_then([] {
+        return unistdpp::connect(
+          res, unistdpp::Address::fromUnixPath(default_sock_addr.data()));
+      })
       .or_else([](auto err) {
         std::cerr << "Failed connecting to rm2fb: " << unistdpp::to_string(err)
                   << "\n";
-        res.sock.close();
+        res.close();
       });
   }
   return res;
@@ -79,18 +84,15 @@ waitForInit() {
 bool
 sendUpdate(const UpdateParams& params) {
   auto& clientSock = getControlSocket();
-  if (!clientSock.sock.isValid()) {
+  if (!clientSock.isValid()) {
     return false;
   }
 
-  return clientSock.sendto(params)
-    .and_then([&](auto _) {
-      return clientSock.recvfrom<bool>().map(
-        [](auto pair) { return pair.first; });
-    })
+  return clientSock.writeAll(params)
+    .and_then([&]() { return clientSock.readAll<bool>(); })
     .or_else([&](auto err) {
       std::cerr << "Error sending: " << unistdpp::to_string(err) << "\n";
-      clientSock.sock.close();
+      clientSock.close();
     })
     .value_or(false);
 }

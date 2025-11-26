@@ -24,6 +24,11 @@ waitFor(const FD& fd, Wait wait) {
 }
 
 inline bool
+isClosed(const pollfd& fd) {
+  return (fd.revents & POLLHUP) != 0;
+}
+
+inline bool
 canRead(const pollfd& fd) {
   return (fd.revents & POLLIN) != 0;
 }

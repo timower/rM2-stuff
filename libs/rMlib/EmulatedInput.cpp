@@ -38,7 +38,6 @@ struct FakeInputDevice : public InputDeviceBase {
               .value();
   }
 
-  void flood() final {}
   OptError<> readEvents(std::vector<Event>& out) final { return {}; }
 };
 } // namespace

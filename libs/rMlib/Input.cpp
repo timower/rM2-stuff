@@ -22,52 +22,6 @@ namespace rmlib::input {
 
 namespace {
 
-constexpr auto touch_flood_size = 8 * 512 * 4;
-constexpr auto key_flood_size = 8 * 64;
-
-auto
-mkEvent(int a, int b, int v) {
-  input_event r{};
-  r.type = a;
-  r.code = b;
-  r.value = v;
-  r.input_event_sec = 0;
-  r.input_event_usec = 0;
-  return r;
-}
-
-auto*
-getTouchFlood() {
-  static const auto* floodBuffer = [] {
-    // NOLINTNEXTLINE
-    static const auto ret = std::make_unique<input_event[]>(touch_flood_size);
-    for (int i = 0; i < touch_flood_size;) {
-      ret[i++] = mkEvent(EV_ABS, ABS_DISTANCE, 1);
-      ret[i++] = mkEvent(EV_SYN, 0, 0);
-      ret[i++] = mkEvent(EV_ABS, ABS_DISTANCE, 2);
-      ret[i++] = mkEvent(EV_SYN, 0, 0);
-    }
-    return ret.get();
-  }();
-  return floodBuffer;
-}
-
-auto*
-getKeyFlood() {
-  static const auto* floodBuffer = [] {
-    // NOLINTNEXTLINE
-    static const auto ret = std::make_unique<input_event[]>(key_flood_size);
-    for (int i = 0; i < key_flood_size;) {
-      ret[i++] = mkEvent(EV_KEY, KEY_LEFTALT, 1);
-      ret[i++] = mkEvent(EV_SYN, SYN_REPORT, 0);
-      ret[i++] = mkEvent(EV_KEY, KEY_LEFTALT, 0);
-      ret[i++] = mkEvent(EV_SYN, SYN_REPORT, 0);
-    }
-    return ret.get();
-  }();
-  return floodBuffer;
-}
-
 template<typename Device>
 struct InputDevice : public InputDeviceBase {
   using InputDeviceBase::InputDeviceBase;
@@ -111,11 +65,6 @@ struct TouchDevice : public InputDevice<TouchDevice> {
   ErrorOr<std::vector<TouchEvent>> handleEvent(input_event /*event*/);
   TouchEvent& getSlot() { return slots.at(slot); }
 
-  void flood() final {
-    const auto* buf = getTouchFlood();
-    (void)fd.writeAll(buf, touch_flood_size * sizeof(input_event));
-  }
-
   Transform transform;
   int slot = 0;
   std::array<TouchEvent, max_num_slots> slots;
@@ -131,11 +80,6 @@ struct PenDevice : public InputDevice<PenDevice> {
     , transform(transform) {}
   ErrorOr<std::vector<PenEvent>> handleEvent(input_event /*event*/);
 
-  void flood() final {
-    const auto* buf = getTouchFlood();
-    (void)fd.writeAll(buf, touch_flood_size * sizeof(input_event));
-  }
-
   Transform transform;
   PenEvent penEvent;
 };
@@ -144,11 +88,6 @@ struct KeyDevice : public InputDevice<KeyDevice> {
   KeyDevice(unistdpp::FD fd, EvDevPtr evdev, std::string path)
     : InputDevice(std::move(fd), std::move(evdev), std::move(path)) {}
   ErrorOr<std::vector<KeyEvent>> handleEvent(input_event /*event*/);
-
-  void flood() final {
-    const auto* buf = getKeyFlood();
-    (void)fd.writeAll(buf, key_flood_size * sizeof(input_event));
-  }
 
   std::vector<KeyEvent> keyEvents;
 };

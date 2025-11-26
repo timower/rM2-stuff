@@ -20,9 +20,21 @@
 
 #include <systemd/sd-daemon.h>
 
+#include <libevdev/libevdev.h>
+#include <libudev.h>
+
 using namespace unistdpp;
 
 namespace {
+template<class T, class Alloc, class Pred>
+
+constexpr typename std::vector<T, Alloc>::size_type
+erase_if(std::vector<T, Alloc>& c, Pred pred) {
+  auto it = std::remove_if(c.begin(), c.end(), pred);
+  auto r = c.end() - it;
+  c.erase(it, c.end());
+  return r;
+}
 constexpr auto tcp_port = 8888;
 
 std::atomic_bool running = true; // NOLINT
@@ -32,8 +44,54 @@ onSigint(int num) {
   running = false;
 }
 
+constexpr auto touch_flood_size = 8 * 512 * 4;
+constexpr auto key_flood_size = 8 * 64;
+
+auto
+mkEvent(int a, int b, int v) {
+  input_event r{};
+  r.type = a;
+  r.code = b;
+  r.value = v;
+  r.input_event_sec = 0;
+  r.input_event_usec = 0;
+  return r;
+}
+
+auto*
+getTouchFlood() {
+  static const auto* floodBuffer = [] {
+    // NOLINTNEXTLINE
+    static const auto ret = std::make_unique<input_event[]>(touch_flood_size);
+    for (int i = 0; i < touch_flood_size;) {
+      ret[i++] = mkEvent(EV_ABS, ABS_DISTANCE, 1);
+      ret[i++] = mkEvent(EV_SYN, 0, 0);
+      ret[i++] = mkEvent(EV_ABS, ABS_DISTANCE, 2);
+      ret[i++] = mkEvent(EV_SYN, 0, 0);
+    }
+    return ret.get();
+  }();
+  return floodBuffer;
+}
+
+auto*
+getKeyFlood() {
+  static const auto* floodBuffer = [] {
+    // NOLINTNEXTLINE
+    static const auto ret = std::make_unique<input_event[]>(key_flood_size);
+    for (int i = 0; i < key_flood_size;) {
+      ret[i++] = mkEvent(EV_KEY, KEY_LEFTALT, 1);
+      ret[i++] = mkEvent(EV_SYN, SYN_REPORT, 0);
+      ret[i++] = mkEvent(EV_KEY, KEY_LEFTALT, 0);
+      ret[i++] = mkEvent(EV_SYN, SYN_REPORT, 0);
+    }
+    return ret.get();
+  }();
+  return floodBuffer;
+}
+
 struct Sockets {
-  std::optional<ControlSocket> controlSock = std::nullopt;
+  std::optional<FD> controlSock = std::nullopt;
   std::optional<FD> tcpSock = std::nullopt;
 };
 
@@ -60,7 +118,7 @@ getSystemdSockets() {
     }
     if (res == 1) {
       std::cerr << "Got control socket from systemd\n";
-      result.controlSock = ControlSocket{ FD{ fd } };
+      result.controlSock = FD{ fd };
       continue;
     }
 
@@ -203,18 +261,145 @@ handleMsg(const SharedFB& fb,
   }
 }
 
+struct InputMonitor {
+  ~InputMonitor() {
+    if (udevMonitor != nullptr) {
+      udev_monitor_unref(udevMonitor);
+    }
+    if (udevHandle != nullptr) {
+      udev_unref(udevHandle);
+    }
+  }
+
+  void openDevices() {
+    udevHandle = udev_new();
+
+    udev_enumerate* enumerate = udev_enumerate_new(udevHandle);
+    udev_enumerate_add_match_subsystem(enumerate, "input");
+    udev_enumerate_scan_devices(enumerate);
+
+    struct udev_list_entry* devList = udev_enumerate_get_list_entry(enumerate);
+    struct udev_list_entry* entry = nullptr;
+
+    udev_list_entry_foreach(entry, devList) {
+      const char* path = udev_list_entry_get_name(entry);
+      struct udev_device* dev = udev_device_new_from_syspath(udevHandle, path);
+
+      if (dev != nullptr) {
+        handleUdev(*dev);
+        udev_device_unref(dev);
+      }
+    }
+
+    udev_enumerate_unref(enumerate);
+  }
+
+  void startMonitor() {
+    udevMonitor = udev_monitor_new_from_netlink(udevHandle, "udev");
+    udev_monitor_filter_add_match_subsystem_devtype(
+      udevMonitor, "input", nullptr);
+    udev_monitor_enable_receiving(udevMonitor);
+    udevMonitorFd = unistdpp::FD(udev_monitor_get_fd(udevMonitor));
+  }
+
+  void handleNewDevices() {
+    auto* dev = udev_monitor_receive_device(udevMonitor);
+    if (dev != nullptr) {
+      handleUdev(*dev);
+      udev_device_unref(dev);
+    }
+  }
+
+  void flood() {
+    for (const auto& [_, dev] : devices) {
+      if (dev.isTouch) {
+        (void)dev.fd.writeAll(getTouchFlood(),
+                              touch_flood_size * sizeof(input_event));
+      } else {
+        (void)dev.fd.writeAll(getKeyFlood(),
+                              key_flood_size * sizeof(input_event));
+      }
+    }
+  }
+
+  void openDevice(std::string input) {
+    if (devices.count(input) != 0) {
+      return;
+    }
+
+    auto fd = unistdpp::open(input.c_str(), O_RDWR | O_NONBLOCK);
+    if (!fd) {
+      return;
+    }
+
+    libevdev* dev;
+    if (libevdev_new_from_fd(fd->fd, &dev) < 0) {
+      return;
+    }
+
+    if (libevdev_has_event_type(dev, EV_ABS) != 0) {
+      // multi-touch screen -> ev_abs & abs_mt_slot
+      if (libevdev_has_event_code(dev, EV_ABS, ABS_MT_SLOT) != 0) {
+        std::cerr << "Tracking MT dev: " << input << "\n";
+        devices[input] = Device{ std::move(*fd), true };
+      }
+      // Ignore pen input
+    } else if (libevdev_has_event_type(dev, EV_KEY) != 0) {
+      std::cerr << "Tracking key dev: " << input << "\n";
+      devices[input] = Device{ std::move(*fd), false };
+    }
+
+    libevdev_free(dev);
+  }
+
+  void handleUdev(udev_device& dev) {
+    const auto* devnode = udev_device_get_devnode(&dev);
+    if (devnode == nullptr) {
+      return;
+    }
+
+    const auto* action = udev_device_get_action(&dev);
+    if (action == nullptr || action == std::string_view("add")) {
+      openDevice(devnode);
+      return;
+    }
+
+    devices.erase(devnode);
+  }
+
+  udev* udevHandle = nullptr;
+  udev_monitor* udevMonitor = nullptr;
+
+  unistdpp::FD udevMonitorFd;
+
+  struct Device {
+    FD fd;
+    bool isTouch;
+  };
+  std::unordered_map<std::string, Device> devices;
+};
+
+struct UnixClient {
+  unistdpp::FD fd;
+  pid_t pid;
+
+  std::unique_ptr<std::array<uint8_t, fb_size>> savedFB;
+};
+
 struct Server {
   const bool debugMode = checkDebugMode();
   const bool inQemu = !unistdpp::open("/dev/fb0", O_RDONLY).has_value();
 
   AllUinputDevices uinputDevices;
+  InputMonitor inputMonitor;
 
   Sockets systemdSocket;
 
-  ControlSocket serverSock;
+  unistdpp::FD serverSock;
   unistdpp::FD tcpListenSock;
 
-  std::vector<unistdpp::FD> unixClients;
+  pid_t frontPID = 0;
+  std::vector<UnixClient> unixClients;
   std::vector<unistdpp::FD> tcpClients;
 
   const SharedFB& fb;
@@ -223,7 +408,7 @@ struct Server {
 
   std::vector<pollfd> pollfds;
 
-  static ControlSocket getServerSock(Sockets& systemdSockets) {
+  static FD getServerSock(Sockets& systemdSockets) {
     if (systemdSockets.controlSock.has_value()) {
       std::cerr << "Using control socket from systemd\n";
       return std::move(*systemdSockets.controlSock);
@@ -235,18 +420,13 @@ struct Server {
       perror("Socket unlink");
     }
 
-    ControlSocket serverSock;
-    if (!serverSock.init(socketAddr)) {
-      perror("Failed to create server socket");
-      std::exit(EXIT_FAILURE);
-    }
+    auto sock = fatalOnError(unistdpp::socket(AF_UNIX, SOCK_STREAM, 0),
+                             "Failed to create server socket: ");
+    fatalOnError(unistdpp::bind(sock, Address::fromUnixPath(socketAddr)),
+                 "Failed to bind server sock");
+    fatalOnError(unistdpp::listen(sock, 5), "Failed to listen on server sock");
 
-    if (!serverSock.listen(1)) {
-      perror("Failed to create server socket");
-      std::exit(EXIT_FAILURE);
-    }
-
-    return serverSock;
+    return sock;
   }
 
   static unistdpp::FD getTcpSocket(Sockets& systemdSockets) {
@@ -262,11 +442,11 @@ struct Server {
   }
 
   Server(const AddressInfoBase* addrs)
-    : uinputDevices(makeAllDevices())
-    , systemdSocket(getSystemdSockets())
+    : systemdSocket(getSystemdSockets())
     , serverSock(getServerSock(systemdSocket))
     , tcpListenSock(getTcpSocket(systemdSocket))
     , fb(fatalOnError(SharedFB::getInstance())) {
+
     // Get addresses
     if (addrs == nullptr) {
       hookAddrs = getAddresses();
@@ -278,6 +458,10 @@ struct Server {
       std::cerr << "Failed to get addresses\n";
       std::exit(EXIT_FAILURE);
     }
+
+    inputMonitor.openDevices();
+    uinputDevices = makeAllDevices();
+    inputMonitor.startMonitor();
   }
 
   void initSWTCON() {
@@ -285,8 +469,7 @@ struct Server {
     if (!inQemu) {
       std::cerr << "SWTCON calling init\n";
 
-      // NOLINTNEXTLINE
-      auto copyBuffer = std::make_unique<uint16_t[]>(fb_width * fb_height);
+      auto copyBuffer = std::make_unique<std::array<uint8_t, fb_size>>();
 
       // The init threads does a memset to 0xff. But if we're activated by a
       // systemd socket the shared memory already has some content. So make a
@@ -301,6 +484,22 @@ struct Server {
     }
   }
 
+  bool doUpdate(const UpdateParams& msg) {
+    bool res = false;
+    if (!inQemu) {
+      res = hookAddrs->doUpdate(msg);
+    }
+    for (auto& client : tcpClients) {
+      doTCPUpdate(client, fb, msg);
+    }
+
+    // Don't log Stroke updates, unless debug mode is on.
+    if (debugMode) {
+      std::cerr << "UPDATE " << msg << ": " << res << "\n";
+    }
+    return res;
+  }
+
   std::size_t numListenFds() const {
     return 1 + (tcpListenSock.isValid() ? 1 : 0);
   }
@@ -309,7 +508,7 @@ struct Server {
     pollfds.clear();
     pollfds.reserve(numListenFds() + unixClients.size() + tcpClients.size());
 
-    pollfds.emplace_back(waitFor(serverSock.sock, Wait::Read));
+    pollfds.emplace_back(waitFor(serverSock, Wait::Read));
     if (tcpListenSock.isValid()) {
       pollfds.emplace_back(waitFor(tcpListenSock, Wait::Read));
     }
@@ -318,13 +517,15 @@ struct Server {
       unixClients.begin(),
       unixClients.end(),
       std::back_inserter(pollfds),
-      [](const auto& client) { return waitFor(client, Wait::Read); });
+      [](const auto& client) { return waitFor(client.fd, Wait::Read); });
 
     std::transform(
       tcpClients.begin(),
       tcpClients.end(),
       std::back_inserter(pollfds),
       [](const auto& client) { return waitFor(client, Wait::Read); });
+
+    pollfds.push_back(waitFor(inputMonitor.udevMonitorFd, Wait::Read));
 
     return pollfds;
   }
@@ -336,30 +537,98 @@ struct Server {
     unixClients.erase(
       std::remove_if(unixClients.begin(),
                      unixClients.end(),
-                     [&](const auto& sock) { return !sock.isValid(); }),
+                     [&](const auto& client) { return !client.fd.isValid(); }),
       unixClients.end());
 
-    auto prevTcpClients = tcpClients.size();
-    tcpClients.erase(
-      std::remove_if(tcpClients.begin(),
-                     tcpClients.end(),
-                     [&](const auto& sock) { return !sock.isValid(); }),
-      tcpClients.end());
+    auto removedTcpClients =
+      erase_if(tcpClients, [&](const auto& sock) { return !sock.isValid(); });
 
-    return unixClients.size() != prevUnixClients ||
-           tcpClients.size() != prevTcpClients;
+    return unixClients.size() != prevUnixClients || removedTcpClients != 0;
+  }
+
+  void resume(UnixClient& client) {
+    frontPID = client.pid;
+    std::cerr << "Front client exited, resuming: " << frontPID << "\n";
+
+    if (client.savedFB) {
+      memcpy(fb.mem.get(), client.savedFB.get(), fb_size);
+      doUpdate(UpdateParams{
+        .y1 = 0,
+        .x1 = 0,
+        .y2 = fb_height - 1,
+        .x2 = fb_width - 1,
+        .flags = 0,
+        .waveform = WAVEFORM_MODE_GL16 | UpdateParams::ioctl_waveform_flag,
+        .temperatureOverride = 0,
+        .extraMode = 0,
+      });
+    }
+
+    inputMonitor.flood();
+    kill(-frontPID, SIGCONT);
+  }
+
+  void pause(pid_t pid) {
+    std::cerr << "pausing: " << frontPID << "\n";
+    kill(-frontPID, SIGSTOP);
+
+    auto it =
+      std::find_if(unixClients.begin(),
+                   unixClients.end(),
+                   [pid](const auto& client) { return client.pid == pid; });
+    if (it == unixClients.end()) {
+      std::cerr << "No client found with paused pid\n";
+      return;
+    }
+
+    if (it->savedFB == nullptr) {
+      it->savedFB = std::make_unique<std::array<uint8_t, fb_size>>();
+    }
+    memcpy(it->savedFB.get(), fb.mem.get(), fb_size);
+  }
+
+  void updateFrontClient() {
+    if (std::any_of(unixClients.begin(),
+                    unixClients.end(),
+                    [this](auto& client) { return client.pid == frontPID; })) {
+      return;
+    }
+
+    if (unixClients.empty()) {
+      frontPID = 0;
+      return;
+    }
+
+    resume(unixClients.back());
   }
 
   bool acceptUnixClient() {
-    auto sock = serverSock.accept();
+    auto sock = unistdpp::accept(serverSock, nullptr, nullptr);
     if (!sock) {
       std::cerr << "Unix client accept error: " << to_string(sock.error())
                 << "\n";
       return false;
     }
 
-    std::cerr << "New unix client!\n";
-    unixClients.emplace_back(std::move(*sock));
+    ucred peerCred;
+    socklen_t len = sizeof(peerCred);
+    if (auto err =
+          unistdpp::getsockopt(*sock, SOL_SOCKET, SO_PEERCRED, &peerCred, &len);
+        !err) {
+      std::cerr << "Error getting peercred: " << to_string(err.error()) << "\n";
+      return false;
+    }
+
+    std::cerr << "New unix client: " << std::dec << peerCred.pid << "!\n";
+    unixClients.emplace_back(
+      UnixClient{ std::move(*sock), peerCred.pid, nullptr });
+
+    if (frontPID != 0 && peerCred.pid != frontPID) {
+      pause(frontPID);
+    }
+
+    frontPID = unixClients.back().pid;
+
     return true;
   }
 
@@ -375,34 +644,22 @@ struct Server {
     return true;
   }
 
-  void readUnixSock(unistdpp::FD& sock) {
-    sock.readAll<UpdateParams>()
+  void readUnixSock(UnixClient& client) {
+    client.fd.readAll<UpdateParams>()
       .and_then([&](auto msg) {
         // Emtpy message, just to check init.
         if (msg.x1 == msg.x2 && msg.y1 == msg.y2) {
           std::cerr << "Got init check!\n";
-          return sock.writeAll(true);
+          return client.fd.writeAll(true);
         }
 
-        bool res = false;
-        if (!inQemu) {
-          res = hookAddrs->doUpdate(msg);
-        }
-        for (auto& client : tcpClients) {
-          doTCPUpdate(client, fb, msg);
-        }
-
-        // Don't log Stroke updates, unless debug mode is on.
-        if (debugMode) {
-          std::cerr << "UPDATE " << msg << ": " << res << "\n";
-        }
-
-        return sock.writeAll(res);
+        bool res = doUpdate(msg);
+        return client.fd.writeAll(res);
       })
       .or_else([&](auto err) {
         std::cerr << "Unix client fail: " << to_string(err) << "\n";
         if (err == unistdpp::FD::eof_error || err == std::errc::broken_pipe) {
-          sock.close();
+          client.fd.close();
         }
       });
   }
@@ -438,7 +695,17 @@ struct Server {
       clientChanges |= acceptUnixClient();
     }
 
+    if (canRead(pollfds.back())) {
+      inputMonitor.handleNewDevices();
+    }
+
     for (size_t i = 0; i < numUnixClients; i++) {
+      if (isClosed(pollfds[nListenFds + i])) {
+        std::cerr << "Detected HUP\n";
+        unixClients[i].fd.close();
+        continue;
+      }
+
       if (canRead(pollfds[nListenFds + i])) {
         readUnixSock(unixClients[i]);
       }
@@ -451,13 +718,20 @@ struct Server {
       }
 
       for (size_t i = 0; i < numTcpClients; i++) {
+        if (isClosed(pollfds[nListenFds + numUnixClients + i])) {
+          tcpClients[i].close();
+          continue;
+        }
         if (canRead(pollfds[nListenFds + numUnixClients + i])) {
           readTCPSock(tcpClients[i]);
         }
       }
     }
 
-    clientChanges |= dropClients();
+    if (dropClients()) {
+      clientChanges = true;
+      updateFrontClient();
+    }
     return clientChanges;
   }
 };
