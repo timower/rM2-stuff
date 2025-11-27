@@ -68,6 +68,7 @@ sendMessage(const unistdpp::FD& fd, const std::variant<T...>& msg) {
 }
 
 namespace details {
+
 template<typename Variant, auto idx = 0>
 unistdpp::Result<Variant>
 read(const unistdpp::FD& fd, int32_t index) {
@@ -82,6 +83,7 @@ read(const unistdpp::FD& fd, int32_t index) {
     return read<Variant, idx + 1>(fd, index);
   }
 }
+
 } // namespace details
 
 template<typename Variant>
