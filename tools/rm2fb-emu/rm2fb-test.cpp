@@ -1,7 +1,7 @@
 #include "Socket.h"
 
 // rm2fb
-#include <Message.h>
+#include <rm2fb/Message.h>
 
 // rMlib
 #include <Canvas.h>

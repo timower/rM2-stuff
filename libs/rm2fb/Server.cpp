@@ -1,7 +1,9 @@
-#include "ControlSocket.h"
+#include "rm2fb/ControlSocket.h"
+#include "rm2fb/Message.h"
+#include "rm2fb/SharedBuffer.h"
+
 #include "InputDevice.h"
-#include "Message.h"
-#include "SharedBuffer.h"
+#include "InputMonitor.h"
 #include "Versions/Version.h"
 
 #include <unistdpp/file.h>
@@ -19,9 +21,6 @@
 #include <unistd.h>
 
 #include <systemd/sd-daemon.h>
-
-#include <libevdev/libevdev.h>
-#include <libudev.h>
 
 using namespace unistdpp;
 
@@ -42,100 +41,6 @@ std::atomic_bool running = true; // NOLINT
 void
 onSigint(int num) {
   running = false;
-}
-
-constexpr auto touch_flood_size = 8 * 512 * 4;
-constexpr auto key_flood_size = 8 * 64;
-
-auto
-mkEvent(int a, int b, int v) {
-  input_event r{};
-  r.type = a;
-  r.code = b;
-  r.value = v;
-  r.input_event_sec = 0;
-  r.input_event_usec = 0;
-  return r;
-}
-
-auto*
-getTouchFlood() {
-  static const auto* floodBuffer = [] {
-    // NOLINTNEXTLINE
-    static const auto ret = std::make_unique<input_event[]>(touch_flood_size);
-    for (int i = 0; i < touch_flood_size;) {
-      ret[i++] = mkEvent(EV_ABS, ABS_DISTANCE, 1);
-      ret[i++] = mkEvent(EV_SYN, 0, 0);
-      ret[i++] = mkEvent(EV_ABS, ABS_DISTANCE, 2);
-      ret[i++] = mkEvent(EV_SYN, 0, 0);
-    }
-    return ret.get();
-  }();
-  return floodBuffer;
-}
-
-auto*
-getKeyFlood() {
-  static const auto* floodBuffer = [] {
-    // NOLINTNEXTLINE
-    static const auto ret = std::make_unique<input_event[]>(key_flood_size);
-    for (int i = 0; i < key_flood_size;) {
-      ret[i++] = mkEvent(EV_KEY, KEY_LEFTALT, 1);
-      ret[i++] = mkEvent(EV_SYN, SYN_REPORT, 0);
-      ret[i++] = mkEvent(EV_KEY, KEY_LEFTALT, 0);
-      ret[i++] = mkEvent(EV_SYN, SYN_REPORT, 0);
-    }
-    return ret.get();
-  }();
-  return floodBuffer;
-}
-
-struct Sockets {
-  std::optional<FD> controlSock = std::nullopt;
-  std::optional<FD> tcpSock = std::nullopt;
-};
-
-Sockets
-getSystemdSockets() {
-  auto n = sd_listen_fds(1);
-  if (n < 0) {
-    std::cerr << "Error getting systemd sockets: " << strerror(-n) << "\n";
-    return {};
-  }
-  if (n == 0) {
-    return {};
-  }
-  std::cerr << "Got " << n << " Sockets from systemd\n";
-
-  Sockets result;
-  for (int fd = SD_LISTEN_FDS_START; fd < SD_LISTEN_FDS_START + n; fd++) {
-
-    // Check if it's the unix control socket.
-    auto res = sd_is_socket(fd, AF_UNIX, SOCK_STREAM, /* listening */ -1);
-    if (res < 0) {
-      std::cerr << "Error getting systemd socket: " << strerror(-res) << "\n";
-      continue;
-    }
-    if (res == 1) {
-      std::cerr << "Got control socket from systemd\n";
-      result.controlSock = FD{ fd };
-      continue;
-    }
-
-    // Check if it's the TCP debug socket.
-    res = sd_is_socket(fd, AF_UNSPEC, SOCK_STREAM, /* listening */ 1);
-    if (res < 0) {
-      std::cerr << "Error getting systemd socket: " << strerror(-res) << "\n";
-      continue;
-    }
-    if (res == 1) {
-      std::cerr << "Got TCP socket from systemd\n";
-      result.tcpSock = FD{ fd };
-      continue;
-    }
-  }
-
-  return result;
 }
 
 // Starts a tcp server socket
@@ -261,142 +166,25 @@ handleMsg(const SharedFB& fb,
   }
 }
 
-struct InputMonitor {
-  ~InputMonitor() {
-    if (udevMonitor != nullptr) {
-      udev_monitor_unref(udevMonitor);
-    }
-    if (udevHandle != nullptr) {
-      udev_unref(udevHandle);
-    }
-  }
-
-  void openDevices() {
-    udevHandle = udev_new();
-
-    udev_enumerate* enumerate = udev_enumerate_new(udevHandle);
-    udev_enumerate_add_match_subsystem(enumerate, "input");
-    udev_enumerate_scan_devices(enumerate);
-
-    struct udev_list_entry* devList = udev_enumerate_get_list_entry(enumerate);
-    struct udev_list_entry* entry = nullptr;
-
-    udev_list_entry_foreach(entry, devList) {
-      const char* path = udev_list_entry_get_name(entry);
-      struct udev_device* dev = udev_device_new_from_syspath(udevHandle, path);
-
-      if (dev != nullptr) {
-        handleUdev(*dev);
-        udev_device_unref(dev);
-      }
-    }
-
-    udev_enumerate_unref(enumerate);
-  }
-
-  void startMonitor() {
-    udevMonitor = udev_monitor_new_from_netlink(udevHandle, "udev");
-    udev_monitor_filter_add_match_subsystem_devtype(
-      udevMonitor, "input", nullptr);
-    udev_monitor_enable_receiving(udevMonitor);
-    udevMonitorFd = unistdpp::FD(udev_monitor_get_fd(udevMonitor));
-  }
-
-  void handleNewDevices() {
-    auto* dev = udev_monitor_receive_device(udevMonitor);
-    if (dev != nullptr) {
-      handleUdev(*dev);
-      udev_device_unref(dev);
-    }
-  }
-
-  void flood() {
-    for (const auto& [_, dev] : devices) {
-      if (dev.isTouch) {
-        (void)dev.fd.writeAll(getTouchFlood(),
-                              touch_flood_size * sizeof(input_event));
-      } else {
-        (void)dev.fd.writeAll(getKeyFlood(),
-                              key_flood_size * sizeof(input_event));
-      }
-    }
-  }
-
-  void openDevice(std::string input) {
-    if (devices.count(input) != 0) {
-      return;
-    }
-
-    auto fd = unistdpp::open(input.c_str(), O_RDWR | O_NONBLOCK);
-    if (!fd) {
-      return;
-    }
-
-    libevdev* dev;
-    if (libevdev_new_from_fd(fd->fd, &dev) < 0) {
-      return;
-    }
-
-    if (libevdev_has_event_type(dev, EV_ABS) != 0) {
-      // multi-touch screen -> ev_abs & abs_mt_slot
-      if (libevdev_has_event_code(dev, EV_ABS, ABS_MT_SLOT) != 0) {
-        std::cerr << "Tracking MT dev: " << input << "\n";
-        devices[input] = Device{ std::move(*fd), true };
-      }
-      // Ignore pen input
-    } else if (libevdev_has_event_type(dev, EV_KEY) != 0) {
-      std::cerr << "Tracking key dev: " << input << "\n";
-      devices[input] = Device{ std::move(*fd), false };
-    }
-
-    libevdev_free(dev);
-  }
-
-  void handleUdev(udev_device& dev) {
-    const auto* devnode = udev_device_get_devnode(&dev);
-    if (devnode == nullptr) {
-      return;
-    }
-
-    const auto* action = udev_device_get_action(&dev);
-    if (action == nullptr || action == std::string_view("add")) {
-      openDevice(devnode);
-      return;
-    }
-
-    devices.erase(devnode);
-  }
-
-  udev* udevHandle = nullptr;
-  udev_monitor* udevMonitor = nullptr;
-
-  unistdpp::FD udevMonitorFd;
-
-  struct Device {
-    FD fd;
-    bool isTouch;
-  };
-  std::unordered_map<std::string, Device> devices;
-};
-
 struct UnixClient {
   unistdpp::FD fd;
   pid_t pid;
 
   std::unique_ptr<std::array<uint8_t, fb_size>> savedFB;
+  bool dontPause;
 };
 
-struct Server {
+struct Server : ControlInterface {
   const bool debugMode = checkDebugMode();
   const bool inQemu = !unistdpp::open("/dev/fb0", O_RDONLY).has_value();
 
   AllUinputDevices uinputDevices;
   InputMonitor inputMonitor;
 
-  Sockets systemdSocket;
-
   unistdpp::FD serverSock;
   unistdpp::FD tcpListenSock;
+
+  ControlServer controlServer;
 
   pid_t frontPID = 0;
   std::vector<UnixClient> unixClients;
@@ -408,10 +196,61 @@ struct Server {
 
   std::vector<pollfd> pollfds;
 
-  static FD getServerSock(Sockets& systemdSockets) {
-    if (systemdSockets.controlSock.has_value()) {
-      std::cerr << "Using control socket from systemd\n";
-      return std::move(*systemdSockets.controlSock);
+  void getSystemdSockets() {
+    auto n = sd_listen_fds(1);
+    if (n < 0) {
+      std::cerr << "Error getting systemd sockets: " << strerror(-n) << "\n";
+      return;
+    }
+    if (n == 0) {
+      return;
+    }
+    std::cerr << "Got " << n << " Sockets from systemd\n";
+
+    for (int fd = SD_LISTEN_FDS_START; fd < SD_LISTEN_FDS_START + n; fd++) {
+
+      // Check if it's the unix server socket.
+      auto res = sd_is_socket(fd, AF_UNIX, SOCK_STREAM, /* listening */ 1);
+      if (res < 0) {
+        std::cerr << "Error getting systemd socket: " << strerror(-res) << "\n";
+        continue;
+      }
+      if (res == 1) {
+        std::cerr << "Got server socket from systemd\n";
+        serverSock = FD{ fd };
+        continue;
+      }
+
+      // Check if it's the unix control socket.
+      res = sd_is_socket(fd, AF_UNIX, SOCK_DGRAM, /* listening */ -1);
+      if (res < 0) {
+        std::cerr << "Error getting systemd socket: " << strerror(-res) << "\n";
+        continue;
+      }
+      if (res == 1) {
+        std::cerr << "Got control socket from systemd\n";
+        controlServer.sock = FD{ fd };
+        continue;
+      }
+
+      // Check if it's the TCP debug socket.
+      res = sd_is_socket(fd, AF_UNSPEC, SOCK_STREAM, /* listening */ 1);
+      if (res < 0) {
+        std::cerr << "Error getting systemd socket: " << strerror(-res) << "\n";
+        continue;
+      }
+      if (res == 1) {
+        std::cerr << "Got TCP socket from systemd\n";
+        tcpListenSock = FD{ fd };
+        continue;
+      }
+    }
+  }
+
+  void initServerSocket() {
+    if (serverSock.isValid()) {
+      std::cerr << "Using server socket from systemd\n";
+      return;
     }
 
     // Setup server socket.
@@ -420,32 +259,34 @@ struct Server {
       perror("Socket unlink");
     }
 
-    auto sock = fatalOnError(unistdpp::socket(AF_UNIX, SOCK_STREAM, 0),
-                             "Failed to create server socket: ");
-    fatalOnError(unistdpp::bind(sock, Address::fromUnixPath(socketAddr)),
+    serverSock = fatalOnError(unistdpp::socket(AF_UNIX, SOCK_STREAM, 0),
+                              "Failed to create server socket: ");
+    fatalOnError(unistdpp::bind(serverSock, Address::fromUnixPath(socketAddr)),
                  "Failed to bind server sock");
-    fatalOnError(unistdpp::listen(sock, 5), "Failed to listen on server sock");
-
-    return sock;
+    fatalOnError(unistdpp::listen(serverSock, 5),
+                 "Failed to listen on server sock");
   }
 
-  static unistdpp::FD getTcpSocket(Sockets& systemdSockets) {
-    if (systemdSockets.tcpSock.has_value()) {
+  void initTcpSocket() {
+    if (tcpListenSock.isValid()) {
       std::cerr << "Using TCP socket from systemd\n";
-      return std::move(*systemdSockets.tcpSock);
+      return;
     }
-    return createTCPSocket(tcp_port)
-      .or_else([](auto err) {
-        std::cerr << "Error creating TCP socket: " << to_string(err) << "\n";
-      })
-      .value_or(FD());
+    tcpListenSock =
+      createTCPSocket(tcp_port)
+        .or_else([](auto err) {
+          std::cerr << "Error creating TCP socket: " << to_string(err) << "\n";
+        })
+        .value_or(FD());
   }
 
   Server(const AddressInfoBase* addrs)
-    : systemdSocket(getSystemdSockets())
-    , serverSock(getServerSock(systemdSocket))
-    , tcpListenSock(getTcpSocket(systemdSocket))
-    , fb(fatalOnError(SharedFB::getInstance())) {
+    : controlServer(*this), fb(fatalOnError(SharedFB::getInstance())) {
+
+    getSystemdSockets();
+    initServerSocket();
+    controlServer.maybeInit();
+    initTcpSocket();
 
     // Get addresses
     if (addrs == nullptr) {
@@ -500,55 +341,25 @@ struct Server {
     return res;
   }
 
-  std::size_t numListenFds() const {
-    return 1 + (tcpListenSock.isValid() ? 1 : 0);
-  }
-
-  std::vector<pollfd>& getPollFDs() {
-    pollfds.clear();
-    pollfds.reserve(numListenFds() + unixClients.size() + tcpClients.size());
-
-    pollfds.emplace_back(waitFor(serverSock, Wait::Read));
-    if (tcpListenSock.isValid()) {
-      pollfds.emplace_back(waitFor(tcpListenSock, Wait::Read));
-    }
-
-    std::transform(
-      unixClients.begin(),
-      unixClients.end(),
-      std::back_inserter(pollfds),
-      [](const auto& client) { return waitFor(client.fd, Wait::Read); });
-
-    std::transform(
-      tcpClients.begin(),
-      tcpClients.end(),
-      std::back_inserter(pollfds),
-      [](const auto& client) { return waitFor(client, Wait::Read); });
-
-    pollfds.push_back(waitFor(inputMonitor.udevMonitorFd, Wait::Read));
-
-    return pollfds;
-  }
-
   bool dropClients() {
 
     // Remove closed clients
-    auto prevUnixClients = unixClients.size();
-    unixClients.erase(
-      std::remove_if(unixClients.begin(),
-                     unixClients.end(),
-                     [&](const auto& client) { return !client.fd.isValid(); }),
-      unixClients.end());
+    auto removedUnixClients = erase_if(
+      unixClients, [&](const auto& client) { return !client.fd.isValid(); });
 
     auto removedTcpClients =
       erase_if(tcpClients, [&](const auto& sock) { return !sock.isValid(); });
 
-    return unixClients.size() != prevUnixClients || removedTcpClients != 0;
+    return removedUnixClients != 0 || removedTcpClients != 0;
   }
 
   void resume(UnixClient& client) {
     frontPID = client.pid;
-    std::cerr << "Front client exited, resuming: " << frontPID << "\n";
+    std::cerr << "Resuming: " << frontPID << "\n";
+
+    if (client.dontPause) {
+      return;
+    }
 
     if (client.savedFB) {
       memcpy(fb.mem.get(), client.savedFB.get(), fb_size);
@@ -568,23 +379,79 @@ struct Server {
     kill(-frontPID, SIGCONT);
   }
 
-  void pause(pid_t pid) {
-    std::cerr << "pausing: " << frontPID << "\n";
-    kill(-frontPID, SIGSTOP);
+  auto findClient(pid_t pid) {
+    return std::find_if(
+      unixClients.begin(), unixClients.end(), [pid](const auto& client) {
+        return client.pid == pid;
+      });
+  }
 
-    auto it =
-      std::find_if(unixClients.begin(),
-                   unixClients.end(),
-                   [pid](const auto& client) { return client.pid == pid; });
+  bool pause(pid_t pid) {
+    auto it = findClient(pid);
     if (it == unixClients.end()) {
       std::cerr << "No client found with paused pid\n";
-      return;
+      return false;
     }
+
+    if (it->dontPause) {
+      return true;
+    }
+
+    std::cerr << "pausing: " << pid << "\n";
+    kill(-pid, SIGSTOP);
 
     if (it->savedFB == nullptr) {
       it->savedFB = std::make_unique<std::array<uint8_t, fb_size>>();
     }
     memcpy(it->savedFB.get(), fb.mem.get(), fb_size);
+
+    return true;
+  }
+
+  unistdpp::Result<std::vector<Client>> getClients() override {
+    std::vector<Client> clients;
+    std::transform(unixClients.begin(),
+                   unixClients.end(),
+                   std::back_inserter(clients),
+                   [this](const auto& client) {
+                     return Client{
+                       .pid = client.pid,
+                       .active = client.pid == frontPID,
+                     };
+                   });
+    return clients;
+  }
+
+  unistdpp::Result<unistdpp::FD> getFramebuffer(pid_t pid) override {
+    // TODO: impl
+    return {};
+  }
+
+  unistdpp::Result<void> switchTo(pid_t pid) override {
+    if (pid == frontPID) {
+      return {};
+    }
+
+    auto it = findClient(pid);
+    if (it == unixClients.end()) {
+      return tl::unexpected(std::errc::bad_file_descriptor);
+    }
+
+    if (frontPID != 0) {
+      pause(frontPID);
+    }
+    resume(*it);
+    return {};
+  }
+
+  unistdpp::Result<void> setLauncher(pid_t pid) override {
+    auto it = findClient(pid);
+    if (it == unixClients.end()) {
+      return tl::unexpected(std::errc::bad_file_descriptor);
+    }
+
+    it->dontPause = true;
+    return {};
   }
 
   void updateFrontClient() {
@@ -599,6 +466,7 @@ struct Server {
       return;
     }
 
+    std::cerr << "Front client gone ";
     resume(unixClients.back());
   }
 
@@ -620,8 +488,12 @@ struct Server {
     }
 
     std::cerr << "New unix client: " << std::dec << peerCred.pid << "!\n";
-    unixClients.emplace_back(
-      UnixClient{ std::move(*sock), peerCred.pid, nullptr });
+    unixClients.emplace_back(UnixClient{
+      .fd = std::move(*sock),
+      .pid = peerCred.pid,
+      .savedFB = nullptr,
+      .dontPause = false,
+    });
 
     if (frontPID != 0 && peerCred.pid != frontPID) {
       pause(frontPID);
@@ -678,25 +550,68 @@ struct Server {
       });
   }
 
+  // void readControlMsg() {
+  //   recvMessageFrom<ControlMsg>(controlSock)
+  //     .transform([&](const auto& pair) {
+  //       std::visit([&](const auto& msg) { controlMsg(msg); }, pair.second);
+  //     })
+  //     .or_else([](auto err) {
+  //     });
+  // }
+
+  int getPollFDs() {
+    pollfds.clear();
+    pollfds.reserve(4 + unixClients.size() + tcpClients.size());
+
+    pollfds.emplace_back(waitFor(inputMonitor.udevMonitorFd, Wait::Read));
+    pollfds.emplace_back(waitFor(serverSock, Wait::Read));
+    pollfds.emplace_back(waitFor(controlServer.sock, Wait::Read));
+    if (tcpListenSock.isValid()) {
+      pollfds.emplace_back(waitFor(tcpListenSock, Wait::Read));
+    }
+
+    int res = pollfds.size();
+
+    std::transform(
+      unixClients.begin(),
+      unixClients.end(),
+      std::back_inserter(pollfds),
+      [](const auto& client) { return waitFor(client.fd, Wait::Read); });
+
+    std::transform(
+      tcpClients.begin(),
+      tcpClients.end(),
+      std::back_inserter(pollfds),
+      [](const auto& client) { return waitFor(client, Wait::Read); });
+
+    return res;
+  }
+
   bool poll() {
     bool clientChanges = false;
 
-    const auto nListenFds = numListenFds();
+    const auto nListenFds = getPollFDs();
     const auto numUnixClients = unixClients.size();
     const auto numTcpClients = tcpClients.size();
 
-    if (auto res = unistdpp::poll(getPollFDs()); !res) {
+    if (auto res = unistdpp::poll(pollfds); !res) {
       std::cerr << "Poll error: " << to_string(res.error()) << "\n";
       return false;
     }
 
-    // Check control socket.
-    if (canRead(pollfds.front())) {
+    // Check server socket.
+    if (canRead(pollfds[0])) {
+      inputMonitor.handleNewDevices();
+    }
+
+    if (canRead(pollfds[1])) {
       clientChanges |= acceptUnixClient();
     }
 
-    if (canRead(pollfds.back())) {
-      inputMonitor.handleNewDevices();
+    if (canRead(pollfds[2])) {
+      controlServer.handleMsg().or_else([](auto err) {
+        std::cerr << "Control error: " << to_string(err) << "\n";
+      });
     }
 
     for (size_t i = 0; i < numUnixClients; i++) {
@@ -713,7 +628,7 @@ struct Server {
 
     // If we don't have any tcp clients, there are not other FDs to check.
     if (tcpListenSock.isValid()) {
-      if (canRead(pollfds[1])) {
+      if (canRead(pollfds[3])) {
         clientChanges |= acceptTcpClient();
       }
 

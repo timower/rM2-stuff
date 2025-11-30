@@ -1,7 +1,7 @@
 #include "AddressHooking.h"
 #include "PreloadHooks.h"
-#include "SharedBuffer.h"
 #include "Version.h"
+#include "rm2fb/SharedBuffer.h"
 
 #include <dlfcn.h>
 #include <pthread.h>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Message.h"
+#include "rm2fb/Message.h"
 #include <rm2.h>
 
 #include <array>

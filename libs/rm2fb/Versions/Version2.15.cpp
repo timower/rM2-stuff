@@ -3,7 +3,7 @@
 #include "AddressHooking.h"
 #include "ImageHook.h"
 #include "PreloadHooks.h"
-#include "SharedBuffer.h"
+#include "rm2fb/SharedBuffer.h"
 
 #include <cstring>
 #include <rm2.h>
