@@ -1,8 +1,8 @@
 project(rm2fb)
 
-add_library(rm2fb_headers INTERFACE)
-target_include_directories(rm2fb_headers
-                           INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
+add_library(rm2fb_headers OBJECT ControlSocket.cpp SharedBuffer.cpp)
+target_include_directories(rm2fb_headers PUBLIC ./include)
+target_link_libraries(rm2fb_headers PUBLIC unistdpp)
 
 # rm2fb uses Linux APIs extensively
 if(NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
@@ -15,8 +15,6 @@ pkg_check_modules(LIBEVDEV libevdev REQUIRED)
 # Library used for the (socket) testing tool
 add_library(
   rm2fb_lib STATIC
-  SharedBuffer.cpp
-  ControlSocket.cpp
   InputDevice.cpp
   PreloadHooks.cpp
   Versions/Version.cpp
@@ -30,7 +28,8 @@ target_include_directories(
   PRIVATE ${LIBEVDEV_INCLUDE_DIRS}
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
-target_link_libraries(rm2fb_lib PUBLIC linux::mxcfb rt dl unistdpp)
+target_link_libraries(rm2fb_lib PUBLIC linux::mxcfb rt dl unistdpp
+                                       rm2fb_headers)
 
 add_library(rm2fb_server SHARED ServerLib.cpp Server.cpp ImageHook.cpp)
 target_link_libraries(rm2fb_server PRIVATE rm2fb_lib Systemd::Lib
@@ -57,6 +56,14 @@ target_compile_definitions(rm2fb_client_no_hook PRIVATE NO_HOOKING)
 
 # Utility target that builds both the client and server libs.
 add_custom_target(rm2fb DEPENDS rm2fb_client rm2fb_server)
+
+add_executable(rm2fbctl rm2fbctl.cpp)
+target_link_libraries(rm2fbctl PRIVATE rm2fb_headers)
+
+install(
+  TARGETS rm2fbctl
+  COMPONENT rm2display
+  DESTINATION ${OPT_PREFIX}bin)
 
 install(
   TARGETS rm2fb_server_exe

@@ -2,7 +2,7 @@
 
 // rm2fb
 #include "Client.h"
-#include "SharedBuffer.h"
+#include "rm2fb/SharedBuffer.h"
 
 // libc
 #include <cstring>

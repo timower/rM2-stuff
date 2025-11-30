@@ -1,8 +1,8 @@
-#include "SharedBuffer.h"
 #include "Socket.h"
+#include "rm2fb/SharedBuffer.h"
 
 // rm2fb
-#include <Message.h>
+#include <rm2fb/Message.h>
 
 // unistdpp
 #include <unistdpp/socket.h>

@@ -1,9 +1,8 @@
 #include "Client.h"
 
-#include "ControlSocket.h"
 #include "IOCTL.h"
-#include "SharedBuffer.h"
 #include "Versions/Version.h"
+#include "rm2fb/SharedBuffer.h"
 
 #ifndef NO_HOOKING
 #include "frida-gum.h"

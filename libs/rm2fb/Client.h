@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Message.h"
+#include "rm2fb/Message.h"
 
 bool
 sendUpdate(const UpdateParams& params);
