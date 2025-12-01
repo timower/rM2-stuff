@@ -112,7 +112,7 @@ YaftState::init(rmlib::AppContext& ctx, const rmlib::BuildContext& /*unused*/) {
 
   if (std::holds_alternative<std::filesystem::path>(getWidget().configOrPath)) {
     watchPath = std::get<std::filesystem::path>(getWidget().configOrPath);
-    inotifyFd = unistdpp::FD(inotify_init());
+    inotifyFd = unistdpp::FD(inotify_init1(IN_CLOEXEC));
     if (inotifyFd.isValid()) {
       inotifyWd = inotify_add_watch(inotifyFd.fd,
                                     watchPath.parent_path().c_str(),

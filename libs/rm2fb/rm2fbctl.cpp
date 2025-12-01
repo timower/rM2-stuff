@@ -1,4 +1,3 @@
-#include "unistdpp/file.h"
 #include <rm2fb/ControlSocket.h>
 
 namespace {
@@ -9,19 +8,6 @@ usage() {
   std::cerr << " rm2fbctl list\n";
   std::cerr << " rm2fbctl switch <pid>\n";
   std::exit(EXIT_FAILURE);
-}
-
-unistdpp::Result<std::string>
-getProcName(pid_t pid) {
-  auto fd = TRY(unistdpp::open(
-    (std::filesystem::path("/proc") / std::to_string(pid) / "cmdline").c_str(),
-    O_RDONLY));
-
-  std::array<char, 512> buf;
-  auto size = TRY(fd.readAll(buf.data(), buf.size()));
-  auto res = std::string(buf.data(), size);
-
-  return std::filesystem::path(res).filename().string();
 }
 
 } // namespace
@@ -39,9 +25,8 @@ main(int argc, char* argv[]) {
   if (action == "list") {
     auto clients = unistdpp::fatalOnError(client.getClients());
     for (const auto& client : clients) {
-      auto name = getProcName(client.pid).value_or("<error>");
-      std::cout << (client.active ? "*" : " ") << client.pid << " " << name
-                << "\n";
+      std::cout << (client.active ? "*" : " ") << client.pid << " "
+                << client.name << "\n";
     }
 
     return EXIT_SUCCESS;

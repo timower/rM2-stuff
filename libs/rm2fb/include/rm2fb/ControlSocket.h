@@ -8,6 +8,8 @@ struct ControlInterface {
   struct Client {
     pid_t pid;
     bool active;
+
+    char name[32];
   };
 
   virtual unistdpp::Result<std::vector<Client>> getClients() = 0;

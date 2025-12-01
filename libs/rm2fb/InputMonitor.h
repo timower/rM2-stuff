@@ -117,7 +117,7 @@ struct InputMonitor {
       return;
     }
 
-    auto fd = unistdpp::open(input.c_str(), O_RDWR | O_NONBLOCK);
+    auto fd = unistdpp::open(input.c_str(), O_RDWR | O_NONBLOCK | O_CLOEXEC);
     if (!fd) {
       return;
     }

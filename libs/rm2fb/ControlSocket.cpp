@@ -51,7 +51,7 @@ readBoolResponse(const unistdpp::FD& fd) {
 unistdpp::Result<void>
 ControlServer::maybeInit() {
   if (sock.isValid()) {
-    std::cerr << "Using server socket from systemd\n";
+    std::cerr << "Using control socket from systemd\n";
     return {};
   }
   const char* socketAddr = control_sock_addr.data();
@@ -74,6 +74,7 @@ ControlServer::handleMsg() {
   }
 
   unistdpp::Result<void> res;
+  std::cerr << "Got request: " << int(req.type) << "\n";
 
   switch (req.type) {
     case MsgType::GetClients: {
@@ -89,7 +90,7 @@ ControlServer::handleMsg() {
 
       auto* ptr = (ClientResponse*)buf.get();
       ptr->nClients = clients.size();
-      memcpy(&ptr->clients,
+      memcpy(&ptr->clients[0],
              clients.data(),
              clients.size() * sizeof(ControlInterface::Client));
 
@@ -117,7 +118,7 @@ ControlServer::handleMsg() {
 
 unistdpp::Result<void>
 ControlClient::init() {
-  sock = TRY(unistdpp::socket(AF_UNIX, SOCK_DGRAM, 0));
+  sock = TRY(unistdpp::socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0));
 
   return unistdpp::bind(sock, unistdpp::Address::fromUnixPath(nullptr))
     .and_then([this] {
@@ -140,6 +141,7 @@ ControlClient::getClients() {
   auto buf = std::make_unique<char[]>(bufsize);
   auto size = TRY(unistdpp::recvfrom(sock, buf.get(), bufsize, 0, nullptr));
   if (size < long(sizeof(ClientResponse))) {
+    std::cerr << "Got " << size << " response to getClients\n";
     return tl::unexpected(std::errc::bad_message);
   }
 
