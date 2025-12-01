@@ -10,7 +10,6 @@
 
 #include <string_view>
 #include <tuple>
-#include <variant>
 
 namespace unistdpp {
 
@@ -120,6 +119,12 @@ constexpr auto recvfrom =
 // ssize_t sendmsg(int sockfd, const struct msghdr *msg, int flags);
 constexpr auto sendmsg =
   FnWrapper<::sendmsg, Result<ssize_t>(const FD&, const struct msghdr*, int)>{};
+
+unistdpp::Result<void>
+sendFDTo(const FD& sock, int fd, Address* addr = nullptr, char data = '\x1');
+
+unistdpp::Result<int>
+recvFD(const FD& sock);
 
 // ssize_t recvmsg(int sockfd, struct msghdr *msg, int flags);
 constexpr auto recvmsg =

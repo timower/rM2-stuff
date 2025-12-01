@@ -180,11 +180,11 @@ handleMsg(const SharedFB& fb,
 }
 
 struct UnixClient {
-  unistdpp::FD fd;
+  unistdpp::FD sock;
   pid_t pid;
-
-  std::unique_ptr<std::array<uint8_t, fb_size>> savedFB;
   bool dontPause;
+
+  unistdpp::FD memFD;
 };
 
 struct Server : ControlInterface {
@@ -360,7 +360,7 @@ struct Server : ControlInterface {
 
     // Remove closed clients
     auto removedUnixClients = erase_if(
-      unixClients, [&](const auto& client) { return !client.fd.isValid(); });
+      unixClients, [&](const auto& client) { return !client.sock.isValid(); });
 
     auto removedTcpClients =
       erase_if(tcpClients, [&](const auto& sock) { return !sock.isValid(); });
@@ -372,12 +372,11 @@ struct Server : ControlInterface {
     frontPID = client.pid;
     std::cerr << "Resuming: " << frontPID << "\n";
 
-    // if (client.dontPause) {
-    //   return;
-    // }
+    if (client.memFD.isValid()) {
+      // Set FD and overwrite mapping.
+      fb.setFD(std::move(client.memFD));
+      fb.mmap();
 
-    if (client.savedFB) {
-      memcpy(fb.getFb(), client.savedFB.get(), fb_size);
       doUpdate(UpdateParams{
         .y1 = 0,
         .x1 = 0,
@@ -411,22 +410,20 @@ struct Server : ControlInterface {
       return false;
     }
 
+    int signal = SIGSTOP;
     if (it->dontPause) {
       std::cerr << "USR1: " << pid << "\n";
-      kill(-getpgid(pid), SIGUSR1);
-      return true;
+      signal = SIGUSR1;
+    } else {
+      std::cerr << "pausing: " << pid << "\n";
     }
 
-    std::cerr << "pausing: " << pid << "\n";
-    auto res = kill(-getpgid(pid), SIGSTOP);
+    auto res = kill(-getpgid(pid), signal);
     if (res == -1) {
       perror("Error pausing!");
     }
 
-    if (it->savedFB == nullptr) {
-      it->savedFB = std::make_unique<std::array<uint8_t, fb_size>>();
-    }
-    memcpy(it->savedFB.get(), fb.getFb(), fb_size);
+    it->memFD = fb.takeFD();
 
     return true;
   }
@@ -449,9 +446,17 @@ struct Server : ControlInterface {
     return clients;
   }
 
-  unistdpp::Result<unistdpp::FD> getFramebuffer(pid_t pid) override {
-    // TODO: impl
-    return {};
+  unistdpp::Result<int> getFramebuffer(pid_t pid) override {
+    if (pid == frontPID) {
+      return fb.getFd();
+    }
+
+    auto it = findClient(pid);
+    if (it == unixClients.end()) {
+      return tl::unexpected(std::errc::bad_file_descriptor);
+    }
+
+    return it->memFD.fd;
   }
 
   unistdpp::Result<void> switchTo(pid_t pid) override {
@@ -515,16 +520,27 @@ struct Server : ControlInterface {
     }
 
     std::cerr << "New unix client: " << std::dec << peerCred.pid << "!\n";
-    unixClients.emplace_back(UnixClient{
-      .fd = std::move(*sock),
-      .pid = peerCred.pid,
-      .savedFB = nullptr,
-      .dontPause = false,
-    });
 
+    // Pause first, so memFD gets taken.
     if (frontPID != 0 && peerCred.pid != frontPID) {
       pause(frontPID);
     }
+
+    // Alloc new memFD if needed.
+    if (!fb.isValid()) {
+      if (auto err = fb.alloc(); !err.has_value()) {
+        std::cerr << "Error alloc FB: " << to_string(err.error()) << "\n";
+        return false;
+      }
+    }
+
+    unixClients.emplace_back(UnixClient{
+      .sock = std::move(*sock),
+      .pid = peerCred.pid,
+      .dontPause = false,
+
+      .memFD = FD{},
+    });
 
     frontPID = unixClients.back().pid;
 
@@ -544,21 +560,21 @@ struct Server : ControlInterface {
   }
 
   void readUnixSock(UnixClient& client) {
-    client.fd.readAll<UpdateParams>()
+    client.sock.readAll<UpdateParams>()
       .and_then([&](auto msg) {
         // Emtpy message, just to check init.
         if (msg.x1 == msg.x2 && msg.y1 == msg.y2) {
           std::cerr << "Got init check!\n";
-          return fb.send(client.fd);
+          return fb.send(client.sock);
         }
 
         bool res = doUpdate(msg);
-        return client.fd.writeAll(res);
+        return client.sock.writeAll(res);
       })
       .or_else([&](auto err) {
         std::cerr << "Unix client fail: " << to_string(err) << "\n";
         if (err == unistdpp::FD::eof_error || err == std::errc::broken_pipe) {
-          client.fd.close();
+          client.sock.close();
         }
       });
   }
@@ -603,7 +619,7 @@ struct Server : ControlInterface {
       unixClients.begin(),
       unixClients.end(),
       std::back_inserter(pollfds),
-      [](const auto& client) { return waitFor(client.fd, Wait::Read); });
+      [](const auto& client) { return waitFor(client.sock, Wait::Read); });
 
     std::transform(
       tcpClients.begin(),
@@ -644,7 +660,7 @@ struct Server : ControlInterface {
     for (size_t i = 0; i < numUnixClients; i++) {
       if (isClosed(pollfds[nListenFds + i])) {
         std::cerr << "Detected HUP\n";
-        unixClients[i].fd.close();
+        unixClients[i].sock.close();
         continue;
       }
 

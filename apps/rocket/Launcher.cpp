@@ -130,12 +130,7 @@ LauncherState::init(rmlib::AppContext& context,
   unistdpp::fatalOnError(getWidget().ctlClient.setLauncher(getpid()),
                          "Failed to set launcher: ");
 
-  getWidget()
-    .ctlClient.getClients()
-    .transform([this](auto clients) { fbClients = std::move(clients); })
-    .or_else([](auto err) {
-      std::cerr << "Error getting init clients: " << to_string(err) << "\n";
-    });
+  requestClients();
 
   auto pipe = unistdpp::fatalOnError(unistdpp::pipe());
   writeFd = std::move(pipe.writePipe);
@@ -303,13 +298,48 @@ LauncherState::onSignal() {
   } else if (*sigOrErr == SIGCONT) {
     visible = true;
     background.reset();
+
     readApps();
-    getWidget()
-      .ctlClient.getClients()
-      .transform([&](auto clients) { fbClients = std::move(clients); })
-      .or_else([](auto err) {
-        std::cerr << "Error getting clients: " << to_string(err) << "\n";
+    requestClients();
+  }
+}
+
+void
+LauncherState::requestClients() {
+  auto clients = getWidget().ctlClient.getClients();
+  if (!clients) {
+    std::cerr << "Error getting clients: " << to_string(clients.error())
+              << "\n";
+    return;
+  }
+  fbClients = std::move(*clients);
+
+  for (const auto& client : fbClients) {
+    if (fbBuffers.count(client.pid) != 0) {
+      continue;
+    }
+    auto fd = getWidget().ctlClient.getFramebuffer(client.pid);
+    if (!fd) {
+      std::cerr << "Error getting fb: " << to_string(fd.error()) << "\n";
+      continue;
+    }
+
+    auto& fb = fbBuffers[client.pid];
+    fb.setFD(unistdpp::FD(*fd));
+    fb.mmap();
+  }
+
+  // Remove old buffers.
+  for (auto it = fbBuffers.begin(); it != fbBuffers.end();) {
+    auto clientIt =
+      std::find_if(fbClients.begin(), fbClients.end(), [&](const auto& client) {
+        return client.pid == it->first;
       });
+    if (clientIt == fbClients.end()) {
+      it = fbBuffers.erase(it);
+    } else {
+      ++it;
+    }
   }
 }
 
@@ -319,7 +349,6 @@ LauncherState::readApps() {
 
   // Update known apps.
   for (auto appIt = apps.begin(); appIt != apps.end();) {
-
     auto descIt = std::find_if(appDescriptions.begin(),
                                appDescriptions.end(),
                                [&app = *appIt](const auto& desc) {
@@ -329,12 +358,12 @@ LauncherState::readApps() {
     if (descIt == appDescriptions.end()) {
       // Remove old apps.
       appIt = apps.erase(appIt);
-    } else {
-
-      // Update existing apps.
-      appIt->updateDescription(std::move(*descIt));
-      appDescriptions.erase(descIt);
+      continue;
     }
+
+    // Update existing apps.
+    appIt->updateDescription(std::move(*descIt));
+    appDescriptions.erase(descIt);
 
     ++appIt;
   }

@@ -6,6 +6,7 @@
 #include <UI/Rotate.h>
 
 #include "App.h"
+#include "rm2fb/SharedBuffer.h"
 
 const rmlib::MemoryCanvas&
 getMissingImage();
@@ -13,11 +14,13 @@ getMissingImage();
 class RunningAppWidget : public rmlib::StatelessWidget<RunningAppWidget> {
 public:
   RunningAppWidget(const ControlClient::Client& client,
+                   const SharedFB* fb,
                    rmlib::Callback onTap,
                    rmlib::Callback onKill,
                    bool isCurrent,
                    rmlib::Rotation rotation)
     : client(client)
+    , fb(fb)
     , onTap(std::move(onTap))
     , onKill(std::move(onKill))
     , rotation(rotation)
@@ -27,9 +30,10 @@ public:
              const rmlib::BuildContext& /*unused*/) const {
     using namespace rmlib;
 
-    const Canvas& canvas = /*app.savedFB().has_value() ? app.savedFB()->canvas
-                                                     :*/
-      getMissingImage().canvas;
+    const Canvas& canvas =
+      fb != nullptr && fb->isValid() && fb->getFb() != nullptr
+        ? Canvas((uint8_t*)fb->getFb(), fb_width, fb_height, fb_pixel_size)
+        : getMissingImage().canvas;
 
     return container(
       Column(GestureDetector(Rotated(rotation, Sized(Image(canvas), 234, 300)),
@@ -42,6 +46,7 @@ public:
 
 private:
   const ControlClient::Client& client;
+  const SharedFB* fb;
   rmlib::Callback onTap;
   rmlib::Callback onKill;
   rmlib::Rotation rotation;

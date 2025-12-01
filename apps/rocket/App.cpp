@@ -31,7 +31,9 @@ runCommand(std::string_view cmd) {
   if (pid > 0) {
     pipes.writePipe.close();
     // Parent process, read child pid.
-    return pipes.readPipe.readAll<pid_t>();
+    auto res = pipes.readPipe.readAll<pid_t>();
+    waitpid(pid, nullptr, 0);
+    return res;
   }
 
   pipes.readPipe.close();

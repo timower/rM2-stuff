@@ -152,7 +152,12 @@ TEST_CASE("AppWidget", "[rocket]") {
     bool current = GENERATE(true, false);
 
     ctx.pumpWidget(Center(RunningAppWidget(
-      client, [&] { tapped++; }, [&] { killed++; }, current, Rotation::None)));
+      client,
+      nullptr,
+      [&] { tapped++; },
+      [&] { killed++; },
+      current,
+      Rotation::None)));
 
     auto appWidget = ctx.findByType<RunningAppWidget>();
     REQUIRE_THAT(
@@ -189,9 +194,7 @@ getFakeApps() {
 
 struct FakeClient : ControlInterface {
   unistdpp::Result<std::vector<Client>> getClients() override { return {}; }
-  unistdpp::Result<unistdpp::FD> getFramebuffer(pid_t pid) override {
-    return {};
-  }
+  unistdpp::Result<int> getFramebuffer(pid_t pid) override { return {}; }
 
   unistdpp::Result<void> switchTo(pid_t pid) override { return {}; }
   unistdpp::Result<void> setLauncher(pid_t pid) override { return {}; }

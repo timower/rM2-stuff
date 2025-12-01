@@ -78,29 +78,40 @@ ControlServer::handleMsg() {
 
   switch (req.type) {
     case MsgType::GetClients: {
-      auto clients = TRY(iface.getClients());
-      if (clients.size() > max_clients) {
-        clients.resize(max_clients);
+      auto clients = iface.getClients();
+      if (!clients) {
+        res = tl::unexpected(clients.error());
+        break;
+      }
+      if (clients->size() > max_clients) {
+        clients->resize(max_clients);
       }
 
       const auto bufsize = sizeof(ClientResponse) +
-                           (clients.size() * sizeof(ControlInterface::Client));
+                           (clients->size() * sizeof(ControlInterface::Client));
 
       auto buf = std::make_unique<char[]>(bufsize);
 
       auto* ptr = (ClientResponse*)buf.get();
-      ptr->nClients = clients.size();
+      ptr->nClients = clients->size();
       memcpy(&ptr->clients[0],
-             clients.data(),
-             clients.size() * sizeof(ControlInterface::Client));
+             clients->data(),
+             clients->size() * sizeof(ControlInterface::Client));
 
       TRY(unistdpp::sendto(sock, ptr, bufsize, 0, &addr));
 
       return {};
     }
 
-    case MsgType::GetFB:
-      break;
+    case MsgType::GetFB: {
+      auto fb = iface.getFramebuffer(req.pid);
+      if (!fb) {
+        res = tl::unexpected(fb.error());
+        break;
+      }
+
+      return unistdpp::sendFDTo(sock, *fb, &addr);
+    } break;
 
     case MsgType::SwitchTo:
       res = iface.switchTo(req.pid);
@@ -154,9 +165,14 @@ ControlClient::getClients() {
   return res;
 }
 
-unistdpp::Result<unistdpp::FD>
+unistdpp::Result<int>
 ControlClient::getFramebuffer(pid_t pid) {
-  return tl::unexpected(std::errc::not_supported);
+  Request req{
+    .type = MsgType::GetFB,
+    .pid = pid,
+  };
+  TRY(sendMsg(sock, req));
+  return unistdpp::recvFD(sock);
 }
 
 unistdpp::Result<void>

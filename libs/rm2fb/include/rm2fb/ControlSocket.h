@@ -13,7 +13,7 @@ struct ControlInterface {
   };
 
   virtual unistdpp::Result<std::vector<Client>> getClients() = 0;
-  virtual unistdpp::Result<unistdpp::FD> getFramebuffer(pid_t pid) = 0;
+  virtual unistdpp::Result<int> getFramebuffer(pid_t pid) = 0;
 
   virtual unistdpp::Result<void> switchTo(pid_t pid) = 0;
   virtual unistdpp::Result<void> setLauncher(pid_t pid) = 0;
@@ -25,7 +25,7 @@ struct ControlClient : ControlInterface {
   unistdpp::Result<void> init();
 
   unistdpp::Result<std::vector<Client>> getClients() override;
-  unistdpp::Result<unistdpp::FD> getFramebuffer(pid_t pid) override;
+  unistdpp::Result<int> getFramebuffer(pid_t pid) override;
 
   unistdpp::Result<void> switchTo(pid_t pid) override;
   unistdpp::Result<void> setLauncher(pid_t pid) override;

@@ -4,6 +4,8 @@
 #include "AppWidgets.h"
 #include "Hideable.h"
 
+#include "rm2fb/SharedBuffer.h"
+
 #include <rm2fb/ControlSocket.h>
 
 #include <UI.h>
@@ -77,8 +79,12 @@ public:
       if (client.pid == myPid) {
         continue;
       }
+
+      auto fb = fbBuffers.find(client.pid);
+
       widgets.emplace_back(
         client,
+        fb == fbBuffers.end() ? nullptr : &fb->second,
         [this, pid = client.pid] {
           setState([pid](auto& self) { self.switchApp(pid); });
         },
@@ -163,13 +169,17 @@ private:
   void switchApp(pid_t pid);
 
   void onSignal();
-  void readApps();
   bool isRunning(pid_t pid) const;
+
+  void readApps();
+  void requestClients();
 
   void updateRotation(rmlib::AppContext& ctx);
 
   std::vector<App> apps;
+
   std::vector<ControlInterface::Client> fbClients;
+  std::unordered_map<pid_t, SharedFB> fbBuffers;
 
   unistdpp::FD signalPipe;
 
