@@ -45,7 +45,7 @@ struct AddressInfo : public AddressInfoBase {
 
   void initThreads() const final {
     const auto& fb = SharedFB::getInstance();
-    if (!fb.has_value()) {
+    if (!fb.isValid()) {
       return;
     }
 
@@ -56,7 +56,7 @@ struct AddressInfo : public AddressInfoBase {
     // auto* fbMem = static_cast<std::uint8_t*>(fb->getFb());
     // std::vector<std::uint8_t> fbCopy(fbMem, fbMem + fb_size);
 
-    createThreads.call<int, void*>(fb->mem.get());
+    createThreads.call<int, void*>(fb.getFb());
     waitForStart.call<void>();
 
     // std::memcpy(fb->mem.get(), fbCopy.data(), fbCopy.size());

@@ -61,22 +61,36 @@ setupHooks() {
 
 // Sends an empty message to make sure the rm2fb server is listening and has
 // started the SWTCON.
-void
-waitForInit() {
+unistdpp::Result<void>
+doInit(SharedFB& fb) {
+  constexpr auto init_params = UpdateParams{
+    .y1 = 0,
+    .x1 = 0,
+    .y2 = 0,
+    .x2 = 0,
+    .flags = 0,
+    .waveform = 0,
+    .temperatureOverride = 0,
+    .extraMode = 0,
+  };
+
+  if (fb.isValid()) {
+    return {};
+  }
+
   std::cerr << "Sending init check\n";
-  if (!sendUpdate(UpdateParams{
-        .y1 = 0,
-        .x1 = 0,
-        .y2 = 0,
-        .x2 = 0,
-        .flags = 0,
-        .waveform = 0,
-        .temperatureOverride = 0,
-        .extraMode = 0,
-      })) {
+  auto& sock = getControlSocket();
+  if (!sock.isValid()) {
     std::cerr << "Init failed, no server running\n";
     std::exit(EXIT_FAILURE);
   }
+
+  return sock.writeAll(init_params)
+    .and_then([&] { return fb.recv(sock); })
+    .or_else([&](auto err) {
+      std::cerr << "Error sending: " << unistdpp::to_string(err) << "\n";
+      sock.close();
+    });
 }
 
 } // namespace
@@ -102,9 +116,9 @@ extern "C" {
 int
 open64(const char* pathname, int flags, mode_t mode = 0) {
   if (!inXochitl && pathname == std::string("/dev/fb0")) {
-    const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
-    waitForInit();
-    return fb.fd.fd;
+    auto& fb = SharedFB::getInstance();
+    unistdpp::fatalOnError(doInit(fb), "init FB failed");
+    return fb.getFd();
   }
 
   static const auto func_open =
@@ -116,9 +130,9 @@ open64(const char* pathname, int flags, mode_t mode = 0) {
 int
 open(const char* pathname, int flags, mode_t mode = 0) {
   if (!inXochitl && pathname == std::string("/dev/fb0")) {
-    const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
-    waitForInit();
-    return fb.fd.fd;
+    auto& fb = SharedFB::getInstance();
+    unistdpp::fatalOnError(doInit(fb), "init FB failed");
+    return fb.getFd();
   }
 
   static const auto func_open =
@@ -130,7 +144,7 @@ open(const char* pathname, int flags, mode_t mode = 0) {
 int
 close(int fd) {
   if (const auto& fb = SharedFB::getInstance();
-      fb.has_value() && fd == fb->fd.fd) {
+      fb.isValid() && fd == fb.getFd()) {
     return 0;
   }
 
@@ -141,7 +155,7 @@ close(int fd) {
 int
 ioctl(int fd, unsigned long request, char* ptr) {
   if (const auto& fb = SharedFB::getInstance();
-      !inXochitl && fb.has_value() && fd == fb->fd.fd) {
+      fb.isValid() && fd == fb.getFd()) {
     return handleIOCTL(request, ptr);
   }
 
@@ -154,7 +168,7 @@ ioctl(int fd, unsigned long request, char* ptr) {
 int
 __ioctl_time64(int fd, unsigned long int request, char* ptr) { // NOLINT
   if (const auto& fb = SharedFB::getInstance();
-      !inXochitl && fb.has_value() && fd == fb->fd.fd) {
+      fb.isValid() && fd == fb.getFd()) {
     return handleIOCTL(request, ptr);
   }
 
@@ -234,13 +248,14 @@ __libc_start_main(int (*mainFn)(int, char**, char**), // NOLINT
   if (std::string_view(pathBuffer, size) == "/usr/bin/xochitl") {
     inXochitl = true;
 
-    unistdpp::fatalOnError(SharedFB::getInstance(), "Error making shared FB");
+    auto& fb = SharedFB::getInstance();
+    unistdpp::fatalOnError(doInit(fb), "Error making shared FB");
+    unistdpp::fatalOnError(fb.mmap(), "Failed to map FB");
 
     if (setupHooks() != EXIT_SUCCESS) {
       std::cerr << "Seting up hooks failed\n";
       return EXIT_FAILURE;
     }
-    waitForInit();
   }
 
   auto* funcMain =
