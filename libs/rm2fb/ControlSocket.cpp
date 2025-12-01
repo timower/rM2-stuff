@@ -30,9 +30,7 @@ struct ClientResponse {
 
 auto
 sendMsg(const unistdpp::FD& fd, const Request& req) {
-  static const auto server_addr =
-    unistdpp::Address::fromUnixPath(control_sock_addr.data());
-  return unistdpp::sendto(fd, &req, sizeof(Request), 0, &server_addr);
+  return fd.writeAll(&req, sizeof(req));
 }
 
 unistdpp::Result<void>
@@ -48,19 +46,19 @@ readBoolResponse(const unistdpp::FD& fd) {
 
 } // namespace
 
+#include <errno.h>
 unistdpp::Result<void>
-ControlServer::maybeInit() {
+ControlServer::maybeInit(const char* path) {
   if (sock.isValid()) {
     std::cerr << "Using control socket from systemd\n";
     return {};
   }
-  const char* socketAddr = control_sock_addr.data();
-  if (unlink(socketAddr) != 0) {
+  if (unlink(path) != 0 && errno != ENOENT) {
     perror("Socket unlink");
   }
 
   sock = TRY(unistdpp::socket(AF_UNIX, SOCK_DGRAM, 0));
-  return unistdpp::bind(sock, unistdpp::Address::fromUnixPath(socketAddr));
+  return unistdpp::bind(sock, unistdpp::Address::fromUnixPath(path));
 }
 
 unistdpp::Result<void>
@@ -106,12 +104,12 @@ ControlServer::handleMsg() {
     case MsgType::GetFB: {
       auto fb = iface.getFramebuffer(req.pid);
       if (!fb) {
-        res = tl::unexpected(fb.error());
-        break;
+        // Don't send a reply, let client time out
+        return tl::unexpected(fb.error());
       }
 
       return unistdpp::sendFDTo(sock, *fb, &addr);
-    } break;
+    }
 
     case MsgType::SwitchTo:
       res = iface.switchTo(req.pid);
@@ -128,15 +126,18 @@ ControlServer::handleMsg() {
 }
 
 unistdpp::Result<void>
-ControlClient::init() {
-  sock = TRY(unistdpp::socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0));
+ControlClient::init(const char* path) {
+  sock = TRY(unistdpp::socket(AF_UNIX, SOCK_DGRAM |SOCK_CLOEXEC, 0));
 
   return unistdpp::bind(sock, unistdpp::Address::fromUnixPath(nullptr))
-    .and_then([this] {
+    .and_then([this, path] {
       return unistdpp::connect(
-        sock, unistdpp::Address::fromUnixPath(control_sock_addr.data()));
+        sock, unistdpp::Address::fromUnixPath(path));
     })
-    .or_else([this](auto err) { sock.close(); });
+    .or_else([this](auto err) -> unistdpp::Result<void> {
+      sock.close();
+      return tl::unexpected(err);
+    });
 }
 
 unistdpp::Result<std::vector<ControlInterface::Client>>

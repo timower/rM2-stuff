@@ -1,7 +1,7 @@
 project(unit-tests)
 
 add_executable(${PROJECT_NAME} TestUnistdpp.cpp TestRMLib.cpp TestTilem.cpp
-                               TestYaft.cpp TestRocket.cpp)
+                               TestYaft.cpp TestRocket.cpp TestRm2fb.cpp)
 
 find_program(CAT_EXE cat)
 
