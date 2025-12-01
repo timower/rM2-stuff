@@ -10,8 +10,14 @@ target_compile_definitions(
                           CAT_EXE="${CAT_EXE}")
 
 target_link_libraries(
-  ${PROJECT_NAME} PRIVATE Catch2::Catch2WithMain unistdpp rMlib tilem::lib
-                          Yaft::app_lib rocket::lib)
+  ${PROJECT_NAME}
+  PRIVATE Catch2::Catch2WithMain
+          unistdpp
+          rMlib
+          tilem::lib
+          Yaft::app_lib
+          rocket::lib
+          rm2fb_headers)
 
 # From:
 # https://github.com/catchorg/Catch2/blob/devel/docs/cmake-integration.md#catchcmake-and-catchaddtestscmake

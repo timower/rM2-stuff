@@ -1,5 +1,7 @@
 #pragma once
 
+#include <rm2fb/ControlSocket.h>
+
 #include <UI.h>
 #include <UI/Rotate.h>
 
@@ -10,12 +12,12 @@ getMissingImage();
 
 class RunningAppWidget : public rmlib::StatelessWidget<RunningAppWidget> {
 public:
-  RunningAppWidget(const App& app,
+  RunningAppWidget(const ControlClient::Client& client,
                    rmlib::Callback onTap,
                    rmlib::Callback onKill,
                    bool isCurrent,
                    rmlib::Rotation rotation)
-    : app(app)
+    : client(client)
     , onTap(std::move(onTap))
     , onKill(std::move(onKill))
     , rotation(rotation)
@@ -25,20 +27,21 @@ public:
              const rmlib::BuildContext& /*unused*/) const {
     using namespace rmlib;
 
-    const Canvas& canvas = app.savedFB().has_value() ? app.savedFB()->canvas
-                                                     : getMissingImage().canvas;
+    const Canvas& canvas = /*app.savedFB().has_value() ? app.savedFB()->canvas
+                                                     :*/
+      getMissingImage().canvas;
 
     return container(
       Column(GestureDetector(Rotated(rotation, Sized(Image(canvas), 234, 300)),
                              Gestures{}.onTap(onTap)),
-             Row(Text(app.description().name), Button("X", onKill))),
+             Row(Text(client.name), Button("X", onKill))),
       Insets::all(isCurrent ? 1 : 2),
       Insets::all(isCurrent ? 2 : 1),
       Insets::all(2));
   }
 
 private:
-  const App& app;
+  const ControlClient::Client& client;
   rmlib::Callback onTap;
   rmlib::Callback onKill;
   rmlib::Rotation rotation;

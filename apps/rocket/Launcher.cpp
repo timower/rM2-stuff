@@ -10,8 +10,6 @@ using namespace rmlib;
 
 namespace {
 
-constexpr std::array static_app_paths = { "/opt/etc/draft", "/etc/draft" };
-
 #ifndef KEY_POWER
 #define KEY_POWER 116
 #endif
@@ -104,6 +102,16 @@ waitForSleep() {
 #endif
 }
 
+unistdpp::FD writeFd;
+
+void
+signalHandler(int sig) {
+  if (!writeFd.isValid()) {
+    return;
+  }
+  writeFd.writeAll(sig).or_else([](auto err) {});
+}
+
 } // namespace
 
 LauncherState
@@ -119,14 +127,28 @@ LauncherState::init(rmlib::AppContext& context,
     key->grab();
   }
 
-  fbCanvas = &context.getFbCanvas();
-  inputManager = &context.getInputManager();
+  unistdpp::fatalOnError(getWidget().ctlClient.setLauncher(getpid()),
+                         "Failed to set launcher: ");
+
+  getWidget()
+    .ctlClient.getClients()
+    .transform([this](auto clients) { fbClients = std::move(clients); })
+    .or_else([](auto err) {
+      std::cerr << "Error getting init clients: " << to_string(err) << "\n";
+    });
+
+  auto pipe = unistdpp::fatalOnError(unistdpp::pipe());
+  writeFd = std::move(pipe.writePipe);
+  signalPipe = std::move(pipe.readPipe);
+  context.listenFd(signalPipe.fd, [&] { modify().onSignal(); });
+
+  struct sigaction sigAct = {};
+  sigAct.sa_flags = SA_RESTART; // make sure reading is restatart on switch.
+  sigAct.sa_handler = signalHandler;
+  sigaction(SIGUSR1, &sigAct, nullptr);
+  sigaction(SIGCONT, &sigAct, nullptr);
 
   readApps();
-
-  context.listenFd(AppManager::getInstance().getWaitFD().fd, [this] {
-    setState([](auto& self) { self.updateStoppedApps(); });
-  });
 
   inactivityTimer = context.addTimer(
     std::chrono::minutes(1),
@@ -175,6 +197,7 @@ LauncherState::stopTimer() {
 void
 LauncherState::startTimer(rmlib::AppContext& context, int time) {
   sleepCountdown = time;
+  sleepTimer.disable();
   sleepTimer = context.addTimer(
     std::chrono::seconds(time == 0 ? 0 : 1),
     [this] { tick(); },
@@ -219,16 +242,11 @@ LauncherState::show() {
     return;
   }
 
-  if (auto* current = getCurrentApp(); current != nullptr) {
-    current->pause(MemoryCanvas(*fbCanvas));
-    // pausing failed
-    if (!current->isPaused()) {
-      return;
-    }
-  }
+  background.reset();
 
-  readApps();
-  visible = true;
+  if (auto err = getWidget().ctlClient.switchTo(getpid()); !err) {
+    std::cerr << "Error switching: " << to_string(err.error()) << "\n";
+  }
 }
 
 void
@@ -237,106 +255,67 @@ LauncherState::hide(rmlib::AppContext* context) {
     return;
   }
 
-  if (auto* current = getCurrentApp(); current != nullptr) {
-    switchApp(*current);
-  } else if (context != nullptr) {
+  // TODO:
+  // if (false) {
+  //   switchApp(*current);
+  // } else
+
+  // sleep?
+  if (context != nullptr) {
     startTimer(*context, 0);
   }
 }
 
-App*
-LauncherState::getCurrentApp() {
-  auto app = std::find_if(apps.begin(), apps.end(), [this](auto& app) {
-    return app.description().path == currentAppPath;
-  });
-
-  if (app == apps.end()) {
-    return nullptr;
+void
+LauncherState::switchApp(pid_t pid) {
+  auto err = getWidget().ctlClient.switchTo(pid);
+  if (!err) {
+    std::cerr << "Error switching: " << to_string(err.error()) << "\n";
   }
-
-  return &*app;
-}
-
-const App*
-LauncherState::getCurrentApp() const {
-  // NOLINTNEXTLINE
-  return const_cast<LauncherState*>(this)->getCurrentApp();
 }
 
 void
-LauncherState::switchApp(App& app) {
-  visible = false;
+LauncherState::launch(App& app) {
   stopTimer();
 
-  // Pause the current app.
-  if (auto* currentApp = getCurrentApp(); currentApp != nullptr &&
-                                          currentApp->isRunning() &&
-                                          !currentApp->isPaused()) {
-    currentApp->pause();
+  if (!app.launch()) {
+    std::cerr << "Error launching " << app.description().command << std::endl;
+    return;
   }
 
-  // resume or launch app
-  if (app.isPaused()) {
-    app.resume();
-  } else if (!app.isRunning()) {
-    app.resetSavedFB();
-
-    if (!app.launch()) {
-      std::cerr << "Error launching " << app.description().command << std::endl;
-      return;
-    }
+  if (auto icon = app.icon(); icon.has_value()) {
+    background = *icon;
   }
-
-  currentAppPath = app.description().path;
 }
 
 void
-LauncherState::updateStoppedApps() {
-  AppManager::getInstance().update();
-
-  bool shouldShow = false;
-  if (const auto* current = getCurrentApp();
-      current != nullptr && !current->isRunning()) {
-    currentAppPath = "";
-    shouldShow = true;
+LauncherState::onSignal() {
+  auto sigOrErr = signalPipe.readAll<int>();
+  if (!sigOrErr.has_value()) {
+    return;
   }
 
-  apps.erase(std::remove_if(apps.begin(),
-                            apps.end(),
-                            [](const App& app) {
-                              return app.shouldRemoveOnExit() &&
-                                     !app.isRunning();
-                            }),
-             apps.end());
+  std::cerr << "Got signal: " << *sigOrErr << "\n";
 
-  if (shouldShow) {
-    show();
+  if (*sigOrErr == SIGUSR1) {
+    stopTimer();
+    visible = false;
+  } else if (*sigOrErr == SIGCONT) {
+    visible = true;
+    background.reset();
+    readApps();
+    getWidget()
+      .ctlClient.getClients()
+      .transform([&](auto clients) { fbClients = std::move(clients); })
+      .or_else([](auto err) {
+        std::cerr << "Error getting clients: " << to_string(err) << "\n";
+      });
   }
 }
 
 void
 LauncherState::readApps() {
-  const static auto app_paths = [] {
-    std::vector<std::string> paths;
-    std::transform(static_app_paths.begin(),
-                   static_app_paths.end(),
-                   std::back_inserter(paths),
-                   [](const auto* str) { return std::string(str); });
-
-    if (const auto* home = getenv("HOME"); home != nullptr) {
-      paths.push_back(std::string(home) + "/.config/draft");
-    }
-
-    return paths;
-  }();
-
-  std::vector<AppDescription> appDescriptions;
-  for (const auto& appsPath : app_paths) {
-    auto decriptions = readAppFiles(appsPath);
-    std::move(decriptions.begin(),
-              decriptions.end(),
-              std::back_inserter(appDescriptions));
-  }
+  auto appDescriptions = getWidget().appReader();
 
   // Update known apps.
   for (auto appIt = apps.begin(); appIt != apps.end();) {
@@ -347,16 +326,9 @@ LauncherState::readApps() {
                                  return desc.path == app.description().path;
                                });
 
-    // Remove old apps.
     if (descIt == appDescriptions.end()) {
-      if (!appIt->isRunning()) {
-        appIt = apps.erase(appIt);
-        continue;
-      }
-
-      // Defer removing until exit.
-      appIt->setRemoveOnExit();
-
+      // Remove old apps.
+      appIt = apps.erase(appIt);
     } else {
 
       // Update existing apps.
@@ -375,6 +347,14 @@ LauncherState::readApps() {
   std::sort(apps.begin(), apps.end(), [](const auto& app1, const auto& app2) {
     return app1.description().path < app2.description().path;
   });
+}
+
+bool
+LauncherState::isRunning(pid_t pid) const {
+  return std::find_if(
+           fbClients.begin(), fbClients.end(), [pid](const auto& client) {
+             return client.pid == pid;
+           }) != fbClients.end();
 }
 
 void

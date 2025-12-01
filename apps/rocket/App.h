@@ -5,15 +5,9 @@
 
 #include <unistdpp/pipe.h>
 
-#include <chrono>
 #include <optional>
 #include <string>
 #include <vector>
-
-struct AppRunInfo {
-  pid_t pid = -1;
-  bool paused = false;
-};
 
 struct AppDescription {
   std::string path; // path of app draft file, is unique.
@@ -41,54 +35,17 @@ public:
 
   void updateDescription(AppDescription desc);
 
-  bool isRunning() const { return !runInfo.expired(); }
-  bool isPaused() const { return isRunning() && runInfo.lock()->paused; }
-
   /// Starts a new instance of the app if it's not already running.
   /// \returns True if a new instance was started.
   bool launch();
-
-  void stop();
-
-  void pause(std::optional<rmlib::MemoryCanvas> screen = std::nullopt);
-  void resume(rmlib::fb::FrameBuffer* fb = nullptr);
+  pid_t getLaunchPid() const { return pid; }
 
   const AppDescription& description() const { return mDescription; }
-
   const std::optional<rmlib::Canvas>& icon() const { return iconCanvas; }
-  const std::optional<rmlib::MemoryCanvas>& savedFB() const { return savedFb; }
-  void resetSavedFB() { savedFb.reset(); }
-
-  void setRemoveOnExit() { shouldRemove = true; }
-  bool shouldRemoveOnExit() const { return shouldRemove; }
 
 private:
   AppDescription mDescription;
-
-  std::weak_ptr<AppRunInfo> runInfo;
+  pid_t pid = 0;
 
   std::optional<rmlib::Canvas> iconCanvas;
-  std::optional<rmlib::MemoryCanvas> savedFb;
-
-  // Indicates that the app should be removed when it exists
-  bool shouldRemove = false;
-};
-
-class AppManager {
-public:
-  static AppManager& getInstance();
-
-  bool update();
-  const unistdpp::FD& getWaitFD() const { return pipe.readPipe; }
-
-private:
-  friend class App;
-  unistdpp::Pipe pipe;
-
-  std::vector<std::shared_ptr<AppRunInfo>> runInfos;
-
-  static void onSigChild(int sig);
-
-  AppManager();
-  ~AppManager();
 };

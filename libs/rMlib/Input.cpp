@@ -285,7 +285,7 @@ InputManager::open(std::string_view input) {
     return &*it->second;
   }
 
-  auto fd = TRY(unistdpp::open(input.data(), O_RDWR | O_NONBLOCK));
+  auto fd = TRY(unistdpp::open(input.data(), O_RDWR | O_NONBLOCK | O_CLOEXEC));
 
   auto dev = TRY([&]() -> ErrorOr<InputDeviceBase::EvDevPtr> {
     libevdev* dev = nullptr;

@@ -2,15 +2,26 @@
 
 #include "App.h"
 #include "AppWidgets.h"
+#include "Hideable.h"
+
+#include <rm2fb/ControlSocket.h>
 
 #include <UI.h>
 #include <UI/Rotate.h>
+
+#include <utility>
 
 class LauncherState;
 
 class LauncherWidget : public rmlib::StatefulWidget<LauncherWidget> {
 public:
+  LauncherWidget(ControlInterface& ctlClient,
+                 std::function<std::vector<AppDescription>()> appReader)
+    : ctlClient(ctlClient), appReader(std::move(appReader)) {}
   static LauncherState createState();
+
+  ControlInterface& ctlClient;
+  std::function<std::vector<AppDescription>()> appReader;
 };
 
 class LauncherState : public rmlib::StateBase<LauncherWidget> {
@@ -61,24 +72,26 @@ public:
     using namespace rmlib;
 
     std::vector<RunningAppWidget> widgets;
-    for (const auto& app : apps) {
-      if (app.isRunning()) {
-        widgets.emplace_back(
-          app,
-          [this, &app] {
-            setState(
-              [&app](auto& self) { self.switchApp(*const_cast<App*>(&app)); });
-          },
-          [this, &app] {
-            setState([&app](auto& self) {
-              std::cout << "stopping " << app.description().name << std::endl;
-              const_cast<App*>(&app)->stop();
-              self.stopTimer();
-            });
-          },
-          app.description().path == currentAppPath,
-          invert(rotation));
+    const auto myPid = getpid();
+    for (const auto& client : fbClients) {
+      if (client.pid == myPid) {
+        continue;
       }
+      widgets.emplace_back(
+        client,
+        [this, pid = client.pid] {
+          setState([pid](auto& self) { self.switchApp(pid); });
+        },
+        [this, &client] {
+          setState([&client](auto& self) {
+            self.stopTimer();
+            std::cerr << "stopping " << client.pid << "\n";
+            self.switchApp(client.pid);
+            kill(-getpgid(client.pid), SIGTERM);
+          });
+        },
+        client.active,
+        invert(rotation));
     }
     return Wrap(widgets);
   }
@@ -88,10 +101,10 @@ public:
 
     std::vector<AppWidget> widgets;
     for (const auto& app : apps) {
-      if (!app.isRunning()) {
+      if (!isRunning(app.getLaunchPid())) {
         widgets.emplace_back(app, [this, &app] {
           setState(
-            [&app](auto& self) { self.switchApp(*const_cast<App*>(&app)); });
+            [&app](auto& self) { self.launch(*const_cast<App*>(&app)); });
         });
       }
     }
@@ -108,37 +121,22 @@ public:
              const rmlib::BuildContext& /*unused*/) const {
     using namespace rmlib;
 
-    const Canvas* background = nullptr;
-    std::optional<Size> backgroundSize = {};
-    if (const auto* currentApp = getCurrentApp(); currentApp != nullptr) {
-      if (const auto& savedFb = currentApp->savedFB(); savedFb.has_value()) {
-        background = &savedFb->canvas;
-      } else if (const auto& icon = currentApp->icon(); icon.has_value()) {
-        background = &*icon;
-        backgroundSize = splash_size;
-      }
-    }
-
-    auto ui = [&]() -> DynamicWidget {
-      if (visible) {
-        return Rotated(rotation, launcher(context));
+    auto ui = [&]() -> std::optional<DynamicWidget> {
+      if (!visible) {
+        return {};
       }
 
-      if (background == nullptr) {
-        return Colored(white);
+      if (background.has_value()) {
+        return Center(Rotated(
+          rotation,
+          Sized(Image(*background), splash_size.width, splash_size.height)));
       }
 
-      if (backgroundSize.has_value()) {
-        return Center(Rotated(rotation,
-                              Sized(Image(*background),
-                                    backgroundSize->width,
-                                    backgroundSize->height)));
-      }
-      return Image(*background);
+      return Rotated(rotation, launcher(context));
     }();
 
     return GestureDetector(
-      std::move(ui),
+      Hideable(std::move(ui)),
       Gestures{}
         .onKeyDown([this, &context](auto keyCode) {
           if (keyCode == KEY_POWER) {
@@ -154,38 +152,32 @@ private:
   void startTimer(rmlib::AppContext& context, int time = default_sleep_timeout);
   void stopTimer();
 
+  void resetInactivity() const;
   void tick() const;
 
   void show();
   void hide(rmlib::AppContext* context);
   void toggle(rmlib::AppContext& context);
 
-  App* getCurrentApp();
+  void launch(App& app);
+  void switchApp(pid_t pid);
 
-  const App* getCurrentApp() const;
-
-  void switchApp(App& app);
-
-  void updateStoppedApps();
-
+  void onSignal();
   void readApps();
-
-  void resetInactivity() const;
+  bool isRunning(pid_t pid) const;
 
   void updateRotation(rmlib::AppContext& ctx);
 
   std::vector<App> apps;
-  std::string currentAppPath;
+  std::vector<ControlInterface::Client> fbClients;
 
-  std::optional<rmlib::MemoryCanvas> backupBuffer;
+  unistdpp::FD signalPipe;
 
   rmlib::TimerHandle sleepTimer;
   rmlib::TimerHandle inactivityTimer;
 
-  const rmlib::Canvas* fbCanvas = nullptr;
-  rmlib::input::InputManager* inputManager = nullptr;
-
   rmlib::Rotation rotation = rmlib::Rotation::None;
+  std::optional<rmlib::Canvas> background;
 
   int sleepCountdown = -1;
   mutable int inactivityCountdown = default_inactivity_timeout;

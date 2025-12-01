@@ -42,14 +42,15 @@ public:
   void checkTimers() {
     while (!timers.empty()) {
       std::shared_ptr<Timer> top = timers.top();
-      if (top->check()) {
-        timers.pop();
+      timers.pop();
 
+      if (top->check()) {
         if (top->repeats()) {
           top->reset();
           timers.emplace(std::move(top));
         }
       } else {
+        timers.emplace(std::move(top));
         break;
       }
     }
@@ -172,6 +173,7 @@ private:
   input::InputManager inputManager;
 
   TimerQueue timers;
+
   // TODO: use handles to destroy these
   std::vector<Callback> doLaters;
   std::vector<Callback> onDeviceUpdates;

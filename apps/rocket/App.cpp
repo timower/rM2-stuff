@@ -4,7 +4,6 @@
 
 #include <Device.h>
 
-#include <algorithm>
 #include <csignal>
 #include <filesystem>
 #include <fstream>
@@ -13,44 +12,51 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+using std::optional;
+
 using namespace rmlib;
 
 namespace {
 
-pid_t
+unistdpp::Result<pid_t>
 runCommand(std::string_view cmd) {
+  auto pipes = TRY(unistdpp::pipe());
+
   pid_t pid = fork();
 
   if (pid == -1) {
-    perror("Error launching");
-    return -1;
+    return tl::unexpected(unistdpp::getErrno());
   }
 
   if (pid > 0) {
-    // Parent process, pid is the child pid
-    return pid;
+    pipes.writePipe.close();
+    // Parent process, read child pid.
+    return pipes.readPipe.readAll<pid_t>();
   }
 
-  setpgid(0, 0);
+  pipes.readPipe.close();
 
-  std::cout << "Running: " << cmd << std::endl;
+  setsid();
+
+  pid_t pid2 = fork();
+  if (pid2 == -1) {
+    perror("Error launching");
+    exit(EXIT_FAILURE);
+  }
+
+  if (pid2 > 0) {
+    // intermediate parent, exit.
+    unistdpp::fatalOnError(pipes.writePipe.writeAll(pid2));
+    exit(EXIT_SUCCESS);
+  }
+
+  pipes.writePipe.close();
+
+  std::cerr << "Running: " << cmd << std::endl;
   execlp("/bin/sh", "/bin/sh", "-c", cmd.data(), nullptr);
-  perror("Error running process");
-  return -1;
-}
 
-void
-stop(std::shared_ptr<AppRunInfo> runInfo) {
-  const auto pid = runInfo->pid;
-
-  if (runInfo->paused) {
-    kill(-pid, SIGCONT);
-  }
-
-  int res = kill(-pid, SIGTERM);
-  if (res != 0) {
-    perror("Error killing!");
-  }
+  perror("Error launching");
+  exit(EXIT_FAILURE);
 }
 
 } // namespace
@@ -92,7 +98,7 @@ AppDescription::read(std::string_view path, std::string_view iconDir) {
     result.iconPath = std::string(iconDir) + '/' + result.icon + ".png";
   }
 
-  return std::optional(std::move(result));
+  return std::move(result);
 }
 
 std::optional<Canvas>
@@ -160,113 +166,13 @@ App::updateDescription(AppDescription desc) {
 
 bool
 App::launch() {
-  if (isRunning()) {
-    assert(false && "Shouldn't be called if the app is already running");
+  auto pidOrErr = runCommand(description().command);
+  if (!pidOrErr) {
+    std::cerr << "Error launching: " << unistdpp::to_string(pidOrErr.error())
+              << "\n";
     return false;
   }
 
-  auto pid = runCommand(description().command);
-  if (pid == -1) {
-    return false;
-  }
-
-  auto runInfo = std::make_shared<AppRunInfo>();
-  runInfo->pid = pid;
-
-  this->runInfo = runInfo;
-
-  AppManager::getInstance().runInfos.emplace_back(std::move(runInfo));
-
+  pid = *pidOrErr;
   return true;
-}
-
-void
-App::stop() {
-  assert(isRunning());
-
-  ::stop(runInfo.lock());
-}
-
-void
-App::pause(std::optional<MemoryCanvas> screen) {
-  assert(isRunning() && !isPaused());
-
-  auto lockedInfo = runInfo.lock();
-
-  // int res = kill(-lockedInfo->pid, SIGSTOP);
-  // if (res != 0) {
-  //   perror("Failed to send SIGSTOP");
-  //   return;
-  // }
-
-  lockedInfo->paused = true;
-  savedFb = std::move(screen);
-}
-
-void
-App::resume(rmlib::fb::FrameBuffer* fb) {
-  assert(isPaused());
-
-  if (savedFb.has_value() && fb != nullptr) {
-    fb->canvas.copy(savedFb->canvas);
-    fb->doUpdate(
-      fb->canvas.rect(), fb::Waveform::GC16Fast, fb::UpdateFlags::FullRefresh);
-    savedFb.reset();
-  }
-
-  auto lockedInfo = runInfo.lock();
-  // kill(-lockedInfo->pid, SIGCONT);
-  lockedInfo->paused = false;
-}
-
-AppManager&
-AppManager::getInstance() {
-  static AppManager instance;
-  return instance;
-}
-
-bool
-AppManager::update() {
-  bool anyKilled = false;
-
-  while (auto res = pipe.readPipe.readAll<pid_t>()) {
-    auto pid = *res;
-    anyKilled = true;
-
-    runInfos.erase(
-      std::remove_if(runInfos.begin(),
-                     runInfos.end(),
-                     [pid](auto& info) { return info->pid == pid; }),
-      runInfos.end());
-  }
-
-  return anyKilled;
-}
-
-void
-AppManager::onSigChild(int sig) {
-  auto& inst = AppManager::getInstance();
-
-  pid_t childPid = 0;
-  while ((childPid = waitpid(static_cast<pid_t>(-1), nullptr, WNOHANG)) > 0) {
-
-    std::cout << "Killed: " << childPid << "\n";
-
-    auto v = inst.pipe.writePipe.writeAll(childPid);
-
-    if (!v.has_value()) {
-      std::cerr << "Error in writing pid: " << to_string(v.error()) << "\n";
-    }
-  }
-}
-
-AppManager::AppManager() : pipe(unistdpp::fatalOnError(unistdpp::pipe())) {
-  unistdpp::setNonBlocking(pipe.readPipe);
-  std::signal(SIGCHLD, onSigChild);
-}
-
-AppManager::~AppManager() {
-  for (auto runInfo : runInfos) {
-    ::stop(runInfo);
-  }
 }

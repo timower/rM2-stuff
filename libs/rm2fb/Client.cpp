@@ -25,7 +25,8 @@ unistdpp::FD&
 getControlSocket() {
   static unistdpp::FD res;
   if (!res.isValid()) {
-    res = unistdpp::fatalOnError(unistdpp::socket(AF_UNIX, SOCK_STREAM, 0));
+    res = unistdpp::fatalOnError(
+      unistdpp::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0));
 
     unistdpp::bind(res, unistdpp::Address::fromUnixPath(nullptr))
       .and_then([] {

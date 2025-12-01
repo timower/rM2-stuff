@@ -80,6 +80,19 @@ setProcessName(char* argv0) {
   }
 }
 
+unistdpp::Result<std::string>
+getProcName(pid_t pid) {
+  auto fd = TRY(unistdpp::open(
+    (std::filesystem::path("/proc") / std::to_string(pid) / "cmdline").c_str(),
+    O_RDONLY));
+
+  std::array<char, 512> buf;
+  auto size = TRY(fd.readAll(buf.data(), buf.size()));
+  auto res = std::string(buf.data(), size);
+
+  return std::filesystem::path(res).filename().string();
+}
+
 bool
 checkDebugMode() {
   const static bool debug_mode = [] {
@@ -357,9 +370,9 @@ struct Server : ControlInterface {
     frontPID = client.pid;
     std::cerr << "Resuming: " << frontPID << "\n";
 
-    if (client.dontPause) {
-      return;
-    }
+    // if (client.dontPause) {
+    //   return;
+    // }
 
     if (client.savedFB) {
       memcpy(fb.mem.get(), client.savedFB.get(), fb_size);
@@ -375,8 +388,11 @@ struct Server : ControlInterface {
       });
     }
 
-    inputMonitor.flood();
-    kill(-frontPID, SIGCONT);
+    if (!client.dontPause) {
+      inputMonitor.flood();
+    }
+
+    kill(-getpgid(frontPID), SIGCONT);
   }
 
   auto findClient(pid_t pid) {
@@ -394,11 +410,16 @@ struct Server : ControlInterface {
     }
 
     if (it->dontPause) {
+      std::cerr << "USR1: " << pid << "\n";
+      kill(-getpgid(pid), SIGUSR1);
       return true;
     }
 
     std::cerr << "pausing: " << pid << "\n";
-    kill(-pid, SIGSTOP);
+    auto res = kill(-getpgid(pid), SIGSTOP);
+    if (res == -1) {
+      perror("Error pausing!");
+    }
 
     if (it->savedFB == nullptr) {
       it->savedFB = std::make_unique<std::array<uint8_t, fb_size>>();
@@ -414,10 +435,13 @@ struct Server : ControlInterface {
                    unixClients.end(),
                    std::back_inserter(clients),
                    [this](const auto& client) {
-                     return Client{
+                     auto res = Client{
                        .pid = client.pid,
                        .active = client.pid == frontPID,
                      };
+                     auto name = getProcName(client.pid).value_or("<error>");
+                     strncpy(res.name, name.data(), sizeof(res.name));
+                     return res;
                    });
     return clients;
   }

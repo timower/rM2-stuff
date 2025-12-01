@@ -8,8 +8,6 @@
 #include "AppWidgets.h"
 #include "Launcher.h"
 
-#include "unistdpp/file.h"
-
 #include <fstream>
 
 using namespace rmlib;
@@ -126,28 +124,15 @@ imgFile=c
   CHECK(c.iconPath == tmp.dir / "icons" / "c.png");
 }
 
-TEST_CASE("App", "[rocket]") {
-  App app(AppDescription{ .name = "yes", .command = "sleep 5000" });
-
-  REQUIRE(app.launch());
-  usleep(500);
-
-  REQUIRE(app.isRunning());
-  REQUIRE_FALSE(app.isPaused());
-
-  app.stop();
-
-  while (!AppManager::getInstance().update()) {
-    usleep(500);
-  }
-
-  REQUIRE_FALSE(app.isRunning());
-}
-
 TEST_CASE("AppWidget", "[rocket]") {
   auto ctx = TestContext::make();
 
   App app(AppDescription{ .name = "foo", .command = "/usr/bin/ls" });
+  const auto client = ControlInterface::Client{
+    .pid = 12,
+    .active = true,
+    .name = "foo",
+  };
 
   SECTION("AppWidget") {
     int clicked = 0;
@@ -167,7 +152,7 @@ TEST_CASE("AppWidget", "[rocket]") {
     bool current = GENERATE(true, false);
 
     ctx.pumpWidget(Center(RunningAppWidget(
-      app, [&] { tapped++; }, [&] { killed++; }, current, Rotation::None)));
+      client, [&] { tapped++; }, [&] { killed++; }, current, Rotation::None)));
 
     auto appWidget = ctx.findByType<RunningAppWidget>();
     REQUIRE_THAT(
@@ -183,57 +168,51 @@ TEST_CASE("AppWidget", "[rocket]") {
   }
 }
 
-TemporaryDirectory
-makeDrafts() {
-  TemporaryDirectory tmp;
+std::vector<AppDescription>
+getFakeApps() {
+  std::vector<AppDescription> res;
+  res.emplace_back(AppDescription{
+    .path = "/etc/draft/a.dart",
+    .name = "a",
+    .description = "A a",
+    .command = "sleep 1",
+    .icon = "a",
+  });
+  res.emplace_back(AppDescription{
+    .path = "/etc/draft/b.dart",
+    .name = "b",
+    .command = "yes",
+  });
 
-  const auto configPath = tmp.dir / ".config" / "draft";
-  REQUIRE_NOTHROW(std::filesystem::create_directories(configPath));
-
-  writeFile(configPath / "a.draft", R"(
-name=a
-desc=A a
-call=sleep 1
-term=:
-imgFile=a
-    )");
-  writeFile(configPath / "b.draft", R"(
-name=b
-call=yes
-    )");
-
-  return tmp;
+  return res;
 }
 
-TEST_CASE("Landscape", "[rocket]") {
-  auto tmp = makeDrafts();
-  setenv("HOME", tmp.dir.c_str(), true);
+struct FakeClient : ControlInterface {
+  unistdpp::Result<std::vector<Client>> getClients() override { return {}; }
+  unistdpp::Result<unistdpp::FD> getFramebuffer(pid_t pid) override {
+    return {};
+  }
+
+  unistdpp::Result<void> switchTo(pid_t pid) override { return {}; }
+  unistdpp::Result<void> setLauncher(pid_t pid) override { return {}; }
+};
+
+TEST_CASE("Landscape", "[rocket][launcher]") {
+  auto client = FakeClient{};
 
   auto ctx = TestContext::make(/*keyboardAttached=*/true);
-  ctx.pumpWidget(Center(LauncherWidget()));
+  ctx.pumpWidget(Center(LauncherWidget(client, getFakeApps)));
   auto launcher = ctx.findByType<LauncherWidget>();
 
   REQUIRE_THAT(launcher, ctx.matchesGolden("rocket-landscape.png"));
 }
 
-TEST_CASE("Launcher", "[rocket]") {
-  auto tmp = makeDrafts();
-  setenv("HOME", tmp.dir.c_str(), true);
+TEST_CASE("Launcher", "[rocket][launcher]") {
+  auto client = FakeClient{};
 
   auto ctx = TestContext::make();
-  ctx.pumpWidget(Center(LauncherWidget()));
+  ctx.pumpWidget(Center(LauncherWidget(client, getFakeApps)));
   auto launcher = ctx.findByType<LauncherWidget>();
-
-  REQUIRE_THAT(launcher, ctx.matchesGolden("rocket.png"));
-
-  auto labelA = ctx.findByText("a");
-  ctx.tap(labelA);
-  ctx.pump();
-
-  REQUIRE_THAT(launcher, ctx.matchesGolden("rocket_a.png"));
-
-  sleep(2);
-  ctx.pump(std::chrono::milliseconds(50));
 
   REQUIRE_THAT(launcher, ctx.matchesGolden("rocket.png"));
 }

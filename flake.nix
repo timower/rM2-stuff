@@ -91,13 +91,14 @@
 
       nixosModules.default = ./nix/modules/remarkable.nix;
 
-      nixosConfigurations = {
+      nixosConfigurations = rec {
         example = nixpkgs.lib.nixosSystem {
           modules = [
             self.nixosModules.default
             ./nix/template/config.nix
           ];
         };
+        inherit (example.config.system.build) vm-config;
 
         darwin = nixpkgs.lib.nixosSystem {
           modules = [

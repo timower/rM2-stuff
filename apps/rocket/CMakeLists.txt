@@ -3,7 +3,7 @@ project(rocket)
 add_library(rocket_lib OBJECT App.cpp AppWidgets.cpp Launcher.cpp)
 add_library(rocket::lib ALIAS rocket_lib)
 
-target_link_libraries(rocket_lib PUBLIC rMlib)
+target_link_libraries(rocket_lib PUBLIC rMlib rm2fb_headers)
 if(NOT APPLE)
   target_link_libraries(rocket_lib PUBLIC Systemd::Lib)
 endif()
@@ -13,7 +13,7 @@ add_executable(${PROJECT_NAME} main.cpp)
 
 target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_17)
 
-target_link_libraries(${PROJECT_NAME} PRIVATE rocket_lib rMlib)
+target_link_libraries(${PROJECT_NAME} PRIVATE rocket_lib rMlib rm2fb_headers)
 
 install(
   TARGETS ${PROJECT_NAME}

@@ -13,6 +13,6 @@ struct Pipe {
 };
 
 Result<Pipe>
-pipe();
+pipe(bool closeExec = true);
 
 } // namespace unistdpp
