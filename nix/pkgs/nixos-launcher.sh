@@ -47,7 +47,7 @@ start_server() {
 
   rm -f /run/rm2fb.sock /dev/shm/swtfb.01
   LD_LIBRARY_PATH=/usr/lib @rm2fb-server@ &
-  while ! test -e /run/rm2fb.sock -a -e /dev/shm/swtfb.01; do
+  while ! test -e /run/rm2fb.sock; do
     sleep 1
   done
 

@@ -27,13 +27,13 @@ struct ImageInfo {
 int
 createThreadsHook(ImageInfo* info) {
   puts("HOOK: Create threads called!");
-  const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
+  const auto& fb = SharedFB::getInstance();
   info->width = fb_width;
   info->height = fb_height;
   info->stride = fb_width;
   info->zero1 = 0;
   info->zero2 = 0;
-  info->data = static_cast<uint16_t*>(fb.mem.get());
+  info->data = static_cast<uint16_t*>(fb.getFb());
 
   // This seems to be the buffer that gets used when extraMode == 7.
   info->backBuffer = (char*)fb.getGrayBuffer();
@@ -57,9 +57,9 @@ void*
 mallocHook(void* (*orig)(size_t), size_t size) {
   if (size == 0x503580) {
     std::cout << "HOOK: malloc redirected to shared FB\n";
-    const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
+    const auto& fb = SharedFB::getInstance();
     PreloadHook::getInstance().unhook<PreloadHook::Malloc>();
-    return fb.mem.get();
+    return fb.getFb();
   }
 
   return orig(size);
@@ -69,7 +69,7 @@ void*
 callocHook(void* (*orig)(size_t, size_t), size_t size, size_t count) {
   if (size == 0x281ac0 && count == 1) {
     std::cout << "HOOK: calloc redirected to shared FB\n";
-    const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
+    const auto& fb = SharedFB::getInstance();
     PreloadHook::getInstance().unhook<PreloadHook::Calloc>();
     return fb.getGrayBuffer();
   }

@@ -117,4 +117,12 @@ constexpr auto recvfrom =
   FnWrapper<::recvfrom,
             Result<ssize_t>(const FD&, void*, size_t, int, Address*)>{};
 
+// ssize_t sendmsg(int sockfd, const struct msghdr *msg, int flags);
+constexpr auto sendmsg =
+  FnWrapper<::sendmsg, Result<ssize_t>(const FD&, const struct msghdr*, int)>{};
+
+// ssize_t recvmsg(int sockfd, struct msghdr *msg, int flags);
+constexpr auto recvmsg =
+  FnWrapper<::recvmsg, Result<ssize_t>(const FD&, struct msghdr*, int)>{};
+
 } // namespace unistdpp

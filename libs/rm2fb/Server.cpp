@@ -123,7 +123,7 @@ doTCPUpdate(unistdpp::FD& fd, const SharedFB& fb, const UpdateParams& params) {
 
     memcpy(&buffer[row * width],
            // NOLINTNEXTLINE
-           static_cast<uint16_t*>(fb.mem.get()) + fbRow * fb_width + params.x1,
+           static_cast<uint16_t*>(fb.getFb()) + fbRow * fb_width + params.x1,
            width * sizeof(uint16_t));
   }
 
@@ -203,7 +203,7 @@ struct Server : ControlInterface {
   std::vector<UnixClient> unixClients;
   std::vector<unistdpp::FD> tcpClients;
 
-  const SharedFB& fb;
+  SharedFB& fb;
 
   const AddressInfoBase* hookAddrs;
 
@@ -294,7 +294,9 @@ struct Server : ControlInterface {
   }
 
   Server(const AddressInfoBase* addrs)
-    : controlServer(*this), fb(fatalOnError(SharedFB::getInstance())) {
+    : controlServer(*this), fb(SharedFB::getInstance()) {
+
+    unistdpp::fatalOnError(fb.alloc(), "Failed to allocated FB");
 
     getSystemdSockets();
     initServerSocket();
@@ -318,7 +320,7 @@ struct Server : ControlInterface {
     inputMonitor.startMonitor();
   }
 
-  void initSWTCON() {
+  void initSWTCON() const {
     // Call the get or create Instance function.
     if (!inQemu) {
       std::cerr << "SWTCON calling init\n";
@@ -328,9 +330,9 @@ struct Server : ControlInterface {
       // The init threads does a memset to 0xff. But if we're activated by a
       // systemd socket the shared memory already has some content. So make a
       // backup and preserve it.
-      memcpy(copyBuffer.get(), fb.mem.get(), fb_size);
+      memcpy(copyBuffer.get(), fb.getFb(), fb_size);
       hookAddrs->initThreads();
-      memcpy(fb.mem.get(), copyBuffer.get(), fb_size);
+      memcpy(fb.getFb(), copyBuffer.get(), fb_size);
 
       std::cerr << "SWTCON initalized!\n";
     } else {
@@ -375,7 +377,7 @@ struct Server : ControlInterface {
     // }
 
     if (client.savedFB) {
-      memcpy(fb.mem.get(), client.savedFB.get(), fb_size);
+      memcpy(fb.getFb(), client.savedFB.get(), fb_size);
       doUpdate(UpdateParams{
         .y1 = 0,
         .x1 = 0,
@@ -424,7 +426,7 @@ struct Server : ControlInterface {
     if (it->savedFB == nullptr) {
       it->savedFB = std::make_unique<std::array<uint8_t, fb_size>>();
     }
-    memcpy(it->savedFB.get(), fb.mem.get(), fb_size);
+    memcpy(it->savedFB.get(), fb.getFb(), fb_size);
 
     return true;
   }
@@ -438,6 +440,7 @@ struct Server : ControlInterface {
                      auto res = Client{
                        .pid = client.pid,
                        .active = client.pid == frontPID,
+                       .name = {},
                      };
                      auto name = getProcName(client.pid).value_or("<error>");
                      strncpy(res.name, name.data(), sizeof(res.name));
@@ -546,7 +549,7 @@ struct Server : ControlInterface {
         // Emtpy message, just to check init.
         if (msg.x1 == msg.x2 && msg.y1 == msg.y2) {
           std::cerr << "Got init check!\n";
-          return client.fd.writeAll(true);
+          return fb.send(client.fd);
         }
 
         bool res = doUpdate(msg);
