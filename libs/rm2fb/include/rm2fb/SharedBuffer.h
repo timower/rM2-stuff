@@ -16,6 +16,9 @@ constexpr int total_size = fb_size + grayscale_size;
 struct SharedFB {
   bool isValid() const { return fd.isValid(); }
   int getFd() const { return fd.fd; }
+  void setFD(unistdpp::FD fd) { this->fd = std::move(fd); }
+  unistdpp::FD takeFD() { return std::move(fd); }
+
   void* getFb() const { return mem.get(); }
   void* getGrayBuffer() const { return ((char*)mem.get()) + fb_size; }
 
