@@ -22,7 +22,7 @@ struct ControlInterface {
 struct ControlClient : ControlInterface {
   unistdpp::FD sock;
 
-  unistdpp::Result<void> init();
+  unistdpp::Result<void> init(const char* path = control_sock_addr.data());
 
   unistdpp::Result<std::vector<Client>> getClients() override;
   unistdpp::Result<int> getFramebuffer(pid_t pid) override;
@@ -37,6 +37,6 @@ struct ControlServer {
 
   ControlServer(ControlInterface& iface) : iface(iface) {}
 
-  unistdpp::Result<void> maybeInit();
+  unistdpp::Result<void> maybeInit(const char* path = control_sock_addr.data());
   unistdpp::Result<void> handleMsg();
 };
