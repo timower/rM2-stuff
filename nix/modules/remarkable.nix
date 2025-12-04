@@ -1,4 +1,9 @@
-{ modulesPath, lib, ... }:
+{
+  modulesPath,
+  lib,
+  pkgs,
+  ...
+}:
 {
   imports = [
     "${modulesPath}/profiles/minimal.nix"
@@ -20,12 +25,23 @@
     fsType = "ext4";
   };
 
-  # make logind ignore the power key, the launcher handles this.
-  services.logind.powerKey = "ignore";
+  services.logind.settings.Login = {
+    # make logind ignore the power key, the launcher handles this.
+    HandlePowerKey = "ignore";
+    # Disable autoVT, we don't need getty on tty's.
+    NAutoVTs = 0;
+  };
+
   environment.etc."systemd/system-sleep/sleep-wifi.sh" = {
     mode = "555";
     text = ''
       #!/bin/sh
+      export PATH="${
+        lib.makeBinPath [
+          pkgs.coreutils # basename
+          pkgs.iproute2 # ip
+        ]
+      }"
 
       if [ "$1" == "pre" ]; then
       	echo "$(basename $0): Shutting down Wifi" > /dev/kmsg
