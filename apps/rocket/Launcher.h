@@ -102,15 +102,15 @@ public:
     return Wrap(widgets);
   }
 
-  auto appList() const {
+  auto appList(rmlib::AppContext& ctx) const {
     using namespace rmlib;
 
     std::vector<AppWidget> widgets;
     for (const auto& app : apps) {
       if (!isRunning(app.getLaunchPid())) {
-        widgets.emplace_back(app, [this, &app] {
+        widgets.emplace_back(app, [this, &app, &ctx] {
           setState(
-            [&app](auto& self) { self.launch(*const_cast<App*>(&app)); });
+            [&](auto& self) { self.launch(ctx, *const_cast<App*>(&app)); });
         });
       }
     }
@@ -120,7 +120,7 @@ public:
   auto launcher(rmlib::AppContext& context) const {
     using namespace rmlib;
 
-    return Cleared(Column(header(context), runningApps(), appList()));
+    return Cleared(Column(header(context), runningApps(), appList(context)));
   }
 
   auto build(rmlib::AppContext& context,
@@ -165,7 +165,7 @@ private:
   void hide(rmlib::AppContext* context);
   void toggle(rmlib::AppContext& context);
 
-  void launch(App& app);
+  void launch(rmlib::AppContext& ctx, App& app);
   void switchApp(pid_t pid);
 
   void onSignal();
@@ -185,6 +185,7 @@ private:
 
   rmlib::TimerHandle sleepTimer;
   rmlib::TimerHandle inactivityTimer;
+  rmlib::TimerHandle backgroundTimer;
 
   rmlib::Rotation rotation = rmlib::Rotation::None;
   std::optional<rmlib::Canvas> background;

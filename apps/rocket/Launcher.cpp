@@ -221,6 +221,7 @@ LauncherState::tick() const {
 
 void
 LauncherState::toggle(rmlib::AppContext& context) {
+  background.reset();
   if (visible) {
     bool shouldStartTimer = sleepCountdown <= 0;
     stopTimer();
@@ -236,8 +237,6 @@ LauncherState::show() {
   if (visible) {
     return;
   }
-
-  background.reset();
 
   if (auto err = getWidget().ctlClient.switchTo(getpid()); !err) {
     std::cerr << "Error switching: " << to_string(err.error()) << "\n";
@@ -270,7 +269,7 @@ LauncherState::switchApp(pid_t pid) {
 }
 
 void
-LauncherState::launch(App& app) {
+LauncherState::launch(rmlib::AppContext& ctx, App& app) {
   stopTimer();
 
   if (!app.launch()) {
@@ -280,6 +279,8 @@ LauncherState::launch(App& app) {
 
   if (auto icon = app.icon(); icon.has_value()) {
     background = *icon;
+    backgroundTimer = ctx.addTimer(std::chrono::seconds(3),
+                                   [this] { modify().background.reset(); });
   }
 }
 
@@ -295,9 +296,9 @@ LauncherState::onSignal() {
   if (*sigOrErr == SIGUSR1) {
     stopTimer();
     visible = false;
+    background.reset();
   } else if (*sigOrErr == SIGCONT) {
     visible = true;
-    background.reset();
 
     readApps();
     requestClients();

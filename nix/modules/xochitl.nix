@@ -10,8 +10,17 @@ let
   };
   xochitl = pkgs.writeShellApplication {
     name = "xochitl";
-    runtimeInputs = [ pkgs.systemd ];
+    runtimeInputs = with pkgs; [
+      systemd
+      util-linux
+    ];
     text = ''
+      exec {fd}>"''${XDG_RUNTIME_DIR:-/run}/xochitl.lock"
+      if ! flock -n -x $fd; then
+        echo "Only one xochitl supported!"
+        exit 1
+      fi
+
       ctlCmd="systemctl"
       if [ "$EUID" -ne "0" ]; then
         ctlCmd="systemctl --user"
