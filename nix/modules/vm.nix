@@ -39,15 +39,24 @@ let
     ln -s /proc/self/fd/1 /dev/stdout
     ln -s /proc/self/fd/2 /dev/stderr
 
-    exec /sbin/init
+    exec ${vm-config.config.system.build.toplevel}/init
   '';
+
+  closure = pkgs.closureInfo {
+    rootPaths = [ vm-config.config.system.build.toplevel ];
+  };
 
   vm-nixos = rm-emu.override (prev: {
     commandline = "console=ttymxc0 rootfstype=ext4 root=/dev/mmcblk2p4 rw rootwait init=/sbin/vm-init";
     rootfs = prev.rootfs.override {
       extraCommands = ''
-        mkdir -p /mnt/home
-        tar -C /mnt/home -xJf ${vm-config.config.system.build.image}/tarball/*.tar.xz
+        mkdir -p /mnt/home/nix/store /mnt/home/sbin
+
+        for i in $(< ${closure}/store-paths); do
+            cp -a "$i" "/mnt/home/''${i:1}"
+        done
+        cp ${closure}/registration /mnt/home/nix-path-registration
+
         cp ${vm-init} /mnt/home/sbin/vm-init
       '';
     };
