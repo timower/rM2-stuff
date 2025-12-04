@@ -398,3 +398,47 @@ LauncherState::updateRotation(rmlib::AppContext& ctx) {
                ? Rotation::Clockwise
                : Rotation::None;
 }
+
+void
+LauncherState::onKey(rmlib::AppContext& ctx, int keycode, bool down) const {
+  if (down && keycode == KEY_POWER) {
+    setState([&ctx](auto& self) { self.toggle(ctx); });
+    return;
+  }
+
+  if (keycode == KEY_LEFTALT) {
+    // const cast here as we don't want to trigger a rebuild.
+    const_cast<LauncherState*>(this)->modPressed = down;
+    return;
+  }
+
+  // Only hande key up with mod pressed.
+  if (down || !modPressed) {
+    return;
+  }
+
+  int offset = 0;
+  if (keycode == KEY_LEFT) {
+    offset = -1;
+  } else if (keycode == KEY_RIGHT) {
+    offset = 1;
+  } else {
+    return;
+  }
+
+  const auto clientsOrErr = getWidget().ctlClient.getClients();
+  if (!clientsOrErr) {
+    return;
+  }
+  const auto& clients = *clientsOrErr;
+  auto it = std::find_if(clients.begin(),
+                         clients.end(),
+                         [](const auto& client) { return client.active; });
+  if (it == clients.end()) {
+    return;
+  }
+
+  auto idx = std::distance(clients.begin(), it);
+  idx = (idx + offset) % clients.size();
+  getWidget().ctlClient.switchTo(clients[idx].pid);
+}

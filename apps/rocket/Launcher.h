@@ -107,12 +107,10 @@ public:
 
     std::vector<AppWidget> widgets;
     for (const auto& app : apps) {
-      if (!isRunning(app.getLaunchPid())) {
-        widgets.emplace_back(app, [this, &app, &ctx] {
-          setState(
-            [&](auto& self) { self.launch(ctx, *const_cast<App*>(&app)); });
-        });
-      }
+      widgets.emplace_back(app, [this, &app, &ctx] {
+        setState(
+          [&](auto& self) { self.launch(ctx, *const_cast<App*>(&app)); });
+      });
     }
     return Wrap(widgets);
   }
@@ -141,15 +139,15 @@ public:
       return Rotated(rotation, launcher(context));
     }();
 
-    return GestureDetector(
-      Hideable(std::move(ui)),
-      Gestures{}
-        .onKeyDown([this, &context](auto keyCode) {
-          if (keyCode == KEY_POWER) {
-            setState([&context](auto& self) { self.toggle(context); });
-          }
-        })
-        .onAny([this]() { resetInactivity(); }));
+    return GestureDetector(Hideable(std::move(ui)),
+                           Gestures{}
+                             .onKeyUp([this, &context](auto keyCode) {
+                               onKey(context, keyCode, false);
+                             })
+                             .onKeyDown([this, &context](auto keyCode) {
+                               onKey(context, keyCode, true);
+                             })
+                             .onAny([this]() { resetInactivity(); }));
   }
 
 private:
@@ -176,6 +174,8 @@ private:
 
   void updateRotation(rmlib::AppContext& ctx);
 
+  void onKey(rmlib::AppContext& ctx, int keycode, bool down) const;
+
   std::vector<App> apps;
 
   std::vector<ControlInterface::Client> fbClients;
@@ -193,4 +193,6 @@ private:
   int sleepCountdown = -1;
   mutable int inactivityCountdown = default_inactivity_timeout;
   bool visible = true;
+
+  bool modPressed = false;
 };

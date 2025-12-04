@@ -42,9 +42,9 @@ getKeyFlood() {
     // NOLINTNEXTLINE
     static const auto ret = std::make_unique<input_event[]>(key_flood_size);
     for (int i = 0; i < key_flood_size;) {
-      ret[i++] = mkEvent(EV_KEY, KEY_LEFTALT, 1);
+      ret[i++] = mkEvent(EV_KEY, KEY_RIGHTALT, 1);
       ret[i++] = mkEvent(EV_SYN, SYN_REPORT, 0);
-      ret[i++] = mkEvent(EV_KEY, KEY_LEFTALT, 0);
+      ret[i++] = mkEvent(EV_KEY, KEY_RIGHTALT, 0);
       ret[i++] = mkEvent(EV_SYN, SYN_REPORT, 0);
     }
     return ret.get();
