@@ -65,8 +65,8 @@ protected:
     auto result = this->child->draw(canvas, { 0, 0 });
     if (doRefresh) {
       doRefresh = false;
-      result.waveform = rmlib::fb::Waveform::GC16;
-      result.flags = rmlib::fb::UpdateFlags::FullRefresh;
+      result.waveform = rmlib::fb::Waveform::GC16Fast;
+      // result.flags = rmlib::fb::UpdateFlags::FullRefresh;
     }
 
     return result;
