@@ -64,6 +64,11 @@
     # services.wpa_supplicant.startLimitIntervalSec = 600;
     shutdownRamfs.enable = false;
 
+    additionalUpstreamSystemUnits = [
+      "soft-reboot.target"
+      "systemd-soft-reboot.service"
+    ];
+
     oomd.enable = false;
     suppressedSystemUnits = [
       # Kernel module loading.
