@@ -101,6 +101,7 @@ in
             # Grab tty1, this will allow us to suspend via polkit.
             TTYPath = "/dev/tty1";
             StandardOutput = "journal";
+            StandardInput = "tty";
           };
 
           # conflicts = [ "getty@tty1.service" ];

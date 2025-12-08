@@ -176,6 +176,9 @@ private:
 
   void onKey(rmlib::AppContext& ctx, int keycode, bool down) const;
 
+  void takeInhibitorLock();
+  void releaseInhibitorLock();
+
   std::vector<App> apps;
 
   std::vector<ControlInterface::Client> fbClients;
@@ -195,4 +198,5 @@ private:
   bool visible = true;
 
   bool modPressed = false;
+  unistdpp::FD inhibitorLock;
 };

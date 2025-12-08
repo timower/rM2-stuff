@@ -1,10 +1,7 @@
 #include "Launcher.h"
 
+#include <systemdpp/sdbus.h>
 #include <unistdpp/file.h>
-
-#ifdef __linux__
-#include <systemd/sd-bus.h>
-#endif
 
 using namespace rmlib;
 
@@ -13,94 +10,6 @@ namespace {
 #ifndef KEY_POWER
 #define KEY_POWER 116
 #endif
-
-int
-waitForSleep() {
-#ifdef __linux__
-  bool inSleep = false;
-  int res = 0;
-  sd_bus* bus = nullptr;
-  res = sd_bus_open_system(&bus);
-  if (res < 0) {
-    std::cerr << "Error opening system bus: " << strerror(-res) << "\n";
-    return res;
-  }
-
-  res = sd_bus_match_signal(
-    bus,
-    nullptr,
-    "org.freedesktop.login1",
-    "/org/freedesktop/login1",
-    "org.freedesktop.login1.Manager",
-    "PrepareForSleep",
-    [](sd_bus_message* m, void* inSleep, sd_bus_error*) -> int {
-      int sleeping;
-      int res = sd_bus_message_read(m, "b", &sleeping);
-      if (res < 0) {
-        std::cerr << "Error reading message: " << strerror(-res) << "\n";
-        return res;
-      }
-
-      std::cout << "Sleep got: " << sleeping << "\n";
-
-      if (!sleeping) {
-        // Waking up
-        *(bool*)inSleep = true;
-      }
-      return 0;
-    },
-    &inSleep);
-  if (res < 0) {
-    std::cerr << "Error subscribing to signal: " << strerror(-res) << "\n";
-    sd_bus_unref(bus);
-    return res;
-  }
-
-  sd_bus_error error = SD_BUS_ERROR_NULL;
-  sd_bus_message* reply = nullptr;
-  res = sd_bus_call_method(bus,
-                           "org.freedesktop.login1",
-                           "/org/freedesktop/login1",
-                           "org.freedesktop.login1.Manager",
-                           "Suspend",
-                           &error,
-                           &reply,
-                           "b",
-                           /* interactive */ 1);
-  if (res < 0) {
-    std::cerr << "Error suspending: " << strerror(-res) << "\n";
-    sd_bus_unref(bus);
-    return res;
-  }
-  sd_bus_message_unref(reply);
-
-  // Wait for suspend signal
-  while (!inSleep) {
-    res = sd_bus_process(bus, nullptr);
-    if (res < 0) {
-      std::cerr << "Error reading: " << strerror(-res) << "\n";
-      break;
-    }
-
-    if (res > 0) {
-      continue;
-    }
-
-    res = sd_bus_wait(bus, -1);
-    if (res < 0) {
-      std::cerr << "Error reading: " << strerror(-res) << "\n";
-      break;
-    }
-  }
-
-  sd_bus_error_free(&error);
-  sd_bus_unref(bus);
-
-  return 0;
-#else
-  return 1;
-#endif
-}
 
 unistdpp::FD writeFd;
 
@@ -145,12 +54,13 @@ LauncherState::init(rmlib::AppContext& context,
 
   readApps();
 
+  takeInhibitorLock();
   inactivityTimer = context.addTimer(
     std::chrono::minutes(1),
     [this, &context] {
       inactivityCountdown -= 1;
       if (inactivityCountdown == 0) {
-        resetInactivity();
+        releaseInhibitorLock();
         setState([&context](auto& self) {
           self.startTimer(context);
           self.show();
@@ -164,10 +74,23 @@ LauncherState::init(rmlib::AppContext& context,
     [this, &context] { modify().updateRotation(context); });
 }
 
+void
+LauncherState::releaseInhibitorLock() {
+  inhibitorLock.close();
+}
+
+void
+LauncherState::takeInhibitorLock() {
+  systemdpp::getInhibitLock()
+    .transform([this](auto fd) { inhibitorLock = std::move(fd); })
+    .or_else([](auto errc) {
+      std::cerr << "Could not get inhibit lock: " << to_string(errc) << "\n";
+    });
+}
+
 bool
 LauncherState::sleep() {
-  int res = waitForSleep();
-  if (res == 0) {
+  if (systemdpp::waitForSleep()) {
     // Get the reason
     auto irq = unistdpp::readFile("/sys/power/pm_wakeup_irq");
     if (!irq.has_value()) {
@@ -389,6 +312,10 @@ LauncherState::isRunning(pid_t pid) const {
 
 void
 LauncherState::resetInactivity() const {
+  if (!inhibitorLock.isValid()) {
+    // const cast here as we don't want to trigger a rebuild.
+    const_cast<LauncherState*>(this)->takeInhibitorLock();
+  }
   inactivityCountdown = default_inactivity_timeout;
 }
 
