@@ -46,9 +46,9 @@ protected:
     return result;
   }
 
-  UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) override {
-    canvas.set(rect, widget->color);
-    return UpdateRegion{ rect };
+  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
+    canvas.set(widget->color);
+    return UpdateRegion{ canvas.rect() };
   }
 };
 
@@ -76,7 +76,7 @@ public:
   using LeafRenderObject<Image>::LeafRenderObject;
 
   void update(const Image& newWidget) {
-    if (newWidget.canvas.getMemory() != widget->canvas.getMemory()) {
+    if (newWidget.canvas != widget->canvas) {
       markNeedsDraw();
     }
     widget = &newWidget;
@@ -92,11 +92,20 @@ protected:
                    h, constraints.min.height, constraints.max.height) };
   }
 
-  UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) override {
+  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
+    const auto& rect = canvas.rect();
+    const auto& image = widget->canvas;
+
+    if (image.rect().size() == rect.size() &&
+        image.rotation() == canvas.rotation()) {
+      canvas.copy(image);
+      return UpdateRegion{ rect };
+    }
+
     auto rectW = float(rect.width());
     auto rectH = float(rect.height());
-    auto canvasW = float(widget->canvas.width());
-    auto canvasH = float(widget->canvas.height());
+    auto canvasW = float(image.width());
+    auto canvasH = float(image.height());
     float scaleX = rectW / canvasW;
     float scaleY = rectH / canvasH;
     int offsetX = 0;
@@ -116,16 +125,13 @@ protected:
       [&](int x, int y, int old) {
         auto subY = int(float(y - rect.topLeft.y - offsetY) / scaleY);
         auto subX = int(float(x - rect.topLeft.x - offsetX) / scaleX);
-        if (!widget->canvas.rect().contains(Point{ subX, subY })) {
+        if (!image.rect().contains(Point{ subX, subY })) {
           return old;
         }
 
-        auto pixel = widget->canvas.getPixel(subX, subY);
-        // auto* pixel = widget->canvas.getPtr(subX, subY);
-        return pixel;
+        return image.getPixel(subX, subY);
       },
       rect);
-
     return UpdateRegion{ rect };
   }
 };

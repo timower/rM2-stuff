@@ -110,4 +110,5 @@ constexpr auto sendto = FnWrapper<
 constexpr auto recvfrom =
   FnWrapper<::recvfrom,
             Result<ssize_t>(const FD&, void*, size_t, int, Address*)>{};
+
 } // namespace unistdpp

@@ -10,7 +10,9 @@
 
 #include <Device.h>
 
-#include <sstream>
+#include <sys/inotify.h>
+
+#include <unistdpp/file.h>
 
 using namespace rmlib;
 
@@ -42,10 +44,10 @@ initSignalHandler(AppContext& ctx) {
 
 bool
 forkAndExec(int* master,
-              const char* cmd,
-              char* const argv[],
-              int lines,
-              int cols) {
+            const char* cmd,
+            char* const argv[],
+            int lines,
+            int cols) {
   pid_t pid = 0;
   struct winsize ws{};
   ws.ws_row = lines;
@@ -58,7 +60,8 @@ forkAndExec(int* master,
   pid = eforkpty(master, nullptr, nullptr, &ws);
   if (pid < 0) {
     return false;
-  } if (pid == 0) { /* child */
+  }
+  if (pid == 0) { /* child */
     setenv("TERM", termName, 1);
     execvp(cmd, argv);
     /* never reach here */
@@ -67,6 +70,15 @@ forkAndExec(int* master,
   return true;
 }
 } // namespace
+
+YaftConfigAndError
+Yaft::getConfigAndError() const {
+  if (std::holds_alternative<YaftConfigAndError>(configOrPath)) {
+    return std::get<YaftConfigAndError>(configOrPath);
+  }
+
+  return loadConfigOrMakeDefault(std::get<std::filesystem::path>(configOrPath));
+}
 
 YaftState::~YaftState() {
   if (term) {
@@ -86,22 +98,37 @@ YaftState::init(rmlib::AppContext& ctx, const rmlib::BuildContext& /*unused*/) {
   // term_init needs the maximum size of the terminal.
   int maxSize = std::max(ctx.getFbCanvas().width(), ctx.getFbCanvas().height());
   if (!term_init(term.get(), maxSize, maxSize)) {
-    std::cout << "Error init term\n";
+    std::cerr << "Error init term\n";
     ctx.stop();
     return;
   }
 
-  if (const auto& err = getWidget().configError; err.has_value()) {
+  auto cfgAndError = getWidget().getConfigAndError();
+  config = std::move(cfgAndError.config);
+
+  if (const auto& err = cfgAndError.err; err.has_value()) {
     logTerm(err->msg);
+  }
+
+  if (std::holds_alternative<std::filesystem::path>(getWidget().configOrPath)) {
+    watchPath = std::get<std::filesystem::path>(getWidget().configOrPath);
+    inotifyFd = unistdpp::FD(inotify_init());
+    if (inotifyFd.isValid()) {
+      inotifyWd = inotify_add_watch(inotifyFd.fd,
+                                    watchPath.parent_path().c_str(),
+                                    IN_MODIFY | IN_CREATE | IN_CLOSE_WRITE);
+
+      ctx.listenFd(inotifyFd.fd, [this, &ctx] { readInotify(ctx); });
+    }
   }
 
   initSignalHandler(ctx);
 
   if (!forkAndExec(&term->fd,
-                     getWidget().cmd,
-                     getWidget().argv,
-                     term->lines,
-                     term->cols)) {
+                   getWidget().cmd,
+                   getWidget().argv,
+                   term->lines,
+                   term->cols)) {
     puts("Failed to fork!");
     std::exit(EXIT_FAILURE);
   }
@@ -112,7 +139,7 @@ YaftState::init(rmlib::AppContext& ctx, const rmlib::BuildContext& /*unused*/) {
 
     // Only update if the buffer isn't full. Otherwise more data is comming
     // probably.
-    if (size != buf.size()) {
+    if (size != int(buf.size())) {
       setState([&](auto& self) {
         parse(self.term.get(), reinterpret_cast<uint8_t*>(buf.data()), size);
       });
@@ -138,18 +165,54 @@ YaftState::init(rmlib::AppContext& ctx, const rmlib::BuildContext& /*unused*/) {
 
 void
 YaftState::checkLandscape(rmlib::AppContext& ctx) {
-  const auto& config = getWidget().config;
-
-  if (config.orientation == YaftConfig::Orientation::Auto) {
-
-    // The pogo state updates after a delay, so wait 100 ms before checking.
-    pogoTimer = ctx.addTimer(std::chrono::milliseconds(100), [this] {
-      setState(
-        [](auto& self) { self.isLandscape = device::isPogoConnected(); });
-    });
+  if (config.autoRotate) {
+    const auto hasKeyboard =
+      ctx.getInputManager().getBaseDevices().pogoKeyboard != nullptr;
+    hideKeyboard = hasKeyboard;
+    rotation = hasKeyboard ? Rotation::Clockwise : config.rotation;
   } else {
-    isLandscape = config.orientation == YaftConfig::Orientation::Landscape;
+    rotation = config.rotation;
   }
+}
+
+void
+YaftState::readInotify(rmlib::AppContext& ctx) const {
+  union {
+    std::array<char, 4096> buf;
+    inotify_event ev;
+  } evUnion;
+
+  auto read = unistdpp::read(inotifyFd, &evUnion, sizeof(evUnion));
+  if (!read.has_value()) {
+    std::cerr << "inotify read failed: " << to_string(read.error()) << "\n";
+    return;
+  }
+
+  bool shouldReload = false;
+  const inotify_event* event;
+  for (char* ptr = evUnion.buf.begin(); ptr < evUnion.buf.begin() + *read;
+       ptr += sizeof(struct inotify_event) + event->len) {
+    event = (const struct inotify_event*)ptr;
+
+    if (event->wd == inotifyWd && event->name == watchPath.filename()) {
+      shouldReload = true;
+    }
+  }
+
+  if (!shouldReload) {
+    return;
+  }
+
+  std::cerr << "inotify: Config updated, reloading\n";
+  setState([&](auto& self) {
+    auto cfgAndErr = loadConfig(self.watchPath);
+    if (cfgAndErr.err.has_value()) {
+      self.logTerm(cfgAndErr.err->msg);
+    }
+
+    self.config = cfgAndErr.config;
+    self.checkLandscape(ctx);
+  });
 }
 
 YaftState

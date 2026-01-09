@@ -1,4 +1,6 @@
 #include "AddressHooking.h"
+#include "ImageHook.h"
+#include "PreloadHooks.h"
 #include "Version.h"
 
 #include <rm2.h>
@@ -26,7 +28,10 @@ struct AddressInfo : public AddressInfoBase {
               SimpleFunction shutdownFn)
     : createThreads(createThreads), update(update), shutdownFn(shutdownFn) {}
 
-  void initThreads() const final { createThreads.call<void*>(); }
+  void initThreads() const final {
+    PreloadHook::getInstance().hook<PreloadHook::QImageCtor>(qimageHook);
+    createThreads.call<void*>();
+  }
 
   bool doUpdate(const UpdateParams& params) const final {
     UpdateParams mappedParams = params;
@@ -39,6 +44,7 @@ struct AddressInfo : public AddressInfoBase {
     createThreads.hook((void*)createThreadsHook);
     update.hook((void*)newUpdate);
     shutdownFn.hook((void*)shutdownHook);
+    PreloadHook::getInstance().hook<PreloadHook::QImageCtor>(qimageHook);
     return true;
   }
 };

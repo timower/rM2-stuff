@@ -13,9 +13,9 @@ public:
                const rmlib::BuildContext& ctx) const {
       using namespace rmlib;
 
-      return Center(Border(
+      return Border(
         Cleared(Text("Downloading ROM '" + getWidget().romPath + "' ...")),
-        Insets::all(5)));
+        Insets::all(5));
     }
 
   private:
@@ -35,14 +35,14 @@ public:
 
   auto build(rmlib::AppContext& appCtx, const rmlib::BuildContext& ctx) const {
     using namespace rmlib;
-    return Center((Border(
+    return Border(
       Cleared(Column(
         Text("Loading ROM '" + romPath + "' failed"),
         Row(Padding(Button("Download", [&ctx] { Navigator::of(ctx).pop(); }),
                     Insets::all(10)),
             Padding(Button("Exit", [&appCtx] { appCtx.stop(); }),
                     Insets::all(10))))),
-      Insets::all(5))));
+      Insets::all(5));
   }
   std::string romPath;
 };

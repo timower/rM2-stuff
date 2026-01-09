@@ -65,7 +65,7 @@ public:
   using SingleChildRenderObject<
     GestureDetector<Child>>::SingleChildRenderObject;
 
-  void handleInput(const rmlib::input::Event& ev) final {
+  void doHandleInput(const rmlib::input::Event& ev) final {
     if (this->widget->gestures.onAnyFn) {
       this->widget->gestures.onAnyFn();
     }
@@ -85,7 +85,7 @@ public:
 
         // If we didn't return yet we didn't handle the event.
         // So let our child handle it.
-        SingleChildRenderObject<GestureDetector<Child>>::handleInput(ev);
+        SingleChildRenderObject<GestureDetector<Child>>::doHandleInput(ev);
       },
       ev);
   }
@@ -98,7 +98,7 @@ public:
 private:
   template<typename Ev>
   bool handlePointerEv(const Ev& ev) {
-    if (ev.isDown() && this->getRect().contains(ev.location) &&
+    if (ev.isDown() && this->getLocalRect().contains(ev.location) &&
         currentId == -1) {
       if (this->widget->gestures.handlesTouch()) {
         currentId = ev.id;

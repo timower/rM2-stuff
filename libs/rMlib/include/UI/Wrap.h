@@ -97,11 +97,11 @@ protected:
     return result;
   }
 
-  UpdateRegion doDraw(Rect rect, Canvas& canvas) override {
+  UpdateRegion doDraw(Canvas& canvas) override {
     UpdateRegion result;
 
-    const auto origin =
-      ((rect.size() - totalSize) / 2).toPoint() + Point{ 1, 1 };
+    const auto mySize = this->getSize();
+    const auto origin = ((mySize - totalSize) / 2).toPoint() + Point{ 1, 1 };
     auto offset = origin;
 
     int run = 0;
@@ -109,20 +109,18 @@ protected:
       const auto size = child->getSize();
 
       if (isVertical()) {
-        if (offset.y + size.height > rect.height()) {
+        if (offset.y + size.height > mySize.height) {
           offset.y = origin.y;
           offset.x += runSizes.at(run++);
         }
       } else {
-        if (offset.x + size.width > rect.width()) {
+        if (offset.x + size.width > mySize.width) {
           offset.x = origin.x;
           offset.y += runSizes.at(run++);
         }
       }
 
-      const auto subRect =
-        Rect{ rect.topLeft + offset, rect.topLeft + offset + size.toPoint() };
-      result |= child->draw(subRect, canvas);
+      result |= child->draw(canvas, offset);
 
       if (isVertical()) {
         offset.y += size.height;

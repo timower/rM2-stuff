@@ -1,3 +1,4 @@
+#include "UI/Rotate.h"
 #include <functional>
 #include <iostream>
 #include <type_traits>
@@ -45,7 +46,6 @@ public:
     bool on = true;
   };
 
-
   static State createState() { return State{}; }
 };
 
@@ -82,16 +82,19 @@ class CounterTest : public StatefulWidget<CounterTest> {
 public:
   class State : public StateBase<CounterTest> {
   public:
-    void init(AppContext& context) {}
+    void init(AppContext& context, const BuildContext& /* unused*/) {}
 
-    DynamicWidget build(AppContext& context, const BuildContext& /*unused*/) const {
+    DynamicWidget build(AppContext& context,
+                        const BuildContext& /*unused*/) const {
       if (count < 5) {
-        return Column(LabledInt("Counter: ", count),
-                      Row(Button("-1", [this] { decrease(); }),
-                          Button("+1", [this] { increase(); })),
-                      TimerTest(std::to_string(count)));
-      }         return Row(Button("reset", [this]() { reset(); }), ToggleTest());
-     
+        const auto rot = static_cast<Rotation>(count % 4);
+        return Rotated(rot,
+                       Column(LabledInt("Counter: ", count),
+                              Row(Button("-1", [this] { decrease(); }),
+                                  Button("+1", [this] { increase(); }))));
+        //, TimerTest(std::to_string(count))
+      }
+      return Row(Button("reset", [this]() { reset(); }), ToggleTest());
     }
 
   private:
@@ -109,7 +112,6 @@ public:
     int count = 0;
     TimerHandle timer;
   };
-
 
   static State createState() { return State{}; }
 };
@@ -161,7 +163,6 @@ public:
     int count = 0;
     TimerHandle timer;
   };
-
 
   static State createState() { return State{}; }
 };
@@ -230,7 +231,7 @@ protected:
     return constraints.max;
   }
 
-  rmlib::UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) final {
+  rmlib::UpdateRegion doDraw(rmlib::Canvas& canvas) final {
     if (points.size() < 2) {
       return {};
     }
@@ -262,22 +263,23 @@ protected:
     return result;
   }
 
-  void handleInput(const rmlib::input::Event& ev) final {
+  void doHandleInput(const rmlib::input::Event& ev) final {
     if (!std::holds_alternative<rmlib::input::PenEvent>(ev)) {
       return;
     }
 
     const auto& penEv = std::get<input::PenEvent>(ev);
-    if (!getRect().contains(penEv.location)) {
+    if (!getLocalRect().contains(penEv.location)) {
       return;
     }
+    const auto location = penEv.location;
 
     if (penEv.isDown()) {
       down = true;
     }
 
-    if (down && (points.empty() || points.back() != penEv.location)) {
-      points.emplace_back(penEv.location);
+    if (down && (points.empty() || points.back() != location)) {
+      points.emplace_back(location);
       markNeedsDraw(false);
     }
 
@@ -299,8 +301,15 @@ Drawer::createRenderObject() const {
 
 int
 main() {
-  // auto optErr = runApp(Center(Row(Text("Test:"), CounterTest())));
-  auto optErr = runApp(Cleared(Drawer()));
+  auto optErr = runApp(Center(Row(Text("Test:"), CounterTest())));
+  // auto optErr = runApp(Cleared(Drawer()));
+  // auto optErr = runApp(Center(navTest()));
+  // auto optErr = runApp(
+  //   Center(Column(Rotated(Rotation::None, Text("Hello world")),
+  //                 Rotated(Rotation::Clockwise, Text("Hello world")),
+  //                 Rotated(Rotation::Inverted, Text("Hello world")),
+  //                 Rotated(Rotation::CounterClockwise, Text("Hello
+  //                 world")))));
 
   if (!optErr.has_value()) {
     std::cerr << optErr.error().msg << "\n";

@@ -6,7 +6,6 @@
 
 #include <utf8.h>
 
-#include <array>
 #include <climits>
 #include <iostream>
 #include <vector>
@@ -24,24 +23,7 @@ blend(uint8_t factor, uint8_t fg, uint8_t bg) {
   return uint8_t(val);
 }
 
-constexpr uint16_t
-toRGB565(uint8_t grey) {
-  // NOLINTNEXTLINE
-  return (grey >> 3) | ((grey >> 2) << 5) | ((grey >> 3) << 11);
-}
-
-constexpr uint8_t
-fromRGB565(uint16_t rgb) {
-  // uint8_t r = (rgb & 0x1f) << 3;
-  // NOLINTNEXTLINE
-  uint8_t g = ((rgb >> 5) & 0x3f) << 2;
-  // uint8_t b = ((rgb >> 11) & 0x1f) << 3;
-
-  // Only use g for now, as it has the most bit depth.
-  return g;
-};
-
-#ifdef EMULATE
+#ifdef BUILTIN_FONT
 #include "noto-sans-mono.h"
 #else
 constexpr auto font_path = "/usr/share/fonts/ttf/noto/NotoMono-Regular.ttf";
@@ -51,7 +33,7 @@ const stbtt_fontinfo*
 getFont() {
   static const auto* font = [] {
     static stbtt_fontinfo font;
-#ifndef EMULATE
+#ifndef BUILTIN_FONT
     // TODO: unistdpp
     constexpr auto large_number = 24 << 20;
     static std::array<uint8_t, large_number> fontBuffer = { 0 };
@@ -73,7 +55,7 @@ getFont() {
       std::exit(EXIT_FAILURE);
     }
 
-#ifndef EMULATE
+#ifndef BUILTIN_FONT
     fclose(fp); // NOLINT
 #endif
     return &font;
@@ -83,7 +65,7 @@ getFont() {
 }
 } // namespace
 
-Point
+Size
 Canvas::getTextSize(std::string_view text, int size) {
   const auto* font = getFont();
   auto scale = stbtt_ScaleForPixelHeight(font, float(size));
@@ -190,7 +172,7 @@ Canvas::drawText(std::string_view text,
         // int pixel = bg8 + (t * (fg8 - bg8)) / 0xff;
         auto pixel = blend(t, fg8, bg8);
         // auto pixel = (0xff - textBuffer[y * w + x]);
-        uint16_t pixel565 = toRGB565(pixel);
+        uint16_t pixel565 = greyToRGB565(pixel);
         // (pixel >> 3) | ((pixel >> 2) << 5) | ((pixel >> 3) << 11);
 
         auto memY = location.y + static_cast<int>(baseLine) + y0 + y /*- 1*/;
@@ -269,7 +251,7 @@ greyAlphaToRGB565(uint8_t background, uint16_t pixel) {
 
   auto blended = blend(alpha, grey, background);
 
-  return toRGB565(blended);
+  return greyToRGB565(blended);
 }
 
 std::optional<ImageCanvas>
@@ -318,8 +300,8 @@ ImageCanvas::load(uint8_t* data, int size, int background) {
 
 void
 ImageCanvas::release() {
-  if (canvas.getMemory() != nullptr) {
-    stbi_image_free(canvas.getMemory());
+  if (canvas.memory() != nullptr) {
+    stbi_image_free(canvas.memory());
   }
   canvas = Canvas{};
 }
@@ -330,7 +312,7 @@ MemoryCanvas::MemoryCanvas(const Canvas& other, Rect rect) {
                                        other.components());
   canvas =
     Canvas(memory.get(), rect.width(), rect.height(), other.components());
-  copy(canvas, { 0, 0 }, other, rect);
+  canvas.copy(other);
 }
 
 MemoryCanvas::MemoryCanvas(int width, int height, int components) {
@@ -340,18 +322,18 @@ MemoryCanvas::MemoryCanvas(int width, int height, int components) {
 }
 
 OptError<>
-writeImage(const char* path, const Canvas& canvas) {
-  MemoryCanvas test(canvas.width(), canvas.height(), 1);
+Canvas::writeImage(const char* path) const {
+  MemoryCanvas test(width(), height(), 1);
 
-  canvas.forEach([&](auto x, auto y, auto pixel) {
-    test.canvas.setPixel({ x, y }, fromRGB565(pixel));
+  forEach([&](auto x, auto y, auto pixel) {
+    test.canvas.setPixel({ x, y }, greyFromRGB565(pixel));
   });
 
   if (stbi_write_png(path,
                      test.canvas.width(),
                      test.canvas.height(),
                      test.canvas.components(),
-                     test.canvas.getMemory(),
+                     test.canvas.memory(),
                      test.canvas.lineSize()) == 0) {
     return Error::make("Error writing image");
   }

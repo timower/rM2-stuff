@@ -1,5 +1,6 @@
-#include "../ImageHook.h"
 #include "AddressHooking.h"
+#include "PreloadHooks.h"
+#include "SharedBuffer.h"
 #include "Version.h"
 
 #include <dlfcn.h>
@@ -12,10 +13,7 @@
 namespace {
 constexpr auto usleep_delay = 1000;
 
-bool hook_first_malloc = false;  // NOLINT
 bool* usleep_hook_var = nullptr; // NOLINT
-
-AddressInfoBase::UpdateFn* global_new_update = nullptr; // NOLINT
 
 struct ImageInfo {
   int32_t width;
@@ -26,33 +24,44 @@ struct ImageInfo {
   uint16_t* data;
 };
 
-struct ExtendedUpdateParams {
-  UpdateParams params;
-  float extra1;
-  int extra2;
-};
-static_assert(sizeof(ExtendedUpdateParams) == 0x20);
-
 int
 createThreadsHook(ImageInfo* info) {
   puts("HOOK: Create threads called!");
+  const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
   info->width = fb_width;
   info->height = fb_height;
   info->stride = fb_width;
   info->zero1 = 0;
   info->zero2 = 0;
-  info->data = fb.mem;
+  info->data = static_cast<uint16_t*>(fb.mem.get());
   return 0;
-}
-
-void
-updateHook(const ExtendedUpdateParams* params) {
-  global_new_update(params->params);
 }
 
 void
 shutdownHook() {
   puts("HOOK: Shutdown called!");
+}
+
+void*
+mallocHook(void* (*orig)(size_t), size_t size) {
+  if (size == 0x503580) {
+    std::cout << "HOOK: malloc redirected to shared FB\n";
+    const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
+    PreloadHook::getInstance().unhook<PreloadHook::Malloc>();
+    return fb.mem.get();
+  }
+
+  return orig(size);
+}
+
+int
+usleepHook(int (*orig)(useconds_t), useconds_t micros) {
+  if (usleep_hook_var != nullptr && micros == usleep_delay) {
+    *usleep_hook_var = false;
+    usleep_hook_var = nullptr;
+    PreloadHook::getInstance().unhook<PreloadHook::USleep>();
+  }
+  return orig(micros);
 }
 
 /// client:
@@ -122,23 +131,23 @@ struct AddressInfo : public AddressInfoBase {
   }
 
   void initThreads() const final {
-    hook_first_malloc = true;
+    PreloadHook::getInstance().hook<PreloadHook::Malloc>(mallocHook);
+
     ImageInfo info{};
     createThreads.call<void*, ImageInfo*>(&info);
-    assert(info.data == fb.mem && "Malloc wasn't hooked?");
+    assert([&] {
+      const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
+      return info.data == fb.mem.get();
+    }() && "Malloc wasn't hooked?");
     waitForInit();
   }
 
   bool doUpdate(const UpdateParams& params) const final {
-    ExtendedUpdateParams extraParams{
-      .params = params,
-      .extra1 = 0.0F,
-      .extra2 = 0, // TODO: set priority?
-    };
-    extraParams.params.waveform = mapNewWaveform(params.waveform);
+    UpdateParams mappedParams = params;
+    mappedParams.waveform = mapNewWaveform(params.waveform);
 
     pthread_mutex_lock(updateMutex);
-    update.call<void, const ExtendedUpdateParams*>(&extraParams);
+    update.call<void, const UpdateParams*>(&mappedParams);
     pthread_mutex_unlock(updateMutex);
     sem_post(updateSemaphore);
 
@@ -153,11 +162,11 @@ struct AddressInfo : public AddressInfoBase {
   bool installHooks(UpdateFn* newUpdate) const final {
     puts("Hooking!");
     usleep_hook_var = globalInit;
+    PreloadHook::getInstance().hook<PreloadHook::USleep>(usleepHook);
 
     createThreads.hook((void*)createThreadsHook);
 
-    global_new_update = newUpdate;
-    update.hook((void*)updateHook);
+    update.hook((void*)newUpdate);
 
     shutdownFn.hook((void*)shutdownHook);
     return true;
@@ -195,27 +204,3 @@ const AddressInfo version_3_8_info = AddressInfo{
 } // namespace
 
 const AddressInfoBase* const version_3_8_2 = &version_3_8_info;
-
-extern "C" {
-
-int
-usleep(useconds_t micros) {
-  if (usleep_hook_var != nullptr && micros == usleep_delay) {
-    *usleep_hook_var = false;
-    usleep_hook_var = nullptr;
-  }
-  static auto funcUSleep = (int (*)(useconds_t))dlsym(RTLD_NEXT, "usleep");
-  return funcUSleep(micros);
-}
-
-void*
-malloc(size_t size) {
-  if (size == 0x503580 && hook_first_malloc) {
-    hook_first_malloc = false;
-    return fb.mem;
-  }
-
-  static auto funcMalloc = (void* (*)(size_t))dlsym(RTLD_NEXT, "malloc");
-  return funcMalloc(size);
-}
-}

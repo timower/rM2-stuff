@@ -18,8 +18,8 @@ struct KeyboardParams {
   const Layout& layout;
   const KeyMap& keymap;
 
-  std::chrono::milliseconds repeatDelay = std::chrono::seconds(1);
-  std::chrono::milliseconds repeatTime = std::chrono::milliseconds(100);
+  std::chrono::milliseconds repeatDelay;
+  std::chrono::milliseconds repeatTime;
 };
 
 /// Keyboard widget, displays a virtual keyboard of the given layout.
@@ -59,9 +59,9 @@ protected:
                  const rmlib::BuildContext& /*buildContext*/) final;
 
   rmlib::Size doLayout(const rmlib::Constraints& constraints) final;
-  rmlib::UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) final;
+  rmlib::UpdateRegion doDraw(rmlib::Canvas& canvas) final;
 
-  void handleInput(const rmlib::input::Event& ev) final;
+  void doHandleInput(const rmlib::input::Event& ev) final;
 
 private:
   void updateRepeat();
@@ -108,8 +108,9 @@ private:
   std::unordered_map<const KeyInfo*, KeyState> keyState;
 
   struct PhysKeyState {
-    bool down = false;
     TimeSource::time_point nextRepeat;
+    bool down = false;
+    bool tap = false;
   };
   std::unordered_map<const EvKeyInfo*, PhysKeyState> physKeyState;
 

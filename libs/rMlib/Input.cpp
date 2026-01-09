@@ -23,29 +23,46 @@ namespace rmlib::input {
 namespace {
 
 constexpr auto touch_flood_size = 8 * 512 * 4;
+constexpr auto key_flood_size = 8 * 64;
+
+auto
+mkEvent(int a, int b, int v) {
+  input_event r{};
+  r.type = a;
+  r.code = b;
+  r.value = v;
+  r.input_event_sec = 0;
+  r.input_event_usec = 0;
+  return r;
+}
 
 auto*
 getTouchFlood() {
   static const auto* floodBuffer = [] {
     // NOLINTNEXTLINE
     static const auto ret = std::make_unique<input_event[]>(touch_flood_size);
-
-    constexpr auto mk_input_ev = [](int a, int b, int v) {
-      input_event r{};
-      r.type = a;
-      r.code = b;
-      r.value = v;
-      r.time = { 0, 0 };
-      return r;
-    };
-
     for (int i = 0; i < touch_flood_size;) {
-      ret[i++] = mk_input_ev(EV_ABS, ABS_DISTANCE, 1);
-      ret[i++] = mk_input_ev(EV_SYN, 0, 0);
-      ret[i++] = mk_input_ev(EV_ABS, ABS_DISTANCE, 2);
-      ret[i++] = mk_input_ev(EV_SYN, 0, 0);
+      ret[i++] = mkEvent(EV_ABS, ABS_DISTANCE, 1);
+      ret[i++] = mkEvent(EV_SYN, 0, 0);
+      ret[i++] = mkEvent(EV_ABS, ABS_DISTANCE, 2);
+      ret[i++] = mkEvent(EV_SYN, 0, 0);
     }
+    return ret.get();
+  }();
+  return floodBuffer;
+}
 
+auto*
+getKeyFlood() {
+  static const auto* floodBuffer = [] {
+    // NOLINTNEXTLINE
+    static const auto ret = std::make_unique<input_event[]>(key_flood_size);
+    for (int i = 0; i < key_flood_size;) {
+      ret[i++] = mkEvent(EV_KEY, KEY_LEFTALT, 1);
+      ret[i++] = mkEvent(EV_SYN, SYN_REPORT, 0);
+      ret[i++] = mkEvent(EV_KEY, KEY_LEFTALT, 0);
+      ret[i++] = mkEvent(EV_SYN, SYN_REPORT, 0);
+    }
     return ret.get();
   }();
   return floodBuffer;
@@ -129,9 +146,8 @@ struct KeyDevice : public InputDevice<KeyDevice> {
   ErrorOr<std::vector<KeyEvent>> handleEvent(input_event /*event*/);
 
   void flood() final {
-    // TODO: this probably doesn't work
-    const auto* buf = getTouchFlood();
-    (void)fd.writeAll(buf, touch_flood_size * sizeof(input_event));
+    const auto* buf = getKeyFlood();
+    (void)fd.writeAll(buf, key_flood_size * sizeof(input_event));
   }
 
   std::vector<KeyEvent> keyEvents;
@@ -279,8 +295,6 @@ handeDevice(InputManager& mgr, udev_device& dev) {
   }
 
   const auto* action = udev_device_get_action(&dev);
-  std::cout << "action: " << (action == nullptr ? "null" : action) << "\n";
-
   if (action == nullptr || action == std::string_view("add")) {
     mgr.open(devnode);
     return;
@@ -315,7 +329,10 @@ InputDeviceBase::getName() const {
 
 void
 InputDeviceBase::grab() const {
-  libevdev_grab(evdev.get(), LIBEVDEV_GRAB);
+  int res = libevdev_grab(evdev.get(), LIBEVDEV_GRAB);
+  if (res < 0) {
+    std::cerr << "Grab failed: " << strerror(-res) << "\n";
+  }
 }
 
 void
@@ -340,8 +357,8 @@ InputManager::open(std::string_view input) {
     return InputDeviceBase::EvDevPtr(dev);
   }());
 
+  auto base = device::getBaseDevice(libevdev_get_name(dev.get()));
   auto baseTransform = [&]() -> Transform {
-    auto base = device::getBaseDevice(libevdev_get_name(dev.get()));
     if (!base) {
       return {};
     }
@@ -351,7 +368,36 @@ InputManager::open(std::string_view input) {
   auto device = makeDevice(
     std::move(fd), std::move(dev), std::string(input), baseTransform);
   auto* devicePtr = device.get();
+
+  std::cout << "Got device: " << device->getName() << "\n";
+  auto* devPtr = device.get();
   devices.emplace(devicePtr->path, std::move(device));
+
+  if (base) {
+    switch (base->type) {
+      case device::InputType::Keyboard:
+        if (baseDevices.pogoKeyboard == nullptr) {
+          baseDevices.pogoKeyboard = devPtr;
+        }
+        break;
+      case device::InputType::Power:
+        if (baseDevices.key == nullptr) {
+          baseDevices.key = devPtr;
+        }
+        break;
+      case device::InputType::Pen:
+        if (baseDevices.pen == nullptr) {
+          baseDevices.pen = devPtr;
+        }
+        break;
+      case device::InputType::MultiTouch:
+        if (baseDevices.touch == nullptr) {
+          baseDevices.touch = devPtr;
+        }
+        break;
+    }
+  }
+
   return devicePtr;
 }
 
@@ -393,24 +439,6 @@ InputManager::openAll(bool monitor) {
 
   } else {
     this->udevMonitorFd = unistdpp::FD{};
-  }
-
-  for (const auto& [_, dev] : devices) {
-    auto baseDev = device::getBaseDevice(dev->getName());
-    if (!baseDev) {
-      continue;
-    }
-    switch (baseDev->type) {
-      case device::InputType::Key:
-        baseDevices.key = dev.get();
-        break;
-      case device::InputType::Pen:
-        baseDevices.pen = dev.get();
-        break;
-      case device::InputType::MultiTouch:
-        baseDevices.touch = dev.get();
-        break;
-    }
   }
 
   return baseDevices;

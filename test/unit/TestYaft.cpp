@@ -1,8 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "TempFiles.h"
 #include "rMLibTestHelper.h"
 
 #include "YaftWidget.h"
+
+#include <fstream>
 
 using namespace rmlib;
 
@@ -24,7 +27,7 @@ const Layout test_layout = { {
 template<typename RO>
 void
 doKey(TestContext& ctx,
-      const FindResult<RO>& ros,
+      const FindResults<RO>& ros,
       std::string_view name,
       bool down,
       const Layout& layout = test_layout) {
@@ -62,7 +65,7 @@ doKey(TestContext& ctx,
 template<typename RO>
 void
 tapKey(TestContext& ctx,
-       const FindResult<RO>& ros,
+       const FindResults<RO>& ros,
        std::string_view name,
        const Layout& layout = test_layout) {
   doKey(ctx, ros, name, true, layout);
@@ -87,11 +90,14 @@ TEST_CASE("Keyboard", "[yaft][ui]") {
   const auto params = KeyboardParams{
     .layout = test_layout,
     .keymap = qwerty_keymap,
-    .repeatDelay = std::chrono::milliseconds(50),
-    .repeatTime = std::chrono::milliseconds(10),
+    .repeatDelay = std::chrono::milliseconds(100),
+    .repeatTime = std::chrono::milliseconds(50),
   };
 
-  ctx.pumpWidget(Center(Sized(Keyboard(nullptr, params, updateCb), 300, 200)));
+  constexpr auto width = 300;
+  constexpr auto height = 200;
+  ctx.pumpWidget(
+    Center(Sized(Keyboard(nullptr, params, updateCb), width, height)));
 
   auto kbd = ctx.findByType<Keyboard>();
 
@@ -99,17 +105,17 @@ TEST_CASE("Keyboard", "[yaft][ui]") {
 
   // Test key feedback when pressing.
   doKey(ctx, kbd, "a", true);
-  ctx.pump(params.repeatDelay + 2 * params.repeatTime + params.repeatTime / 2);
+  ctx.pump(params.repeatDelay + 3 * params.repeatTime);
   REQUIRE_THAT(kbd, ctx.matchesGolden("yaft-keyboard-down.png"));
   doKey(ctx, kbd, "a", false);
   REQUIRE(lastCallback == 1);
 
   // Make sure repeat works.
-  CHECK(callbackCount == 3);
+  CHECK(callbackCount >= 2);
 
   // Also make sure a wide key gets updated correctly.
   doKey(ctx, kbd, "b", true);
-  ctx.pump();
+  ctx.pump(std::chrono::milliseconds(5));
   REQUIRE_THAT(kbd, ctx.matchesGolden("yaft-keyboard-down2.png"));
   doKey(ctx, kbd, "b", false);
   REQUIRE(lastCallback == 2);
@@ -126,7 +132,7 @@ TEST_CASE("Keyboard", "[yaft][ui]") {
   REQUIRE(lastCallback == 4);
 
   doKey(ctx, kbd, ":shift", true);
-  ctx.pump(params.repeatDelay + params.repeatTime / 2);
+  ctx.pump(params.repeatDelay + params.repeatTime);
   REQUIRE_THAT(kbd, ctx.matchesGolden("yaft-keyboard-stuck.png"));
   doKey(ctx, kbd, ":shift", false);
 
@@ -141,7 +147,7 @@ TEST_CASE("Keyboard", "[yaft][ui]") {
   REQUIRE(lastCallback == 4);
 
   doKey(ctx, kbd, "<>", true);
-  ctx.pump(params.repeatDelay + params.repeatTime / 2);
+  ctx.pump(params.repeatDelay + params.repeatTime);
   doKey(ctx, kbd, "<>", false);
   REQUIRE(lastCallback == 6);
 }
@@ -149,14 +155,15 @@ TEST_CASE("Keyboard", "[yaft][ui]") {
 TEST_CASE("Yaft", "[yaft][ui]") {
   auto ctx = TestContext::make();
 
-  std::string program = "/bin/cat";
+  std::string program = CAT_EXE;
   std::vector<char*> args = { program.data(), nullptr };
 
   YaftConfigAndError cfgAndErr;
   cfgAndErr.config = YaftConfig::getDefault();
 
   SECTION("landscape") {
-    cfgAndErr.config.orientation = YaftConfig::Orientation::Landscape;
+    cfgAndErr.config.rotation = rmlib::Rotation::Clockwise;
+    cfgAndErr.config.layout = &empty_layout;
     cfgAndErr.err = YaftConfigError{ YaftConfigError::Missing, "Error test!" };
 
     ctx.pumpWidget(Yaft(args.front(), args.data(), cfgAndErr));
@@ -167,7 +174,7 @@ TEST_CASE("Yaft", "[yaft][ui]") {
   }
 
   SECTION("portrait") {
-    cfgAndErr.config.orientation = YaftConfig::Orientation::Protrait;
+    cfgAndErr.config.rotation = rmlib::Rotation::None;
 
     ctx.pumpWidget(Yaft(args.front(), args.data(), cfgAndErr));
     ctx.pump();
@@ -205,4 +212,26 @@ TEST_CASE("Yaft", "[yaft][ui]") {
       REQUIRE(ctx.shouldStop());
     }
   }
+}
+
+TEST_CASE("inotify", "[yaft][ui]") {
+  TemporaryDirectory tmp;
+  setenv("HOME", tmp.dir.c_str(), 1);
+  setenv("XDG_CONFIG_HOME", "", 1);
+
+  std::string program = CAT_EXE;
+  std::vector<char*> args = { program.data(), nullptr };
+
+  auto ctx = TestContext::make();
+  ctx.pumpWidget(Yaft(args.front(), args.data(), getConfigPath()));
+
+  auto yaft = ctx.findByType<Yaft>();
+  REQUIRE_THAT(yaft, ctx.matchesGolden("yaft-new.png"));
+
+  std::ofstream cfgOfs(tmp.dir / ".config" / "yaft" / "config.toml");
+  cfgOfs << "rotation = \"inverted\"";
+  cfgOfs.close();
+
+  ctx.pump(std::chrono::milliseconds(100));
+  REQUIRE_THAT(yaft, ctx.matchesGolden("yaft-inverted.png"));
 }

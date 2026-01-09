@@ -24,10 +24,10 @@ using StateType = decltype(std::declval<const DerivedSW>().createState());
 // using StateType = std::result_of_t<decltype (&DerivedSW::createState)()>;
 
 template<typename DerivedSW>
-using WidgetType = std::result_of_t<decltype (&StateType<DerivedSW>::build)(
-  const StateType<DerivedSW>,
-  AppContext&,
-  const BuildContext&)>;
+using WidgetType = std::invoke_result_t<decltype(&StateType<DerivedSW>::build),
+                                        const StateType<DerivedSW>,
+                                        AppContext&,
+                                        const BuildContext&>;
 
 } // namespace details
 

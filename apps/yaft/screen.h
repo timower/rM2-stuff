@@ -34,17 +34,15 @@ public:
 protected:
   rmlib::Size doLayout(const rmlib::Constraints& constraints) final;
 
-  rmlib::UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) final;
+  rmlib::UpdateRegion doDraw(rmlib::Canvas& canvas) final;
 
-  void doRebuild(rmlib::AppContext& ctx, const rmlib::BuildContext& /*buildContext*/) final;
+  void doRebuild(rmlib::AppContext& ctx,
+                 const rmlib::BuildContext& /*buildContext*/) final;
 
-  void handleInput(const rmlib::input::Event& ev) final;
+  void doHandleInput(const rmlib::input::Event& ev) final;
 
 private:
-  rmlib::Rect drawLine(rmlib::Canvas& canvas,
-                       rmlib::Rect rect,
-                       terminal_t& term,
-                       int line) const;
+  rmlib::Rect drawLine(rmlib::Canvas& canvas, terminal_t& term, int line) const;
   template<typename Ev>
   void handleTouchEvent(const Ev& ev);
 

@@ -29,7 +29,7 @@ public:
     widget = &newWidget;
   }
 
-  void handleInput(const rmlib::input::Event& ev) override {
+  void doHandleInput(const rmlib::input::Event& ev) override {
     if (!widget->onlyTopInput) {
       for (const auto& child : this->children) {
         child->handleInput(ev);
@@ -56,12 +56,12 @@ protected:
     return result;
   }
 
-  UpdateRegion doDraw(Rect rect, Canvas& canvas) override {
+  UpdateRegion doDraw(Canvas& canvas) override {
     UpdateRegion result;
 
     for (const auto& child : this->children) {
-      const auto subRect = rect.align(child->getSize(), 0, 0);
-      result |= child->draw(subRect, canvas);
+      const auto subRect = canvas.rect().align(child->getSize(), 0.5, 0.5);
+      result |= child->draw(canvas, subRect.topLeft);
     }
 
     return result;

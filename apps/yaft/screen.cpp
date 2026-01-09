@@ -10,7 +10,8 @@ inline int
 myCeil(int val, int div) {
   if (div == 0) {
     return 0;
-  }     return (val + div - 1) / div;
+  }
+  return (val + div - 1) / div;
 }
 
 inline uint16_t
@@ -95,7 +96,7 @@ ScreenRenderObject::shouldRefresh() const {
 }
 
 rmlib::UpdateRegion
-ScreenRenderObject::doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) {
+ScreenRenderObject::doDraw(rmlib::Canvas& canvas) {
   auto& term = *widget->term;
 
   if ((term.mode & MODE_CURSOR) != 0U) {
@@ -112,7 +113,7 @@ ScreenRenderObject::doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) {
     bool useA2 = widget->isLandscape
                    ? term.lines * CELL_HEIGHT <= currentRect.width()
                    : term.lines * CELL_HEIGHT <= currentRect.height();
-    fb->doUpdate(currentRect,
+    fb->doUpdate(canvas.subCanvas(currentRect),
                  useA2 ? fb::Waveform::A2 : fb::Waveform::DU,
                  useA2 ? fb::UpdateFlags::None : fb::UpdateFlags::Priority);
 
@@ -122,7 +123,7 @@ ScreenRenderObject::doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) {
 
   for (int line = 0; line < term.lines; line++) {
     if (isFullDraw() || term.line_dirty[line]) {
-      currentRect |= drawLine(canvas, rect, term, line);
+      currentRect |= drawLine(canvas, term, line);
     } else {
       maybeDraw();
     }
@@ -132,7 +133,8 @@ ScreenRenderObject::doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) {
   if (shouldRefresh()) {
     term.shouldClear = false;
     numUpdates = 0;
-    return {rect, fb::Waveform::GC16, fb::UpdateFlags::FullRefresh};
+    // TODO: sync
+    return { canvas.rect(), fb::Waveform::GC16, fb::UpdateFlags::FullRefresh };
   }
 
   return {};
@@ -140,21 +142,17 @@ ScreenRenderObject::doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) {
 
 rmlib::Rect
 ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
-                             rmlib::Rect rect,
                              terminal_t& term,
                              int line) const {
 
   const bool isLandscape = widget->isLandscape;
 
   // x in landscape, y in portrait.
-  int zStart =
-    isLandscape
-      ? term.height - (term.marginTop + line * CELL_HEIGHT) + rect.topLeft.x
-      : term.marginTop + line * CELL_HEIGHT + rect.topLeft.y;
+  int zStart = isLandscape ? term.height - (term.marginTop + line * CELL_HEIGHT)
+                           : term.marginTop + line * CELL_HEIGHT;
 
   for (int col = 0; col < term.cols; col++) {
-    int marginLeft = term.marginLeft + col * CELL_WIDTH +
-                      (isLandscape ? rect.topLeft.y : rect.topLeft.x);
+    int marginLeft = term.marginLeft + col * CELL_WIDTH;
 
     auto& cell = term.cells[line][col];
 
@@ -171,7 +169,7 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
       myCeil(glyphWidth, BITS_PER_BYTE) * BITS_PER_BYTE - glyphWidth;
     if (cell.width == WIDE) {
       bdfPadding += CELL_WIDTH;
-}
+    }
 
     /* check cursor position */
     if ((((term.mode & MODE_CURSOR) != 0U) && line == term.cursor.y) &&
@@ -179,8 +177,9 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
          (cell.width == WIDE && (col + 1) == term.cursor.x) ||
          (cell.width == NEXT_TO_WIDE && (col - 1) == term.cursor.x))) {
       colorPair.fg = DEFAULT_BG;
-      colorPair.bg = (/*!vt_active &&*/ BACKGROUND_DRAW) != 0U ? PASSIVE_CURSOR_COLOR
-                                                          : ACTIVE_CURSOR_COLOR;
+      colorPair.bg = (/*!vt_active &&*/ BACKGROUND_DRAW) != 0U
+                       ? PASSIVE_CURSOR_COLOR
+                       : ACTIVE_CURSOR_COLOR;
     }
 
     // lookup pixels
@@ -215,10 +214,8 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
       }
 
       for (int w = 0; w < CELL_WIDTH; w++) {
-        int pos = isLandscape ? (marginLeft + w) * canvas.lineSize() +
-                                  (zStart - h) * canvas.components()
-                              : (marginLeft + w) * canvas.components() +
-                                  (zStart + h) * canvas.lineSize();
+        const auto pos = isLandscape ? Point{ zStart - h, marginLeft + w }
+                                     : Point{ marginLeft + w, zStart + h };
 
         /* set fg or bg */
         const auto* glyph = (cell.attribute & ATTR_BOLD) != 0
@@ -243,8 +240,9 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
             break;
         }
 
-        /* update copy buffer only */
-        memcpy(canvas.getMemory() + pos, &pixel, canvas.components());
+        // We only care about rgb555, as we assume that format above.
+        // So do a direct assign instead of memcpy.
+        canvas.setPixel(pos, pixel);
       }
     }
   }
@@ -252,10 +250,11 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
   term.line_dirty[line] =
     ((term.mode & MODE_CURSOR) != 0u) && term.cursor.y == line;
 
-  return isLandscape ? Rect{ { zStart - CELL_HEIGHT, 0 },
-                             { zStart, rect.height() - 1 } }
-                     : Rect{ { 0, zStart },
-                             { rect.width() - 1, zStart + CELL_HEIGHT - 1 } };
+  const auto size = this->getSize();
+  return isLandscape
+           ? Rect{ { zStart - CELL_HEIGHT, 0 }, { zStart, size.height - 1 } }
+           : Rect{ { 0, zStart },
+                   { size.width - 1, zStart + CELL_HEIGHT - 1 } };
 }
 
 template<typename Ev>
@@ -285,11 +284,10 @@ ScreenRenderObject::handleTouchEvent(const Ev& ev) {
     }
   }();
 
-  const auto scaledLoc = ev.location - getRect().topLeft;
+  const auto scaledLoc = ev.location;
   const auto rotatedLoc =
-    widget->isLandscape
-      ? Point{ scaledLoc.y, getRect().width() - scaledLoc.x }
-      : scaledLoc;
+    widget->isLandscape ? Point{ scaledLoc.y, getSize().width - scaledLoc.x }
+                        : scaledLoc;
 
   std::array<char, 6> buf{};
   initMouseBuf(buf, rotatedLoc);
@@ -320,13 +318,13 @@ ScreenRenderObject::handleTouchEvent(const Ev& ev) {
 }
 
 void
-ScreenRenderObject::handleInput(const rmlib::input::Event& ev) {
+ScreenRenderObject::doHandleInput(const rmlib::input::Event& ev) {
   std::visit(
     [this](const auto& ev) {
       if constexpr (rmlib::input::is_pointer_event<
                       std::decay_t<decltype(ev)>>) {
 
-        if (getRect().contains(ev.location)) {
+        if (getLocalRect().contains(ev.location)) {
           handleTouchEvent(ev);
         }
       }
@@ -335,6 +333,7 @@ ScreenRenderObject::handleInput(const rmlib::input::Event& ev) {
 }
 
 void
-ScreenRenderObject::doRebuild(AppContext& ctx, const BuildContext& /*buildContext*/) {
+ScreenRenderObject::doRebuild(AppContext& ctx,
+                              const BuildContext& /*buildContext*/) {
   this->fb = &ctx.getFramebuffer();
 }

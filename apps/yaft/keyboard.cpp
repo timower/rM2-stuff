@@ -116,7 +116,8 @@ getKeyCodeStr(int scancode, bool shift, bool alt, bool ctrl, bool appCursor) {
       buf[1] = 0;
     }
     return buf.data();
-  } if (scancode == 0x3) {
+  }
+  if (scancode == 0x3) {
     buf[0] = char(scancode);
     buf[1] = 0;
     return buf.data();
@@ -126,7 +127,7 @@ getKeyCodeStr(int scancode, bool shift, bool alt, bool ctrl, bool appCursor) {
 }
 
 template<typename Ev>
-static int
+int
 getSlot(const Ev& ev) {
   return ev.slot;
 }
@@ -163,9 +164,8 @@ KeyboardRenderObject::update(const Keyboard& keyboard) {
 void
 KeyboardRenderObject::doRebuild(rmlib::AppContext& ctx,
                                 const rmlib::BuildContext& /*buildContext*/) {
-  const auto duration = getWidget().params.repeatTime / 10;
-  repeatTimer = ctx.addTimer(
-    duration, [this]() { updateRepeat(); }, duration);
+  const auto duration = getWidget().params.repeatTime;
+  repeatTimer = ctx.addTimer(duration, [this]() { updateRepeat(); }, duration);
 }
 
 rmlib::Size
@@ -197,12 +197,12 @@ KeyboardRenderObject::doLayout(const rmlib::Constraints& constraints) {
 }
 
 rmlib::UpdateRegion
-KeyboardRenderObject::doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) {
-  Point pos = rect.topLeft;
+KeyboardRenderObject::doDraw(rmlib::Canvas& canvas) {
+  Point pos = { 0, 0 };
 
   UpdateRegion result;
   for (const auto& row : widget->params.layout.rows) {
-    pos.x = rect.topLeft.x;
+    pos.x = 0;
 
     for (const auto& key : row) {
       result |= drawKey(pos, key, canvas);
@@ -221,12 +221,12 @@ KeyboardRenderObject::doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) {
 }
 
 void
-KeyboardRenderObject::handleInput(const rmlib::input::Event& ev) {
+KeyboardRenderObject::doHandleInput(const rmlib::input::Event& ev) {
   std::visit(
     [this](const auto& ev) {
       if constexpr (rmlib::input::is_pointer_event<
                       std::decay_t<decltype(ev)>>) {
-        if (getRect().contains(ev.location) || ev.isUp()) {
+        if (getLocalRect().contains(ev.location) || ev.isUp()) {
           handleTouchEvent(ev);
         }
       } else {
@@ -271,11 +271,16 @@ KeyboardRenderObject::updateRepeat() {
     }
 
     if (time > state.nextRepeat) {
-      if (!isModifier(key->scancode)) {
-        sendKeyDown(*key, /* repeat */ true);
-      }
+      // Tap timer expired.
+      state.tap = false;
 
-      state.nextRepeat += repeatTime;
+      if (key->holdCode == 0) {
+        if (!isModifier(key->scancode)) {
+          sendKeyDown(*key, /* repeat */ true);
+        }
+
+        state.nextRepeat += repeatTime;
+      }
     }
   }
 }
@@ -345,19 +350,33 @@ KeyboardRenderObject::sendKeyDown(const KeyInfo& key, bool repeat) {
   }
   sendKeyDown(scancode, shift, alt, ctrl);
 }
+
 void
 KeyboardRenderObject::sendKeyDown(const EvKeyInfo& key, bool repeat) {
   if (isModifier(key.scancode)) {
     return;
   }
 
-  const auto anyKeyDown = [this](int scancode) {
-    return std::any_of(physKeyState.begin(),
-                       physKeyState.end(),
-                       [scancode](const auto& codeAndKey) {
-                         return codeAndKey.first->scancode == scancode &&
-                                codeAndKey.second.down;
-                       });
+  const auto anyKeyDown = [this, &key](int scancode) {
+    return std::any_of(
+      physKeyState.begin(),
+      physKeyState.end(),
+      [&key, scancode](auto& codeAndKey) {
+        // is the main scancode a modifier that's held.
+        if (codeAndKey.first->scancode == scancode && codeAndKey.second.down) {
+          return true;
+        }
+
+        // Or a tap hold key that's down and not within the tap
+        // delay.
+        if (codeAndKey.first != &key &&
+            codeAndKey.first->holdCode == scancode &&
+            codeAndKey.second.down /*&& !codeAndKey.second.tap*/) {
+          return true;
+        }
+
+        return false;
+      });
   };
 
   bool shift = anyKeyDown(Shift);
@@ -379,17 +398,18 @@ KeyboardRenderObject::sendKeyDown(const EvKeyInfo& key, bool repeat) {
 
     return key.scancode;
   }();
+
   sendKeyDown(scancode, shift, alt, ctrl);
 }
 
 const KeyInfo*
 KeyboardRenderObject::getKey(const rmlib::Point& point) {
-  if (!getRect().contains(point)) {
+  if (!getLocalRect().contains(point)) {
     return nullptr;
   }
 
-  const auto rowIdx = int((point.y - getRect().topLeft.y) / keyHeight);
-  const auto columnIdx = int((point.x - getRect().topLeft.x) / keyWidth);
+  const auto rowIdx = int(point.y / keyHeight);
+  const auto columnIdx = int(point.x / keyWidth);
   const auto& row = widget->params.layout.rows[rowIdx];
 
   int keyCounter = 0;
@@ -468,17 +488,32 @@ KeyboardRenderObject::handleKeyEvent(const rmlib::input::KeyEvent& ev) {
 
   auto it = keymap.find(ev.keyCode);
   if (it == keymap.end()) {
-    std::cout << "Unknown physical key: " << ev.keyCode << "\n";
+    std::cerr << "Unknown physical key: " << ev.keyCode << "\n";
     return;
   }
   const auto& key = it->second;
   auto& state = physKeyState[&key];
 
+  const bool isTapHold = key.holdCode != 0;
+
   if (ev.type == input::KeyEvent::Press) {
     state.down = true;
-    state.nextRepeat = TimeSource::now() + getWidget().params.repeatDelay;
-    sendKeyDown(key);
+    state.tap = true;
+
+    // TODO: make configurable.
+    const auto delay = isTapHold ? std::chrono::milliseconds(200)
+                                 : getWidget().params.repeatDelay;
+    state.nextRepeat = TimeSource::now() + delay;
+
+    // Tap hold keys only trigger after tap delay.
+    if (!isTapHold) {
+      sendKeyDown(key);
+    }
   } else if (ev.type == input::KeyEvent::Release) {
+    if (isTapHold && state.tap) {
+      sendKeyDown(key);
+    }
+
     state.down = false;
   }
 }
@@ -519,15 +554,16 @@ KeyboardRenderObject::drawKey(rmlib::Point pos,
   }();
 
   const auto textSize = Canvas::getTextSize(printName, 32);
-  canvas.drawText(printName,
-                  { keyRect.topLeft.x + keyWidth / 2 - textSize.x / 2,
-                    keyRect.topLeft.y + keyHeight / 2 - textSize.y / 2 },
-                  32);
+  canvas.drawText(
+    printName,
+    { keyRect.topLeft.x + (keyWidth / 2) - (textSize.width / 2),
+      keyRect.topLeft.y + (keyHeight / 2) - (textSize.height / 2) },
+    32);
 
   if (!key.altName.empty()) {
     const auto altTextSize = Canvas::getTextSize(key.altName, 26);
     canvas.drawText(key.altName,
-                    { keyRect.topLeft.x + keyWidth - altTextSize.x - 4,
+                    { keyRect.topLeft.x + keyWidth - altTextSize.width - 4,
                       keyRect.topLeft.y + 3 },
                     26);
   }
@@ -545,5 +581,5 @@ KeyboardRenderObject::drawKey(rmlib::Point pos,
   }
 
   state.dirty = false;
-  return {keyRect, fb::Waveform::DU, fb::UpdateFlags::Priority};
+  return { keyRect, fb::Waveform::DU, fb::UpdateFlags::Priority };
 }

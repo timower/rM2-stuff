@@ -10,8 +10,8 @@ namespace rmlib {
 
 class AppContext {
 public:
-  static ErrorOr<AppContext> makeContext() {
-    auto fb = TRY(fb::FrameBuffer::open());
+  static ErrorOr<AppContext> makeContext(std::optional<Size> size = {}) {
+    auto fb = TRY(fb::FrameBuffer::open(size));
     auto ctx = AppContext(std::move(fb));
     TRY(ctx.inputManager.openAll());
     return ctx;
@@ -71,6 +71,7 @@ public:
 
   const Canvas& getFbCanvas() const { return framebuffer.canvas; }
   const fb::FrameBuffer& getFramebuffer() const { return framebuffer; }
+  fb::FrameBuffer& getFramebuffer() { return framebuffer; }
 
   void onDeviceUpdate(Callback fn) {
     onDeviceUpdates.emplace_back(std::move(fn));
@@ -132,12 +133,10 @@ public:
 
   void step() {
     rootRO->rebuild(*this, nullptr);
-
-    const auto size = rootRO->layout(rootConstraints);
-    const auto rect = rmlib::Rect{ { 0, 0 }, size.toPoint() };
+    rootRO->layout(rootConstraints);
 
     auto updateRegion = rootRO->cleanup(framebuffer.canvas);
-    updateRegion |= rootRO->draw(rect, framebuffer.canvas);
+    updateRegion |= rootRO->draw(framebuffer.canvas, { 0, 0 });
 
     if (!updateRegion.region.empty()) {
       framebuffer.doUpdate(

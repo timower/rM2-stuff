@@ -13,6 +13,11 @@ add_subdirectory(libTilEm)
 add_subdirectory(thick)
 add_subdirectory(stb)
 
-if (${BUILD_TESTS})
+if("${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
+  add_subdirectory(evdev)
+  add_subdirectory(systemd)
+endif()
+
+if(${BUILD_TESTS})
   add_subdirectory(catch2)
 endif()

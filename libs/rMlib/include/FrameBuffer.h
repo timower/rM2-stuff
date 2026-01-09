@@ -10,13 +10,13 @@ namespace rmlib::fb {
 // Waveform ints that match rm2 'actual' updates
 enum class Waveform { DU = 0, GC16 = 1, GC16Fast = 2, A2 = 3 };
 
-enum UpdateFlags { None = 0, FullRefresh = 1, Sync = 2, Priority = 4 };
+enum UpdateFlags { None = 0, FullRefresh = 1, /*Sync = 2,*/ Priority = 4 };
 
 struct FrameBuffer {
   enum Type { rM1, Shim, rM2Stuff }; // NOLINT
 
   /// Opens the framebuffer.
-  static ErrorOr<FrameBuffer> open();
+  static ErrorOr<FrameBuffer> open(std::optional<Size> requestedSize = {});
 
   FrameBuffer(FrameBuffer&& other) = default;
 
@@ -30,6 +30,24 @@ struct FrameBuffer {
 
   void doUpdate(Rect region, Waveform waveform, UpdateFlags flags) const;
 
+  void doUpdate(const Canvas& subCanvas,
+                Waveform waveform,
+                UpdateFlags flags) const {
+
+    assert(canvas.memory() <= subCanvas.memory() &&
+           subCanvas.memory() < (canvas.memory() + canvas.totalSize()));
+
+    std::ptrdiff_t memDiff = subCanvas.memory() - canvas.memory();
+    Point topleft = { .x = static_cast<int>(memDiff % canvas.lineSize()) /
+                           canvas.components(),
+                      .y = static_cast<int>(memDiff / canvas.lineSize()) };
+    doUpdate(
+      { topleft,
+        topleft + rotate(subCanvas.rotation(), subCanvas.size()).toPoint() },
+      waveform,
+      flags);
+  }
+
   void drawText(std::string_view text,
                 Point location,
                 int size = default_text_size,
@@ -37,7 +55,7 @@ struct FrameBuffer {
                 UpdateFlags flags = UpdateFlags::None) {
     auto textSize = Canvas::getTextSize(text, size);
     canvas.drawText(text, location, size);
-    doUpdate({ location, location + textSize }, waveform, flags);
+    doUpdate({ location, location + textSize.toPoint() }, waveform, flags);
   }
 
   void clear() {

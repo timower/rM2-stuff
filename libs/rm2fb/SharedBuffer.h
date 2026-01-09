@@ -2,24 +2,27 @@
 
 #include <cstdint>
 
+#include <unistdpp/mmap.h>
+#include <unistdpp/unistdpp.h>
+
 constexpr int fb_width = 1404;
 constexpr int fb_height = 1872;
 constexpr int fb_pixel_size = sizeof(uint16_t);
 constexpr int fb_size = fb_width * fb_height * fb_pixel_size;
 
-constexpr auto default_fb_name = "/rm2fb.01";
+constexpr int grayscale_size = fb_width * fb_height;
+constexpr int total_size = fb_size + grayscale_size;
 
-// TODO: use unistdpp
+constexpr auto default_fb_name = "/swtfb.01";
+
 struct SharedFB {
-  int fd = -1;
-  uint16_t* mem = nullptr;
+  unistdpp::FD fd;
+  unistdpp::MmapPtr mem;
 
-  SharedFB(const char* path);
-  ~SharedFB();
+  void* getFb() const { return mem.get(); }
+  void* getGrayBuffer() const { return ((char*)mem.get()) + fb_size; }
 
-  SharedFB(const SharedFB& other) = delete;
-  SharedFB& operator=(const SharedFB& other) = delete;
+  static unistdpp::Result<SharedFB> open(const char* path);
 
-  SharedFB(SharedFB&& other) noexcept;
-  SharedFB& operator=(SharedFB&& other) noexcept;
+  static const unistdpp::Result<SharedFB>& getInstance();
 };

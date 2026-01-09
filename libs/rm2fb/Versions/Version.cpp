@@ -1,17 +1,23 @@
 #include "Version.h"
 
-#include <array>
 #include <cstring>
+#include <dlfcn.h>
 #include <iomanip>
 #include <iostream>
 #include <map>
 
 namespace {
+
+// The build ID in xochitl binaries happens to be at this address for all
+// supported versions. See:
+// readelf --sections /usr/bin/xochitl
+//   [ 2] .note.gnu.bu[...] NOTE            00010170
+// To get the value:
 // xxd -s 384 -l 20 -i xochitl
-using BuildId = std::array<unsigned char, 20>;
+constexpr auto xochitl_buildid_addr = 0x10180;
 
 const AddressInfoBase*
-getAddresses(BuildId version) {
+getAddressesById(BuildId version) {
   static const std::map<BuildId, const AddressInfoBase*> addresses = {
     { { 0x93, 0x88, 0x6b, 0x15, 0xc3, 0xf5, 0x05, 0x12, 0x04, 0x9e,
         0xf2, 0x50, 0xc3, 0x20, 0xae, 0x00, 0x2a, 0x96, 0x5b, 0x05 },
@@ -29,6 +35,44 @@ getAddresses(BuildId version) {
         0x14, 0xcd, 0xd3, 0xac, 0xb6, 0xdf, 0xbd, 0xc8, 0xb5, 0x67 },
       version_3_8_2 },
 
+    // xochitl
+    { { 0x4f, 0xa0, 0xe9, 0x51, 0x3d, 0x15, 0x53, 0xf3, 0x4d, 0xdc,
+        0x89, 0xba, 0x65, 0xbd, 0xd5, 0x69, 0x92, 0x92, 0x93, 0x9a },
+      version_3_20_0 },
+    // libqsgepaper
+    { { 0x0f, 0x18, 0xb6, 0x39, 0xf6, 0x05, 0x2d, 0xdb, 0xf5, 0x89,
+        0x35, 0x62, 0x45, 0xdb, 0x66, 0xc9, 0x96, 0x96, 0xbe, 0xe7 },
+      version_3_20_0 },
+
+    // xochitl
+    { { 0x92, 0xc6, 0xf0, 0x95, 0xc9, 0x09, 0x11, 0x12, 0xa4, 0x7f,
+        0x5d, 0xf2, 0x49, 0xb6, 0xde, 0x14, 0x81, 0xaa, 0xb9, 0x81 },
+      version_3_22_0 },
+    // libqsgepaper
+    { { 0x7e, 0x66, 0xd6, 0xc8, 0xe0, 0x6e, 0xcb, 0xe5, 0xbd, 0x58,
+        0x94, 0xef, 0x77, 0xce, 0x00, 0x89, 0xb3, 0x96, 0x62, 0xeb },
+      version_3_22_0 },
+
+    // xochitl
+    { { 0xd7, 0x16, 0xf7, 0x00, 0xfa, 0x27, 0xe8, 0xbb, 0x40, 0xb2,
+        0x3d, 0x49, 0x49, 0xeb, 0x0f, 0x91, 0x04, 0x8b, 0x09, 0x77 },
+      version_3_22_4 },
+    // libqsgepaper -> same as 3.22.0
+
+    // xochitl
+    { { 0x66, 0x31, 0xa7, 0xbb, 0x21, 0x7c, 0xb9, 0xb0, 0x9e, 0x29,
+        0xfd, 0x95, 0x9f, 0xfc, 0x76, 0x52, 0x2f, 0xef, 0x7c, 0x10 },
+      version_3_23_0_54 },
+    // libqsgepaper
+    { { 0x57, 0x04, 0xf9, 0x38, 0xd1, 0x57, 0x0d, 0xab, 0x3d, 0x1f,
+        0xd6, 0xa4, 0xfa, 0x49, 0x83, 0x23, 0x5c, 0xa6, 0x3b, 0x96 },
+      version_3_23_0_54 },
+
+    // xochitl
+    { { 0x0f, 0x55, 0x87, 0xb6, 0xb5, 0xff, 0x67, 0x61, 0xe8, 0xbe,
+        0xb0, 0x01, 0xa7, 0xa1, 0x64, 0x6d, 0xe7, 0xdd, 0xfc, 0x19 },
+      version_3_23_0_64 },
+    // libqsgepaper -> same as 3.23.0.54
   };
 
   auto it = addresses.find(version);
@@ -39,23 +83,45 @@ getAddresses(BuildId version) {
   return it->second;
 }
 
+BuildId
+getXochitlBuildId() {
+  BuildId id;
+
+  memcpy(
+    id.data(), reinterpret_cast<const char*>(xochitl_buildid_addr), id.size());
+
+  return id;
+}
+
 } // namespace
 
 const AddressInfoBase*
-getAddresses() {
-  static const AddressInfoBase* result = [] {
-    BuildId id;
+getAddresses(std::optional<BuildId> id) {
+  if (!id.has_value()) {
+    id = getXochitlBuildId();
+  }
 
-    // NOLINTNEXTLINE
-    memcpy(id.data(), reinterpret_cast<const char*>(0x10180), id.size());
+  std::cerr << "Build ID: ";
+  for (unsigned char c : *id) {
+    std::cerr << "0x" << std::hex << std::setfill('0') << std::setw(2) << int(c)
+              << " ";
+  }
+  std::cerr << "\n";
 
-    std::cerr << "Build ID: ";
-    for (unsigned char c : id) {
-      std::cerr << "0x" << std::hex << std::setfill('0') << std::setw(2)
-                << int(c) << " ";
+  return getAddressesById(*id);
+}
+
+void*
+getQsgepaperHandle() {
+  static auto* handle = []() -> void* {
+    auto* handle =
+      dlopen("/usr/lib/plugins/scenegraph/libqsgepaper.so", RTLD_LAZY);
+    if (handle == nullptr) {
+      std::cerr << dlerror() << "\n";
+      return nullptr;
     }
-    std::cerr << "\n";
-    return getAddresses(id);
+    return handle;
   }();
-  return result;
+
+  return handle;
 }

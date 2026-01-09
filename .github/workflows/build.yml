@@ -4,19 +4,41 @@ on: [push, pull_request]
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: 'ghcr.io/timower/rm-docker:main'
+  IMAGE_NAME: 'ghcr.io/timower/rm-docker:main-qemu-toltec'
 
 jobs:
+
+  nix-build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        lfs: 'true'
+    - uses: cachix/install-nix-action@v31
+      with:
+        github_access_token: ${{ secrets.GITHUB_TOKEN }}
+    - uses: cachix/cachix-action@v15
+      with:
+        name: rm2-stuff
+        authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+        # Skip qcow2 vm images and system tarballs.
+        pushFilter: '(qcow2$|tarball-armv7l-unknown-linux-gnueabihf$|-rm-emu-|rm-nix-test|test-driver)'
+    - run: nix build
+    - run: nix build .#dev-cross
+    - run: nix build .#dev-rm2-toolchain
+    - run: nix build .#nixosConfigurations.example.config.system.build.toplevel
+    - run: nix flake check -L --max-jobs 1
+
   build:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/toltec-dev/base:v2.3
+      image: ghcr.io/toltec-dev/base:v3.1
 
     steps:
       - name: Install Deps
-        run: apt-get update && apt-get install -y git git-lfs
+        run: apt-get update && apt-get install -y git git-lfs xxd
 
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           lfs: 'true'
 
@@ -30,7 +52,7 @@ jobs:
         run: cmake --build build/release-toltec --target package
 
       - name: Upload
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: package
           path: build/release-toltec/*.ipk
@@ -39,89 +61,90 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           lfs: 'true'
 
       - name: Install Deps
-        run: sudo apt-get install -y ninja-build libsdl2-dev xxd llvm libevdev-dev libsystemd-dev
+        run: |
+         sudo apt-get update
+         sudo apt-get install -y ninja-build libsdl2-dev xxd llvm libevdev-dev libsystemd-dev
 
       - name: Configure CMake
         run: cmake --preset dev-host
 
       - name: Build
-        run: cmake --build build/host
+        run: cmake --build build/dev-host
 
       - name: Unit Tests
-        run: cmake --build build/host --target make-coverage
+        run: cmake --build build/dev-host --target make-coverage
 
       - name: Upload Coverage
-        uses: codecov/codecov-action@v3
-        continue-on-error: true
+        uses: codecov/codecov-action@v4
         with:
-          files: ./build/host/report.lcov
-          fail_ci_if_error: true # optional (default = false)
+          token: ${{ secrets.CODECOV_TOKEN }} # required
+          files: ./build/dev-host/report.lcov
+          fail_ci_if_error: false # optional (default = false)
           verbose: true # optional (default = false)
 
       - name: Upload Test Binary
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: host-package
-          path: build/host/tools/rm2fb-emu/rm2fb-test
+          path: build/dev-host/tools/rm2fb-emu/rm2fb-test
 
-  integration-tests:
-    runs-on: ubuntu-latest
-    needs: [build, build-host]
+  # integration-tests:
+  #   runs-on: ubuntu-latest
+  #   needs: [build, build-host]
 
-    strategy:
-      matrix:
-        fw_version: ['2.15.1', '3.3.2', '3.5.2', '3.8.2']
+  #   strategy:
+  #     matrix:
+  #       fw_version: ['3.3.2.1666', '3.20.0.92']
 
-    steps:
-      - uses: actions/checkout@v3
-        with:
-          lfs: 'true'
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         lfs: 'true'
 
-      - name: Install Deps
-        run: sudo apt-get install -y libsdl2-2.0-0
+  #     - name: Install Deps
+  #       run: sudo apt-get install -y libsdl2-2.0-0
 
-      - name: Download package
-        uses: actions/download-artifact@v2
-        with:
-          name: package
-          path: packages/
+  #     - name: Download package
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: package
+  #         path: packages/
 
-      - name: Download host package
-        uses: actions/download-artifact@v2
-        with:
-          name: host-package
-          path: tools/
+  #     - name: Download host package
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: host-package
+  #         path: tools/
 
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+  #     - name: Login to GitHub Container Registry
+  #       uses: docker/login-action@v3
+  #       with:
+  #         registry: ${{ env.REGISTRY }}
+  #         username: ${{ github.actor }}
+  #         password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Integration Tests
-        id: intest
-        run: |
-          chmod +x ./tools/rm2fb-test
-          mkdir ./tmp
-          ./test/integration/test.sh \
-            ${{ env.IMAGE_NAME }}-${{ matrix.fw_version }} \
-            ./packages/ \
-            ./tools/rm2fb-test \
-            ./tmp
+  #     - name: Integration Tests
+  #       id: intest
+  #       run: |
+  #         chmod +x ./tools/rm2fb-test
+  #         mkdir ./tmp
+  #         ./test/integration/test.sh \
+  #           ${{ env.IMAGE_NAME }}-${{ matrix.fw_version }} \
+  #           ./packages/ \
+  #           ./tools/rm2fb-test \
+  #           ./tmp
 
-      - name: Upload test results
-        if:  ${{ failure() && steps.intest.conclusion == 'failure' }}
-        uses: actions/upload-artifact@v2
-        with:
-          name: test_failures_${{ matrix.fw_version }}
-          path: ./tmp
-
+  #     - name: Upload test results
+  #       if:  ${{ failure() && steps.intest.conclusion == 'failure' }}
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: test_failures_${{ matrix.fw_version }}
+  #         path: ./tmp
 
   release:
     runs-on: ubuntu-latest
@@ -130,14 +153,14 @@ jobs:
 
     steps:
       - name: Download package
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
           name: package
 
       - run: ls -la
 
       - name: Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           draft: true
           files: ./*

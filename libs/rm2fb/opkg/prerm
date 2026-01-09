@@ -2,4 +2,4 @@
 set -eu
 
 # Disable the rm2fb socket
-systemctl disable --now rm2fb.socket
+systemctl disable --now rm2fb.socket rm2fb.service

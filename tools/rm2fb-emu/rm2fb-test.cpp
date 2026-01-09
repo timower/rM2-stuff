@@ -21,7 +21,7 @@ doScreenshot(unistdpp::FD& sock, std::vector<std::string_view> args) {
   sendMessage(sock, ClientMsg(GetUpdate{}));
   auto msgOrErr = sock.readAll<UpdateParams>();
   if (!msgOrErr) {
-    std::cerr << "Error reading: " << toString(msgOrErr.error()) << "\n";
+    std::cerr << "Error reading: " << to_string(msgOrErr.error()) << "\n";
     return false;
   }
   auto msg = *msgOrErr;
@@ -40,7 +40,7 @@ doScreenshot(unistdpp::FD& sock, std::vector<std::string_view> args) {
 
   auto res = sock.readAll(buffer.data(), bufSize);
   if (!res) {
-    std::cerr << "Error reading: " << toString(res.error()) << "\n";
+    std::cerr << "Error reading: " << to_string(res.error()) << "\n";
     return false;
   }
 
@@ -48,7 +48,46 @@ doScreenshot(unistdpp::FD& sock, std::vector<std::string_view> args) {
 
   const auto name =
     args.empty() ? std::string_view("screenshot.png") : args.front();
-  fatalOnError(rmlib::writeImage(name.data(), canvas));
+  fatalOnError(canvas.writeImage(name.data()));
+
+  return true;
+}
+
+bool
+doInput(unistdpp::FD& sock, int x, int y, bool touch) {
+  auto input = Input{
+    .x = x,
+    .y = y,
+    .type = Input::Down,
+    .touch = touch,
+  };
+
+  fatalOnError(sendMessage(sock, ClientMsg(input)));
+  usleep(tap_wait);
+
+  input.type = Input::Up;
+  fatalOnError(sendMessage(sock, ClientMsg(input)));
+  usleep(tap_wait);
+
+  return true;
+}
+
+bool
+doMovePen(unistdpp::FD& sock, std::vector<std::string_view> args) {
+  if (args.size() != 3) {
+    std::cerr << "Move requires 3 args\n";
+    return false;
+  }
+
+  auto input = Input{
+    .x = atoi(args[1].data()),
+    .y = atoi(args[2].data()),
+    .type = Input::Move,
+    .touch = args[0] == "touch",
+  };
+
+  fatalOnError(sendMessage(sock, ClientMsg(input)));
+  usleep(tap_wait);
 
   return true;
 }
@@ -60,16 +99,27 @@ doTouch(unistdpp::FD& sock, std::vector<std::string_view> args) {
     return false;
   }
 
-  auto input = Input{
-    .x = atoi(args[0].data()),
-    .y = atoi(args[1].data()),
-    .type = 1,
-  };
+  return doInput(sock, atoi(args[0].data()), atoi(args[1].data()), true);
+}
+
+bool
+doPen(unistdpp::FD& sock, std::vector<std::string_view> args) {
+  if (args.size() != 2) {
+    std::cerr << "Touch requires 2 args, x and y\n";
+    return false;
+  }
+
+  return doInput(sock, atoi(args[0].data()), atoi(args[1].data()), false);
+}
+
+bool
+doPower(unistdpp::FD& sock, std::vector<std::string_view> args) {
+  auto input = PowerButton{ .down = true };
 
   fatalOnError(sendMessage(sock, ClientMsg(input)));
   usleep(tap_wait);
 
-  input.type = 2;
+  input.down = false;
   fatalOnError(sendMessage(sock, ClientMsg(input)));
   usleep(tap_wait);
 
@@ -80,6 +130,9 @@ const std::unordered_map<std::string_view, decltype(&doScreenshot)> actions = {
   {
     { "screenshot", doScreenshot },
     { "touch", doTouch },
+    { "pen", doPen },
+    { "power", doPower },
+    { "move", doMovePen },
   }
 };
 } // namespace
@@ -102,7 +155,7 @@ main(int argc, char* argv[]) {
   int port = atoi(argv[2]);                 // NOLINT
   auto sock = getClientSock(argv[1], port); // NOLINT
   if (!sock.has_value()) {
-    std::cout << "Couldn't get tcp socket: " << toString(sock.error()) << "\n";
+    std::cout << "Couldn't get tcp socket: " << to_string(sock.error()) << "\n";
     return EXIT_FAILURE;
   }
 
@@ -111,7 +164,5 @@ main(int argc, char* argv[]) {
     args.emplace_back(argv[i]); // NOLINT
   }
 
-  actionFn(*sock, std::move(args));
-
-  return EXIT_SUCCESS;
+  return actionFn(*sock, std::move(args)) ? EXIT_SUCCESS : EXIT_FAILURE;
 }

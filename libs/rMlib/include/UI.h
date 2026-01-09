@@ -41,8 +41,10 @@ stop(int signal) {
 
 template<typename AppWidget>
 OptError<>
-runApp(AppWidget widget) {
-  auto context = TRY(AppContext::makeContext());
+runApp(AppWidget widget,
+       std::optional<Size> size = {},
+       bool clearOnExit = false) {
+  auto context = TRY(AppContext::makeContext(size));
   details::currentContext = &context;
 
   // TODO: fix widget lifetime
@@ -58,6 +60,10 @@ runApp(AppWidget widget) {
   std::signal(SIGINT, SIG_DFL);
   std::signal(SIGTERM, SIG_DFL);
   details::currentContext = nullptr;
+
+  if (clearOnExit) {
+    context.getFramebuffer().clear();
+  }
 
   return {};
 }

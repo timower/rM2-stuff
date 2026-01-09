@@ -11,11 +11,14 @@
 using namespace rmlib;
 
 namespace {
-const char* shellCmd = "/bin/bash";
+const char* shellCmd = "/bin/sh";
 }
 
 int
 main(int argc, char* argv[]) {
+  if (auto* shellEnv = getenv("SHELL"); shellEnv != nullptr) {
+    shellCmd = strdup(shellEnv);
+  }
   static const char* shellArgs[3] = { shellCmd, "-l", nullptr };
 
   /* for wcwidth() */
@@ -36,9 +39,7 @@ main(int argc, char* argv[]) {
     args = const_cast<char* const*>(shellArgs);
   }
 
-  auto cfg = loadConfigOrMakeDefault();
-
-  fatalOnError(runApp(Yaft(cmd, args, std::move(cfg))));
+  unistdpp::fatalOnError(runApp(Yaft(cmd, args, getConfigPath())));
 
   return 0;
 }

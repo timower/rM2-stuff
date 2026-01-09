@@ -11,6 +11,8 @@
 
 #include <SDL.h>
 
+bool haveKeyboard = false;
+
 namespace rmlib::input {
 
 void
@@ -30,7 +32,7 @@ struct FakeInputDevice : public InputDeviceBase {
 
     pipes = unistdpp::pipe()
               .or_else([](auto err) {
-                std::cerr << unistdpp::toString(err) << "\n";
+                std::cerr << unistdpp::to_string(err) << "\n";
                 std::exit(EXIT_FAILURE);
               })
               .value();
@@ -64,10 +66,13 @@ InputManager::openAll(bool monitor) {
   devices.emplace("Test", std::move(fakeDev));
 
   baseDevices = { fakeDevRef, fakeDevRef, fakeDevRef };
+  if (haveKeyboard) {
+    baseDevices.pogoKeyboard = fakeDevRef;
+  }
   return baseDevices;
 }
 
-ErrorOr<std::vector<Event>>
+ErrorOr<std::vector<Event>> // NOLINTNEXTLINE
 InputManager::waitForInput(std::vector<pollfd>& extraFds,
                            std::optional<std::chrono::milliseconds> timeout) {
   static bool down = false;
@@ -83,7 +88,7 @@ InputManager::waitForInput(std::vector<pollfd>& extraFds,
 
     auto ret = unistdpp::poll(extraFds, timeout);
     if (!ret) {
-      std::cerr << "Poll failure: " << unistdpp::toString(ret.error()) << "\n";
+      std::cerr << "Poll failure: " << unistdpp::to_string(ret.error()) << "\n";
       return;
     }
 

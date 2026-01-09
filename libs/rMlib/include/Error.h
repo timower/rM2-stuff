@@ -2,6 +2,7 @@
 
 #include <unistdpp/error.h>
 
+#include <iostream>
 #include <string>
 
 #include <tl/expected.hpp>
@@ -27,19 +28,3 @@ using ErrorOr = tl::expected<T, E>;
 
 template<typename E = Error>
 using OptError = tl::expected<void, E>;
-
-template<typename T, typename E>
-T
-fatalOnError(tl::expected<T, E> error) {
-  if (!error.has_value()) {
-    using namespace std;
-    std::cerr << "FATAL: " << to_string(error.error()) << std::endl;
-    std::abort();
-  }
-
-  if constexpr (std::is_void_v<T>) {
-    return;
-  } else {
-    return *error;
-  }
-}

@@ -63,10 +63,10 @@ TEST_CASE("Text", "[rmlib][ui]") {
 
   auto txt = ctx.findByType<Text>();
   REQUIRE(txt.size() == 1);
-  REQUIRE(txt.front()->getWidget().getText() == "Test");
+  REQUIRE(txt.front().ro->getWidget().getText() == "Test");
 
   auto txt2 = ctx.findByText("Test");
-  REQUIRE(txt == txt2);
+  REQUIRE(txt.front().ro == txt2.front().ro);
 
   REQUIRE_THAT(ctx.findByText("Test"), ctx.matchesGolden("text-basic.png"));
 }
@@ -80,7 +80,7 @@ TEST_CASE("Sized", "[rmlib][ui]") {
     auto txt = ctx.findByText("Test");
     REQUIRE_THAT(txt, Catch::Matchers::SizeIs(1));
 
-    REQUIRE(txt.front()->getSize() == Size{ 50, 50 });
+    REQUIRE(txt.front().ro->getSize() == Size{ 50, 50 });
     REQUIRE_THAT(txt, ctx.matchesGolden("text-sized.png"));
   }
 
@@ -90,7 +90,7 @@ TEST_CASE("Sized", "[rmlib][ui]") {
     auto txt = ctx.findByText("Test");
     REQUIRE_THAT(txt, Catch::Matchers::SizeIs(1));
 
-    REQUIRE(txt.front()->getSize() != Size{ 50, 50 });
+    REQUIRE(txt.front().ro->getSize() != Size{ 50, 50 });
     REQUIRE_THAT(txt, ctx.matchesGolden("text-sized2.png"));
   }
 
@@ -100,7 +100,7 @@ TEST_CASE("Sized", "[rmlib][ui]") {
     auto txt = ctx.findByText("Test");
     REQUIRE_THAT(txt, Catch::Matchers::SizeIs(1));
 
-    REQUIRE(txt.front()->getSize().height == 20);
+    REQUIRE(txt.front().ro->getSize().height == 20);
     REQUIRE_THAT(txt, ctx.matchesGolden("text-sized3.png"));
   }
 
@@ -110,7 +110,7 @@ TEST_CASE("Sized", "[rmlib][ui]") {
     auto txt = ctx.findByText("Test");
     REQUIRE_THAT(txt, Catch::Matchers::SizeIs(1));
 
-    REQUIRE(txt.front()->getSize().width == 200);
+    REQUIRE(txt.front().ro->getSize().width == 200);
     REQUIRE_THAT(txt, ctx.matchesGolden("text-sized4.png"));
   }
 }
@@ -163,8 +163,8 @@ TEST_CASE("Flex", "[rmlib][ui]") {
     REQUIRE(txt2.size() == 1);
     REQUIRE(txt3.size() == 1);
 
-    REQUIRE(txt1.front()->getSize().height ==
-            Catch::Approx(txt2.front()->getSize().height * 2).margin(10));
+    REQUIRE(txt1.front().ro->getSize().height ==
+            Catch::Approx(txt2.front().ro->getSize().height * 2).margin(10));
 
     auto column = ctx.findByType<
       Flex<Expanded<Border<Text>>, Expanded<Border<Text>>, Border<Text>>>();

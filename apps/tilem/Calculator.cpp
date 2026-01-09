@@ -30,6 +30,10 @@ CalcState::init(rmlib::AppContext& context,
                 const rmlib::BuildContext& buildCtx) {
   mCalc = loadCalc();
 
+  updateRotation(context);
+  context.onDeviceUpdate(
+    [this, &context] { modify().updateRotation(context); });
+
   if (mCalc == nullptr) {
     popupTimer = context.addTimer(std::chrono::seconds(0), [&] {
       Navigator::of(buildCtx)
@@ -49,8 +53,14 @@ CalcState::init(rmlib::AppContext& context,
 
   std::cout << "loaded rom, entering mainloop\n";
   lastUpdateTime = std::chrono::steady_clock::now();
-  updateTimer = context.addTimer(
-    tps, [this] { updateCalcState(); }, tps);
+  updateTimer = context.addTimer(tps, [this] { updateCalcState(); }, tps);
+}
+
+void
+CalcState::updateRotation(AppContext& context) {
+  rotation = context.getInputManager().getBaseDevices().pogoKeyboard != nullptr
+               ? rmlib::Rotation::Clockwise
+               : rmlib::Rotation::None;
 }
 
 CalcState::~CalcState() {

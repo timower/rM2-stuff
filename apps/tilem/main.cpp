@@ -5,17 +5,16 @@
 using namespace rmlib;
 using namespace rmlib::input;
 
-namespace {
-
-constexpr auto calc_default_rom = "/home/root/ti84plus.rom";
-
-} // namespace
-
 int
 main(int argc, char* argv[]) {
-  const auto* calcName = argc > 1 ? argv[1] : calc_default_rom;
+  const auto* home = getenv("HOME");
+  const auto defaultRom = home == nullptr
+                            ? std::string("/home/root/ti84plus.rom")
+                            : std::string(home) + "/ti84plus.rom";
+  const auto* calcName = argc > 1 ? argv[1] : defaultRom.c_str();
 
-  fatalOnError(runApp(Navigator(tilem::Calculator(calcName))));
+  unistdpp::fatalOnError(
+    runApp(Center(Navigator(tilem::Calculator(calcName)))));
 
   return EXIT_SUCCESS;
 }

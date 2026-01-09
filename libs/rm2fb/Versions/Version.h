@@ -1,8 +1,12 @@
 #pragma once
 
 #include "Message.h"
-
 #include <rm2.h>
+
+#include <array>
+#include <optional>
+
+using BuildId = std::array<unsigned char, 20>;
 
 class AddressInfoBase {
 public:
@@ -56,6 +60,14 @@ extern const AddressInfoBase* const version_2_15_1;
 extern const AddressInfoBase* const version_3_3_2;
 extern const AddressInfoBase* const version_3_5_2;
 extern const AddressInfoBase* const version_3_8_2;
+extern const AddressInfoBase* const version_3_20_0;
+extern const AddressInfoBase* const version_3_22_0;
+extern const AddressInfoBase* const version_3_22_4;
+extern const AddressInfoBase* const version_3_23_0_54;
+extern const AddressInfoBase* const version_3_23_0_64;
 
 const AddressInfoBase*
-getAddresses();
+getAddresses(std::optional<BuildId> id = std::nullopt);
+
+void*
+getQsgepaperHandle();

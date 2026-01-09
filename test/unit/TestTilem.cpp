@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "TempFiles.h"
 #include "rMLibTestHelper.h"
 
 #include "Calculator.h"
@@ -11,28 +12,13 @@
 using namespace rmlib;
 using namespace tilem;
 
-class TemporaryDirectory {
-public:
-  TemporaryDirectory() : dir("/tmp/tilem") {
-    REQUIRE_NOTHROW(std::filesystem::create_directory(dir));
-  }
-
-  ~TemporaryDirectory() {
-    if (!dir.empty() && std::filesystem::is_directory(dir)) {
-      REQUIRE_NOTHROW(std::filesystem::remove_all(dir));
-    }
-  }
-
-  std::string dir;
-};
-
 TEST_CASE("Tilem", "[tilem][ui]") {
-  TemporaryDirectory tmp;
-  const auto romPath = tmp.dir + "/unit_test.rom";
+  TemporaryDirectory tmp(/* cwd */ true);
+  const std::string romPath = "unit_test.rom";
 
   auto ctx = TestContext::make();
 
-  ctx.pumpWidget(Navigator(Calculator(romPath)));
+  ctx.pumpWidget(Center(Navigator(Calculator(romPath))));
 
   auto calc = ctx.findByType<Calculator>();
 
@@ -49,6 +35,12 @@ TEST_CASE("Tilem", "[tilem][ui]") {
   }
 
   SECTION("Download") {
+    // Skip download test in sandboxed environments (like Nix builds)
+    // Test for network access with a quick connection test
+    if (std::system("wget --spider -q --timeout=2 https://www.google.com "
+                    ">/dev/null 2>&1") != 0) {
+      SKIP("Skipping download test - no network access available");
+    }
 
     ctx.tap(ctx.findByText("Download"));
 
@@ -72,4 +64,16 @@ TEST_CASE("Tilem", "[tilem][ui]") {
     ctx.pump();
     REQUIRE(ctx.shouldStop());
   }
+}
+
+TEST_CASE("Tilem Landscape", "[tilem][ui]") {
+  TemporaryDirectory tmp(/* cwd */ true);
+  const std::string romPath = "unit_test.rom";
+
+  auto ctx = TestContext::make(/*keyboardAttached=*/true);
+
+  ctx.pumpWidget(Center(Navigator(Calculator(romPath))));
+
+  auto calc = ctx.findByType<Calculator>();
+  REQUIRE_THAT(calc, ctx.matchesGolden("tilem-landscape.png"));
 }

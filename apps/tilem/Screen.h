@@ -33,7 +33,7 @@ public:
 protected:
   rmlib::Size doLayout(const rmlib::Constraints& constraints) final;
 
-  rmlib::UpdateRegion doDraw(rmlib::Rect rect, rmlib::Canvas& canvas) final;
+  rmlib::UpdateRegion doDraw(rmlib::Canvas& canvas) final;
 
 private:
   TilemLCDBuffer* lcd = nullptr;

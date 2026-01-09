@@ -96,6 +96,8 @@ struct BaseDevices {
   InputDeviceBase* pen = nullptr;
   InputDeviceBase* touch = nullptr;
   InputDeviceBase* key = nullptr;
+
+  InputDeviceBase* pogoKeyboard = nullptr;
 };
 
 struct InputManager {
@@ -128,7 +130,8 @@ struct InputManager {
       std::pair<std::vector<Event>, std::array<bool, sizeof...(ExtraFds)>>>> {
 
     static_assert(((std::is_same_v<ExtraFds, unistdpp::FD> ||
-                    std::is_same_v<ExtraFds, int>)&&...));
+                    std::is_same_v<ExtraFds, int>) &&
+                   ...));
 
     std::vector<pollfd> fds;
 
@@ -148,9 +151,9 @@ struct InputManager {
     if constexpr (sizeof...(ExtraFds) == 0) {
       return res;
     } else {
-      std::array<bool, sizeof...(extraFds)> extraResult;
+      std::array<bool, sizeof...(extraFds)> extraResult{};
       for (std::size_t i = 0; i < sizeof...(extraFds); i++) {
-        extraResult[i] = unistdpp::canRead(fds[i]);
+        extraResult[i] = unistdpp::canRead(fds[i]); // NOLINT
       }
 
       return std::pair{ res, extraResult };
@@ -160,7 +163,18 @@ struct InputManager {
   BaseDevices getBaseDevices() const { return baseDevices; }
 
   size_t numDevices() const { return devices.size(); }
-  void removeDevice(std::string_view path) { devices.erase(path); }
+  void removeDevice(std::string_view path) {
+    auto it = devices.find(path);
+    if (it == devices.end()) {
+      return;
+    }
+
+    if (it->second.get() == baseDevices.pogoKeyboard) {
+      baseDevices.pogoKeyboard = nullptr;
+    }
+
+    devices.erase(it);
+  }
 
 private:
   /// members

@@ -1,0 +1,6 @@
+#!/bin/sh
+echo "Waiting for ssh to come up..."
+while ! timeout 5 in_vm true; do
+  sleep 1
+done
+echo "Done!"

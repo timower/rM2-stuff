@@ -2,9 +2,9 @@
 
 #include <unistdpp/file.h>
 
+#include <algorithm>
 #include <dirent.h>
 #include <fcntl.h>
-#include <fstream>
 #include <unistd.h>
 
 namespace rmlib::device {
@@ -28,7 +28,7 @@ struct BaseDeviceName : BaseDevice {
   std::string_view name;
 };
 
-using BaseDevices = std::array<BaseDeviceName, 3>;
+using BaseDevices = std::array<BaseDeviceName, 4>;
 
 const BaseDevices rm1_paths = { {
   // touch
@@ -42,7 +42,9 @@ const BaseDevices rm1_paths = { {
   { { InputType::Pen, wacom_transform }, "Wacom I2C Digitizer" },
 
   // keys
-  { { InputType::Key, {} }, "gpio-keys" },
+  { { InputType::Power, {} }, "gpio-keys" },
+
+  { { InputType::Keyboard, {} }, "rM_Keyboard" },
 } };
 
 const BaseDevices rm2_paths = { {
@@ -55,7 +57,8 @@ const BaseDevices rm2_paths = { {
   { { InputType::Pen, wacom_transform }, "Wacom I2C Digitizer" },
 
   // keys
-  { { InputType::Key, {} }, "snvs-powerkey" },
+  { { InputType::Power, {} }, "snvs-powerkey" },
+  { { InputType::Keyboard, {} }, "rM_Keyboard" },
 } };
 
 const BaseDevices&
@@ -111,7 +114,7 @@ listDirectory(std::string_view path, bool onlyFiles) {
 
   std::vector<std::string> result;
   for (auto* dirent = readdir(dir); dirent != nullptr; dirent = readdir(dir)) {
-    if (onlyFiles && dirent->d_type != DT_REG) {
+    if (onlyFiles && (dirent->d_type != DT_REG && dirent->d_type != DT_LNK)) {
       continue;
     }
     result.push_back(std::string(path) + "/" + std::string(dirent->d_name));
@@ -119,6 +122,7 @@ listDirectory(std::string_view path, bool onlyFiles) {
 
   closedir(dir);
 
+  std::sort(result.begin(), result.end());
   return result;
 }
 
@@ -130,7 +134,7 @@ isPogoConnected() {
   constexpr auto path = "/tmp/pogo";
 #endif
 
-  return unistdpp::open(path, O_RDWR)
+  return unistdpp::open(path, O_RDONLY)
     .and_then([](unistdpp::FD fd) {
       return fd.readAll<char>().transform([&](char buf) { return buf == '1'; });
     })

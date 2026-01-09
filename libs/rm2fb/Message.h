@@ -1,5 +1,6 @@
 #pragma once
 
+#include <iomanip>
 #include <unistdpp/unistdpp.h>
 
 #include <cstdint>
@@ -16,30 +17,48 @@ struct UpdateParams {
 
   int flags;
   int waveform;
+
+  float temperatureOverride;
+  int extraMode;
 };
 
-constexpr auto update_message_size = 6 * 4;
+constexpr auto update_message_size = 8 * 4;
 static_assert(sizeof(UpdateParams) == update_message_size,
               "Params has wrong size?");
 
 inline std::ostream&
 operator<<(std::ostream& stream, const UpdateParams& msg) {
-  return stream << "{ { " << msg.x1 << ", " << msg.y1 << "; " << msg.x2 << ", "
-                << msg.y2 << " }, wave: " << msg.waveform
-                << " flags: " << msg.flags << " }";
+  // clang-format off
+  return stream << "{ { "
+                << std::setw(4) << msg.x1 << ", " << std::setw(4) << msg.y1
+                << "; "
+                << std::setw(4) << msg.x2 << ", " << std::setw(4) << msg.y2
+                << " },"
+                << std::hex
+                << " wave: " << msg.waveform
+                << " flags: " << msg.flags
+                << std::dec
+                << " temp: " << msg.temperatureOverride
+                << " mode: " << msg.extraMode << " }";
+  // clang-format on
 }
 
 struct Input {
-  int32_t x;
-  int32_t y;
-  int32_t type; // 1 = down, 2 = up
+  int32_t x = 0;
+  int32_t y = 0;
+  enum Action { Move, Down, Up } type = Move;
+  bool touch = false; // True for touch, false for pen
 };
 
-static_assert(sizeof(Input) == 3 * 4, "Input message has unexpected size");
+static_assert(sizeof(Input) == 4 * 4, "Input message has unexpected size");
 
 struct GetUpdate {};
 
-using ClientMsg = std::variant<Input, GetUpdate>;
+struct PowerButton {
+  bool down;
+};
+
+using ClientMsg = std::variant<Input, GetUpdate, PowerButton>;
 
 template<typename... T>
 unistdpp::Result<void>
@@ -53,6 +72,7 @@ template<typename Variant, auto idx = 0>
 unistdpp::Result<Variant>
 read(const unistdpp::FD& fd, int32_t index) {
   if constexpr (idx >= std::variant_size_v<Variant>) {
+    (void)index;
     return tl::unexpected(std::errc::bad_message);
   } else {
     if (idx == index) {

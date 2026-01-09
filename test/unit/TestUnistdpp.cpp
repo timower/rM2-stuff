@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "TempFiles.h"
+
 // unistdpp
 #include <unistdpp/file.h>
 #include <unistdpp/pipe.h>
@@ -18,19 +20,19 @@ template<typename T>
 struct StringMaker<Result<T>> {
   static std::string convert(const Result<T>& value) {
     return value.has_value() ? StringMaker<T>::convert(*value)
-                             : "Error: " + toString(value.error());
+                             : "Error: " + to_string(value.error());
   }
 };
 template<>
 struct StringMaker<Result<void>> {
   static std::string convert(const Result<void>& value) {
-    return value.has_value() ? "OK" : "Error: " + toString(value.error());
+    return value.has_value() ? "OK" : "Error: " + to_string(value.error());
   }
 };
 } // namespace Catch
 
 TEST_CASE("error", "[unistdpp]") {
-  REQUIRE(toString(std::errc::invalid_argument) == "Invalid argument");
+  REQUIRE(to_string(std::errc::invalid_argument) == "Invalid argument");
 }
 
 TEST_CASE("open", "[unistdpp]") {
@@ -82,6 +84,11 @@ TEST_CASE("readFile", "[unistdpp]") {
 
   SECTION("sysfs") {
     auto res = readFile("/sys/devices/system/cpu/present");
+    if (!res.has_value() &&
+        res.error() == std::errc::no_such_file_or_directory) {
+      SKIP("No sysfs access");
+    }
+
 #ifndef __APPLE__
     REQUIRE(res);
     REQUIRE((*res)[0] == '0');
@@ -218,13 +225,16 @@ TEST_CASE("TCP Socket", "[unistdpp]") {
 }
 
 TEST_CASE("Unix Socket", "[unistdpp]") {
+  auto tmpPath = TemporaryDirectory();
+
   auto serverSock = unistdpp::socket(AF_UNIX, SOCK_DGRAM, 0);
   REQUIRE(serverSock.has_value());
 
-  constexpr auto test_socket = "/tmp/unistdpp-test.sock";
-  unlink(test_socket);
+  const auto testSocket = tmpPath.dir / "unistdpp-test.sock";
+  unlink(testSocket.c_str());
 
-  REQUIRE(unistdpp::bind(*serverSock, Address::fromUnixPath(test_socket)));
+  REQUIRE(
+    unistdpp::bind(*serverSock, Address::fromUnixPath(testSocket.c_str())));
 
   auto clientSock = unistdpp::socket(AF_UNIX, SOCK_DGRAM, 0);
   REQUIRE(clientSock.has_value());
@@ -233,12 +243,14 @@ TEST_CASE("Unix Socket", "[unistdpp]") {
 #if __linux__
   REQUIRE(unistdpp::bind(*clientSock, Address::fromUnixPath(nullptr)));
 #else
-  unlink("/tmp/client.sock");
+  const auto clientPath = tmpPath.dir / "client.sock";
+  unlink(clientPath.c_str());
   REQUIRE(
-    unistdpp::bind(*clientSock, Address::fromUnixPath("/tmp/client.sock")));
+    unistdpp::bind(*clientSock, Address::fromUnixPath(clientPath.c_str())));
 #endif
 
-  REQUIRE(unistdpp::connect(*clientSock, Address::fromUnixPath(test_socket)));
+  REQUIRE(
+    unistdpp::connect(*clientSock, Address::fromUnixPath(testSocket.c_str())));
 
   const char testMsg[] = "Test";
   REQUIRE(unistdpp::sendto(*clientSock, testMsg, sizeof(testMsg), 0, nullptr));
