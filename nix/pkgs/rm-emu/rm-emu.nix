@@ -9,6 +9,7 @@
   netcat,
   gnugrep,
   coreutils,
+  e2fsprogs,
 
   kernel,
   rootfs,
@@ -49,6 +50,7 @@ stdenvNoCC.mkDerivation {
     qemu
     openssh
     netcat
+    e2fsprogs
   ];
 
   src = ./bin;
@@ -85,6 +87,7 @@ stdenvNoCC.mkDerivation {
           qemu
           gnugrep
           coreutils
+          e2fsprogs
         ]
       }
 
