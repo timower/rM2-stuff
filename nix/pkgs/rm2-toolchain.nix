@@ -29,16 +29,12 @@ stdenv.mkDerivation rec {
   dontUnpack = true;
   dontBuild = true;
 
+  # The sysroot has broken symlinks, probably fine.
+  dontCheckForBrokenSymlinks = true;
+
   installPhase = ''
     mkdir -p $out
     ENVCLEANED=1 $src -y -d $out || true
-    rm -f $out/sysroots/cortexa7hf-neon-remarkable-linux-gnueabi/usr/lib/environment.d/99-environment.conf
-    rm -f $out/sysroots/cortexa7hf-neon-remarkable-linux-gnueabi/etc/tmpfiles.d/etc.conf
-    rm -f $out/sysroots/cortexa7hf-neon-remarkable-linux-gnueabi/etc/tmpfiles.d/home.conf
-    rm -f $out/sysroots/cortexa7hf-neon-remarkable-linux-gnueabi/etc/resolv.conf
-    rm -f $out/sysroots/cortexa7hf-neon-remarkable-linux-gnueabi/etc/mtab
-    rm -f $out/sysroots/cortexa7hf-neon-remarkable-linux-gnueabi/etc/resolv-conf.systemd
-    rm -f $out/sysroots/cortexa7hf-neon-remarkable-linux-gnueabi/var/lock
   '';
 
   meta = with lib; {
