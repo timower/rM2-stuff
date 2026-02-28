@@ -32,7 +32,7 @@ let
 
   url =
     if isNewFormat then
-      "https://storage.googleapis.com/remarkable-versions/${fileName}"
+      "https://remarkable-software.s3.us-east-2.amazonaws.com/${fileName}"
     else if (builtins.compareVersions fw_version "3.0.0.0") == 1 then
       "${base_url_v3}/${fw_version}/${fw_version}_reMarkable2-${fileName}.signed"
     else

@@ -7,9 +7,10 @@ let
   kernel = pkgsLinux.callPackage ./kernel.nix { };
 
   versions = import ./versions.nix { inherit lib; };
-  latestVersion = builtins.head (
-    builtins.attrNames (lib.attrsets.filterAttrs (v: i: i.isLatest) versions)
-  );
+  latestVersion = "3.23.0.64";
+  # builtins.head (
+  #   builtins.attrNames (lib.attrsets.filterAttrs (v: i: i.isLatest) versions)
+  # );
 
   extractor = pkgsLinux.callPackage ./extractor.nix { };
 
