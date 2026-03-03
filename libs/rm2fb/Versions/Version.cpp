@@ -2,19 +2,17 @@
 
 #include <cstring>
 #include <dlfcn.h>
+#include <elf.h>
 #include <iomanip>
 #include <iostream>
 #include <map>
 
 namespace {
 
-// The build ID in xochitl binaries happens to be at this address for all
-// supported versions. See:
-// readelf --sections /usr/bin/xochitl
-//   [ 2] .note.gnu.bu[...] NOTE            00010170
-// To get the value:
-// xxd -s 384 -l 20 -i xochitl
-constexpr auto xochitl_buildid_addr = 0x10180;
+// xochitl is a non-PIE ARM executable loaded at 0x10000.
+constexpr uintptr_t xochitl_base_addr = 0x10000;
+// Legacy fallback for older firmware where the build ID was always here.
+constexpr uintptr_t xochitl_buildid_addr_legacy = 0x10180;
 
 const AddressInfoBase*
 getAddressesById(BuildId version) {
@@ -73,6 +71,18 @@ getAddressesById(BuildId version) {
         0xb0, 0x01, 0xa7, 0xa1, 0x64, 0x6d, 0xe7, 0xdd, 0xfc, 0x19 },
       version_3_23_0_64 },
     // libqsgepaper -> same as 3.23.0.54
+
+    // xochitl 3.25.1.1
+    // NOTE: EPFramebufferSwtcon moved from libqsgepaper.so into xochitl.
+    // The server MUST use the LD_PRELOAD path (ServerLib.cpp).
+    { { 0x4d, 0xec, 0x15, 0x72, 0x3d, 0xe1, 0xc4, 0xee, 0x43, 0x1f,
+        0xd0, 0x90, 0x79, 0xfc, 0x21, 0x8d, 0x95, 0xcb, 0xe2, 0xb3 },
+      version_3_25_0 },
+    // libqsgepaper 3.25.1.1: NOT mapped here. It only contains
+    // EPFramebufferDesktop (a software renderer), not EPFramebufferSwtcon.
+    // If we mapped it, ServerExe would take the dlopen path and crash
+    // because the version_3_25_0 addresses are for xochitl, not libqsgepaper.
+    // The server must fall through to the LD_PRELOAD path instead.
   };
 
   auto it = addresses.find(version);
@@ -85,11 +95,48 @@ getAddressesById(BuildId version) {
 
 BuildId
 getXochitlBuildId() {
+  // Parse the in-memory ELF headers to find the GNU build-id note.
+  // This works across firmware versions regardless of where the linker
+  // placed the .note.gnu.build-id section.
+  const auto* ehdr =
+    reinterpret_cast<const Elf32_Ehdr*>(xochitl_base_addr);
+
+  if (memcmp(ehdr->e_ident, ELFMAG, SELFMAG) == 0) {
+    const auto* phdr = reinterpret_cast<const Elf32_Phdr*>(
+      xochitl_base_addr + ehdr->e_phoff);
+
+    for (int i = 0; i < ehdr->e_phnum; i++) {
+      if (phdr[i].p_type != PT_NOTE) {
+        continue;
+      }
+
+      const auto* ptr = reinterpret_cast<const uint8_t*>(phdr[i].p_vaddr);
+      const auto* end = ptr + phdr[i].p_memsz;
+
+      while (ptr + sizeof(Elf32_Nhdr) <= end) {
+        const auto* nhdr = reinterpret_cast<const Elf32_Nhdr*>(ptr);
+        const auto* name = ptr + sizeof(Elf32_Nhdr);
+        const auto* desc = name + ((nhdr->n_namesz + 3) & ~3u);
+
+        if (nhdr->n_type == NT_GNU_BUILD_ID && nhdr->n_namesz == 4 &&
+            memcmp(name, "GNU", 4) == 0 && nhdr->n_descsz == 20) {
+          BuildId id;
+          memcpy(id.data(), desc, id.size());
+          return id;
+        }
+
+        ptr = desc + ((nhdr->n_descsz + 3) & ~3u);
+      }
+    }
+  }
+
+  // Fallback for older firmware where the build ID was always at 0x10180.
+  std::cerr << "WARNING: ELF build-id note not found, falling back to "
+            << std::hex << xochitl_buildid_addr_legacy << "\n";
   BuildId id;
-
-  memcpy(
-    id.data(), reinterpret_cast<const char*>(xochitl_buildid_addr), id.size());
-
+  memcpy(id.data(),
+         reinterpret_cast<const char*>(xochitl_buildid_addr_legacy),
+         id.size());
   return id;
 }
 
