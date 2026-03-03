@@ -1,31 +1,51 @@
-# rM2-stuff: Firmware 3.25 Support
+# rM2-stuff — reMarkable 2 Firmware 3.25 Support
 
-## Reproducing This Work
+Fork of [timower/rM2-stuff](https://github.com/timower/rM2-stuff) with firmware 3.25.1.1 support.
+Upstream PR: https://github.com/timower/rM2-stuff/pull/50
 
-### Prerequisites
-
-- macOS (aarch64) or Linux host with Nix installed and flakes enabled
-- reMarkable 2 tablet running firmware 3.25.1.1
-- SSH access to the tablet (`ssh root@10.11.99.1`)
-- Auto-updates disabled on the tablet
-- A copy of the xochitl binary from the device (`scp root@10.11.99.1:/usr/bin/xochitl /tmp/xochitl`)
-
-### Build
+## Device Access
 
 ```sh
-cd /path/to/rM2-stuff
+ssh root@10.11.99.1          # USB connection (password on Settings > General > Help)
+```
+
+The device runs BusyBox — many GNU flags don't work:
+- `od -A n` → use `od -x`
+- `head -1` → use `head -n 1`
+- No `pgrep -f`, no `script`, no `file`
+
+## Terminal (yaft)
+
+```sh
+ssh root@10.11.99.1
+terminal                      # launch yaft on e-ink screen
+terminal stop                 # force return to reMarkable UI
+nohup terminal &              # survives SSH disconnect
+```
+
+The `terminal` script at `/opt/bin/terminal` stops xochitl, starts rm2fb, runs yaft,
+and restores xochitl on exit.
+
+## SSH from Device
+
+The device uses Dropbear, not OpenSSH:
+```sh
+dropbearkey -t ed25519 -f ~/.ssh/id_dropbear     # generate key
+dropbearkey -y -f ~/.ssh/id_dropbear              # show public key
+TERM=xterm dbclient -T -i ~/.ssh/id_dropbear user@host /bin/bash  # connect
+```
+
+## Build and Deploy
+
+### Build (cross-compile on macOS)
+```sh
+cd ~/repos/LbdInternal/rm2-stuff
 nix build .#dev-cross
 ```
 
-This cross-compiles for armv7l. Outputs are in `result/`:
-- `result/bin/rm2fb_server` — server executable
-- `result/lib/librm2fb_server.so` — server shared library (the actual code runs here via LD_PRELOAD)
-- `result/lib/librm2fb_client.so.1.1.0` — client library for apps like yaft
-
-### Deploy to Device
-
+### Deploy
 ```sh
-# Copy and fix ELF metadata for device
+# Prepare binaries
 cp result/lib/librm2fb_server.so /tmp/librm2fb_server.so
 cp result/lib/librm2fb_client.so.1.1.0 /tmp/librm2fb_client.so
 cp result/bin/rm2fb_server /tmp/rm2fb_server_exe
@@ -40,64 +60,85 @@ nix shell nixpkgs#patchelf -c bash -c '
 scp /tmp/rm2fb_server_exe root@10.11.99.1:/opt/bin/rm2fb_server
 scp /tmp/librm2fb_server.so root@10.11.99.1:/opt/lib/librm2fb_server.so
 scp /tmp/librm2fb_client.so root@10.11.99.1:/opt/lib/librm2fb_client.so.1.1.0
-
-# Fix libevdev dependency (one-time)
-ssh root@10.11.99.1 'ln -sf /opt/lib/libevdev.so.2 /usr/lib/libevdev.so.2'
 ```
 
-### Test
+**CRITICAL**: The Version3.25 code runs in `librm2fb_server.so` (loaded via
+LD_PRELOAD into xochitl), NOT the rm2fb_server executable. Always deploy the library.
 
+### Restart after deploy
 ```sh
-ssh root@10.11.99.1
-systemctl stop xochitl
-systemctl start rm2fb
-LD_PRELOAD=/opt/lib/librm2fb_client.so.1.1.0 /opt/bin/yaft
+ssh root@10.11.99.1 'systemctl stop rm2fb; systemctl reset-failed rm2fb; systemctl start rm2fb'
 ```
 
-Expected: yaft terminal visible on e-ink screen, keyboard input works.
+If the service crash-loops: `systemctl reset-failed rm2fb` before restarting.
 
-### Verify Display Updates
+## Viewing the Screen Remotely
+
+Cannot read display output from /dev/fb0 — SWTCON doesn't write there.
+Instead, verify display updates via:
 
 ```sh
-# LCDIF interrupt count should increase after each screen update
+# LCDIF interrupt count (increases ~50-90 per e-ink refresh)
 ssh root@10.11.99.1 'cat /proc/interrupts | grep lcdif'
 
+# Non-white pixels in shared framebuffer (0 = nothing displayed)
+ssh root@10.11.99.1 'dd if=/dev/shm/swtfb.01 bs=4096 count=1280 2>/dev/null | od -x | grep -cv "ffff.*ffff.*ffff.*ffff.*ffff.*ffff.*ffff.*ffff"'
+
 # Server logs
-ssh root@10.11.99.1 'journalctl -u rm2fb --no-pager -n 20'
+ssh root@10.11.99.1 'journalctl -u rm2fb --no-pager -n 30'
 ```
 
-## Key Technical Details
+## Debugging
 
-### Why LD_PRELOAD Mode
+```sh
+# Check what's running
+ssh root@10.11.99.1 'ps | grep -E "xochitl|yaft|rm2fb" | grep -v grep'
 
-In firmware 3.20-3.23, EPFramebufferSwtcon lived in libqsgepaper.so. The server
-could dlopen it and dlsym the update functions. In 3.25, EPFramebufferSwtcon is
-statically linked into xochitl. The libqsgepaper.so build ID is intentionally NOT
-mapped in Version.cpp so ServerExe falls through to the LD_PRELOAD path.
+# rm2fb runs as xochitl with LD_PRELOAD — look for:
+#   {xochitl} /opt/bin/rm2fb_server     <- rm2fb mode
+#   /usr/bin/xochitl --system           <- stock mode
 
-### IMPORTANT: Deploy the Library, Not Just the Executable
+# Read process memory (e.g. swtconData state)
+ssh root@10.11.99.1 'PID=$(ps | grep "{xochitl}" | grep -v grep | awk "{print \$1}"); cat /proc/$PID/maps | head -n 20'
 
-The rm2fb_server executable does `exec /usr/bin/xochitl` with
-`LD_PRELOAD=librm2fb_server.so`. The Version3.25.cpp code runs inside the
-**library**, not the executable. Always deploy both files.
+# SWTCON hardware status
+ssh root@10.11.99.1 'cat /sys/class/hwmon/hwmon1/temp0'
+```
 
-### Finding Addresses for New Firmware Versions
+## Architecture
 
-If a future firmware update changes addresses, use this process:
+Firmware 3.25 moved EPFramebufferSwtcon from libqsgepaper.so into xochitl
+(statically linked). The rm2fb server must use LD_PRELOAD mode.
 
-1. Extract xochitl: `scp root@10.11.99.1:/usr/bin/xochitl /tmp/xochitl`
-2. Get build ID: `readelf -n /tmp/xochitl`
-3. Find EPFramebuffer::instance(): search for "SWTCON initialized" string xref,
-   trace back to the function that calls `operator new(140)`
-4. Find actualUpdate: locate Fusion vtable (search for vtable entries near instance()),
-   vtable[23] contains the update dispatcher. actualUpdate is the first function it calls
-   after locking the mutex.
-5. Find processAndSignal: called immediately after actualUpdate in vtable[23].
-   Signature: no args, accesses swtconData global directly.
-6. Find swtconData pointer: global referenced by processAndSignal (stores at fixed address)
-7. Find singleton pointer: set by instance(), referenced by vtable[23]
+Display update pipeline:
+```
+yaft -> RGB565 shared FB -> rm2fb converts to Y8 gray + ARGB32
+     -> actualUpdate(0x57e6f0) creates UpdateMsgs
+     -> processAndSignal(0x57d5e4) wakes framegen
+     -> SWTCON -> LCDIF -> e-ink panel
+```
 
-Tools: Ghidra for full disassembly, or Python + capstone for targeted analysis:
+### Key Addresses (xochitl 3.25.1.1)
+```
+Build ID:          4dec15723de1c4ee431fd09079fc218d95cbe2b3
+instance():        0x583020
+actualUpdate:      0x57e6f0
+processAndSignal:  0x57d5e4
+shutdown:          0x7438F8
+singleton ptr:     0x01324090
+swtconData ptr:    0x013240E4
+queue mutex:       swtconData + 0x54
+futex word:        swtconData + 0x30
+```
+
+### Finding Addresses for Future Firmware
+
+1. `scp root@10.11.99.1:/usr/bin/xochitl /tmp/xochitl`
+2. `readelf -n /tmp/xochitl` — get build ID
+3. Search for "SWTCON initialized" string -> trace to `EPFramebuffer::instance()`
+4. Find Fusion vtable -> vtable[23] has the update dispatcher
+5. actualUpdate is called after locking mutex; processAndSignal is called after
+6. Use Ghidra or Python + capstone for disassembly:
 ```python
 from capstone import Cs, CS_ARCH_ARM, CS_MODE_THUMB
 cs = Cs(CS_ARCH_ARM, CS_MODE_THUMB)
@@ -108,9 +149,26 @@ for insn in cs.disasm(code, addr):
     print(f"  0x{insn.address:08x}: {insn.mnemonic} {insn.op_str}")
 ```
 
-### Allocation Sizes to Watch
+## Files Modified from Upstream
 
-These may change across firmware versions:
-- Gray buffer: `1404 * 1872 * 1 = 0x281ac0` (has been stable across versions)
+| File | Change |
+|------|--------|
+| `libs/rm2fb/Versions/Version3.25.cpp` | New — full 3.25 implementation |
+| `libs/rm2fb/Versions/Version.cpp` | 3.25 build ID + ELF PT_NOTE parsing |
+| `libs/rm2fb/Versions/Version.h` | Declared `version_3_25_0` |
+| `libs/rm2fb/PreloadHooks.h` | Added `Mmap` hook |
+| `libs/rm2fb/CMakeLists.txt` | Added Version3.25.cpp |
+
+### Allocation Sizes
+- Gray buffer: `1404 * 1872 * 1 = 0x281ac0` (stable across versions)
 - ARGB buffer: `1404 * 1872 * 4 = 0xa06b00` (new in 3.25)
 - /dev/fb0 mmap: `0x17BD800` (may vary)
+
+## Device State
+
+- Firmware: 3.25.1.1
+- Auto-updates disabled (fakeupdateengine installed)
+- libevdev symlink: `/usr/lib/libevdev.so.2 -> /opt/lib/libevdev.so.2`
+- SSH key: `/home/root/.ssh/id_dropbear` (ed25519)
+- Helper script: `/opt/bin/terminal`
+- README on device: `/opt/README-rm2fb-3.25.md`
