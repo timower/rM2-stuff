@@ -7,6 +7,7 @@ Upstream PR: https://github.com/timower/rM2-stuff/pull/50
 
 ```sh
 ssh root@10.11.99.1          # USB connection (password on Settings > General > Help)
+ssh root@192.168.1.168        # WiFi connection
 ```
 
 The device runs BusyBox — many GNU flags don't work:
@@ -25,6 +26,19 @@ nohup terminal &              # survives SSH disconnect
 
 The `terminal` script at `/opt/bin/terminal` stops xochitl, starts rm2fb, runs yaft,
 and restores xochitl on exit.
+
+## Type Folio Keyboard
+
+The Type Folio has no physical `[` or `]` keys. The pogo driver's default keymap
+already maps CapsLock to Escape — no hwdb remap needed.
+
+**WARNING:** Do NOT use udev hwdb `KEYBOARD_KEY_xx` entries for the Type Folio.
+The Type Folio is a matrix keyboard (bus=0019, vendor=2EDD, product=0001) and
+hwdb scancodes are matrix indices, not AT scancodes. Using AT scancode `3a`
+(CapsLock on normal keyboards) actually remaps KEY_4's matrix position, breaking
+the 4 key. The hwdb remap was removed after discovering this.
+
+Other useful keys: Fn + `-` = `=`, Fn + 9 = `[`, Fn + 0 = `]`.
 
 ## SSH from Device
 
