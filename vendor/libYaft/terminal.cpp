@@ -21,7 +21,7 @@ erase_cell(struct terminal_t* term, int y, int x) {
   cellp->width = HALF;
   cellp->has_pixmap = false;
 
-  term->line_dirty[y] = true;
+  mark_col_dirty(term, y, x);
 }
 
 void
@@ -41,7 +41,10 @@ copy_cell(struct terminal_t* term, int dst_y, int dst_x, int src_y, int src_x) {
       *(dst + 1) = *src;
       (dst + 1)->width = NEXT_TO_WIDE;
     }
-    term->line_dirty[dst_y] = true;
+    mark_col_dirty(term, dst_y, dst_x);
+    if (src->width == WIDE) {
+      mark_col_dirty(term, dst_y, dst_x + 1);
+    }
   }
 }
 
@@ -79,12 +82,13 @@ set_cell(struct terminal_t* term,
 
   cellp = &term->cells[y][x];
   *cellp = cell;
-  term->line_dirty[y] = true;
+  mark_col_dirty(term, y, x);
 
   if (cell.width == WIDE && x + 1 < term->cols) {
     cellp = &term->cells[y][x + 1];
     *cellp = cell;
     cellp->width = NEXT_TO_WIDE;
+    mark_col_dirty(term, y, x + 1);
     return WIDE;
   }
 
@@ -114,7 +118,7 @@ scroll(struct terminal_t* term, int from, int to, int offset) {
   logging(DEBUG, "scroll from:%d to:%d offset:%d\n", from, to, offset);
 
   for (int y = from; y <= to; y++)
-    term->line_dirty[y] = true;
+    mark_line_full_dirty(term, y);
 
   abs_offset = abs(offset);
   scroll_lines = (to - from + 1) - abs_offset;
@@ -352,7 +356,7 @@ reset(struct terminal_t* term) {
       else
         term->tabstop[col] = false;
     }
-    term->line_dirty[line] = true;
+    mark_line_full_dirty(term, line);
   }
 
   reset_esc(term);
@@ -362,12 +366,14 @@ reset(struct terminal_t* term) {
 void
 redraw(struct terminal_t* term) {
   for (int i = 0; i < term->lines; i++)
-    term->line_dirty[i] = true;
+    mark_line_full_dirty(term, i);
 }
 
 void
 term_die(struct terminal_t* term) {
   free(term->line_dirty);
+  free(term->col_dirty_min);
+  free(term->col_dirty_max);
   free(term->tabstop);
   free(term->esc.buf);
   free(term->sixel.pixmap);
@@ -390,6 +396,16 @@ term_init(struct terminal_t* term, int width, int height) {
 
   /* allocate memory */
   term->line_dirty = (bool*)ecalloc(term->lines, sizeof(bool));
+  term->col_dirty_min = (int*)malloc(term->lines * sizeof(int));
+  term->col_dirty_max = (int*)malloc(term->lines * sizeof(int));
+  if (term->col_dirty_min) {
+    for (int i = 0; i < term->lines; i++)
+      term->col_dirty_min[i] = -1;
+  }
+  if (term->col_dirty_max) {
+    for (int i = 0; i < term->lines; i++)
+      term->col_dirty_max[i] = -1;
+  }
   term->tabstop = (bool*)ecalloc(term->cols, sizeof(bool));
   term->esc.buf = (char*)ecalloc(1, term->esc.size);
   term->sixel.pixmap = (uint8_t*)ecalloc(width * height, BYTES_PER_PIXEL);
@@ -399,8 +415,8 @@ term_init(struct terminal_t* term, int width, int height) {
   for (int i = 0; i < term->lines; i++)
     term->cells[i] = (struct cell_t*)ecalloc(term->cols, sizeof(struct cell_t));
 
-  if (!term->line_dirty || !term->tabstop || !term->cells || !term->esc.buf ||
-      !term->sixel.pixmap) {
+  if (!term->line_dirty || !term->col_dirty_min || !term->col_dirty_max ||
+      !term->tabstop || !term->cells || !term->esc.buf || !term->sixel.pixmap) {
     term_die(term);
     return false;
   }

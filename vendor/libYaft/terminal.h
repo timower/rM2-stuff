@@ -1,5 +1,7 @@
 #pragma once
 
+#include "yaft.h"
+
 #ifdef __cplusplus
 
 #include <cstdint>
@@ -9,6 +11,29 @@ extern "C" {
 
 #define X_MARGIN 2
 #define Y_MARGIN 2
+
+static inline void
+mark_col_dirty(struct terminal_t* term, int y, int x) {
+  term->line_dirty[y] = true;
+  if (term->col_dirty_min[y] < 0 || x < term->col_dirty_min[y])
+    term->col_dirty_min[y] = x;
+  if (term->col_dirty_max[y] < 0 || x > term->col_dirty_max[y])
+    term->col_dirty_max[y] = x;
+}
+
+static inline void
+mark_line_full_dirty(struct terminal_t* term, int y) {
+  term->line_dirty[y] = true;
+  term->col_dirty_min[y] = 0;
+  term->col_dirty_max[y] = term->cols - 1;
+}
+
+static inline void
+clear_line_dirty(struct terminal_t* term, int y) {
+  term->line_dirty[y] = false;
+  term->col_dirty_min[y] = -1;
+  term->col_dirty_max[y] = -1;
+}
 
 /* See LICENSE for licence details. */
 void

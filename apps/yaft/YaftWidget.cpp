@@ -17,7 +17,7 @@
 using namespace rmlib;
 
 namespace {
-const char* termName = "yaft-256color";
+const char* termName = "xterm-256color";
 
 AppContext* globalCtx = nullptr;
 

@@ -100,7 +100,7 @@ ScreenRenderObject::doDraw(rmlib::Canvas& canvas) {
   auto& term = *widget->term;
 
   if ((term.mode & MODE_CURSOR) != 0U) {
-    term.line_dirty[term.cursor.y] = true;
+    mark_col_dirty(&term, term.cursor.y, term.cursor.x);
   }
 
   Rect currentRect;
@@ -151,7 +151,11 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
   int zStart = isLandscape ? term.height - (term.marginTop + line * CELL_HEIGHT)
                            : term.marginTop + line * CELL_HEIGHT;
 
-  for (int col = 0; col < term.cols; col++) {
+  int colStart = (term.col_dirty_min[line] >= 0) ? term.col_dirty_min[line] : 0;
+  int colEnd = (term.col_dirty_max[line] >= 0) ? term.col_dirty_max[line] + 1
+                                                : term.cols;
+
+  for (int col = colStart; col < colEnd; col++) {
     int marginLeft = term.marginLeft + col * CELL_WIDTH;
 
     auto& cell = term.cells[line][col];
@@ -247,14 +251,18 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
     }
   }
 
-  term.line_dirty[line] =
-    ((term.mode & MODE_CURSOR) != 0u) && term.cursor.y == line;
+  clear_line_dirty(&term, line);
+  if (((term.mode & MODE_CURSOR) != 0u) && term.cursor.y == line) {
+    mark_col_dirty(&term, line, term.cursor.x);
+  }
 
-  const auto size = this->getSize();
+  int pixelLeft = term.marginLeft + colStart * CELL_WIDTH;
+  int pixelRight = term.marginLeft + colEnd * CELL_WIDTH - 1;
   return isLandscape
-           ? Rect{ { zStart - CELL_HEIGHT, 0 }, { zStart, size.height - 1 } }
-           : Rect{ { 0, zStart },
-                   { size.width - 1, zStart + CELL_HEIGHT - 1 } };
+           ? Rect{ { zStart - CELL_HEIGHT, pixelLeft },
+                   { zStart, pixelRight } }
+           : Rect{ { pixelLeft, zStart },
+                   { pixelRight, zStart + CELL_HEIGHT - 1 } };
 }
 
 template<typename Ev>

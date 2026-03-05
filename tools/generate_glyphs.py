@@ -67,16 +67,25 @@ def font_has_glyph(font, code):
         return False
 
 
+SUPERSAMPLE = 4  # Render at 4x resolution for better 1-bit conversion
+THRESHOLD = 96   # Lower threshold preserves thin strokes and diagonal detail
+
+
 def find_best_size(font_path, target_width=CELL_WIDTH, target_height=CELL_HEIGHT):
-    """Find the largest point size fitting within the cell."""
-    best = 8
-    for size in range(8, 40):
+    """Find the largest point size fitting within the cell.
+
+    Sizes are measured at supersample resolution, so we find the largest
+    size where the glyph fits within target * SUPERSAMPLE pixels.
+    """
+    ss = SUPERSAMPLE
+    best = 8 * ss
+    for size in range(8 * ss, 40 * ss):
         font = ImageFont.truetype(font_path, size)
         bbox = font.getbbox("M")
         w = bbox[2] - bbox[0]
         ascent, descent = font.getmetrics()
         total_h = ascent + descent
-        if w <= target_width and total_h <= target_height:
+        if w <= target_width * ss and total_h <= target_height * ss:
             best = size
         else:
             break
@@ -141,14 +150,23 @@ def extend_box_drawing_edges(bitmap, cell_w, cell_h):
 def rasterize_glyph(font, code, width):
     """Render a single glyph to a 1-bit bitmap array.
 
+    Renders at SUPERSAMPLE × resolution, then downscales to target size
+    using area averaging. Each target pixel becomes the average of an
+    SS×SS block — pixels above THRESHOLD become 1-bit foreground.
+    This produces much cleaner edges on curves and diagonals than
+    direct 1:1 rendering with a simple threshold.
+
     Returns list of 32 uint32_t values, or None if glyph is missing.
     """
+    ss = SUPERSAMPLE
     char = chr(code)
     cell_w = CELL_WIDTH * width
     cell_h = CELL_HEIGHT
+    hi_w = cell_w * ss
+    hi_h = cell_h * ss
 
-    # Create grayscale image
-    img = Image.new('L', (cell_w, cell_h), 0)
+    # Create high-res grayscale image
+    img = Image.new('L', (hi_w, hi_h), 0)
     draw = ImageDraw.Draw(img)
 
     # Get font metrics for baseline positioning
@@ -161,23 +179,28 @@ def rasterize_glyph(font, code, width):
 
     char_w = bbox[2] - bbox[0]
 
-    # Center horizontally
-    x_offset = (cell_w - char_w) // 2 - bbox[0]
+    # Center horizontally in high-res space
+    x_offset = (hi_w - char_w) // 2 - bbox[0]
 
-    # Baseline at ~75% of cell height (row 24 of 32)
-    baseline_target = int(cell_h * 0.75)
+    # Baseline at ~75% of cell height
+    baseline_target = int(hi_h * 0.75)
     y_offset = baseline_target - ascent
 
     draw.text((x_offset, y_offset), char, fill=255, font=font)
 
-    # Threshold to 1-bit
+    # Downsample: average each SS×SS block, then threshold
     pixels = img.load()
     bitmap = []
     for row in range(cell_h):
         val = 0
         for col in range(cell_w):
-            if pixels[col, row] >= 128:
-                # MSB = leftmost pixel
+            # Average the SS×SS block
+            total = 0
+            for dy in range(ss):
+                for dx in range(ss):
+                    total += pixels[col * ss + dx, row * ss + dy]
+            avg = total / (ss * ss)
+            if avg >= THRESHOLD:
                 bit_pos = (cell_w - 1) - col
                 val |= (1 << bit_pos)
         bitmap.append(val)
