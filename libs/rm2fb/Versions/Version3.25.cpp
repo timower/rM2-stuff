@@ -230,29 +230,38 @@ struct AddressInfo : public AddressInfoBase {
 
     const auto& fb = unistdpp::fatalOnError(SharedFB::getInstance());
     const auto* src = static_cast<const uint16_t*>(fb.mem.get());
-    const int numPixels = fb_width * fb_height;
 
-    // Convert RGB565 from shared FB → Y8 to gray buffer.
-    if (redirectedGray) {
-      auto* grayDst = static_cast<uint8_t*>(fb.getGrayBuffer());
-      for (int i = 0; i < numPixels; i++) {
-        uint16_t px = src[i];
-        uint32_t r = ((px >> 11) & 0x1F) * 255 / 31;
-        uint32_t g = ((px >> 5) & 0x3F) * 255 / 63;
-        uint32_t b = (px & 0x1F) * 255 / 31;
-        grayDst[i] = static_cast<uint8_t>((r * 77 + g * 150 + b * 29) >> 8);
-      }
+    // Clamp dirty rect to framebuffer bounds.
+    int x1 = params.x1, y1 = params.y1, x2 = params.x2, y2 = params.y2;
+    if (x1 < 0) x1 = 0;
+    if (y1 < 0) y1 = 0;
+    if (x2 >= fb_width) x2 = fb_width - 1;
+    if (y2 >= fb_height) y2 = fb_height - 1;
+    if (x1 > x2 || y1 > y2) {
+      // Empty or invalid rect — convert everything as fallback.
+      x1 = 0; y1 = 0; x2 = fb_width - 1; y2 = fb_height - 1;
     }
 
-    // Also convert RGB565 → ARGB32 (update function reads from both buffers).
-    if (pixelBuffer32 != nullptr) {
-      auto* argbDst = static_cast<uint32_t*>(pixelBuffer32);
-      for (int i = 0; i < numPixels; i++) {
-        uint16_t px = src[i];
-        uint32_t r = ((px >> 11) & 0x1F) * 255 / 31;
-        uint32_t g = ((px >> 5) & 0x3F) * 255 / 63;
-        uint32_t b = (px & 0x1F) * 255 / 31;
-        argbDst[i] = 0xFF000000 | (r << 16) | (g << 8) | b;
+    // Convert only the dirty rect from RGB565 → Y8 gray + ARGB32.
+    if (redirectedGray || pixelBuffer32 != nullptr) {
+      auto* grayDst = redirectedGray
+        ? static_cast<uint8_t*>(fb.getGrayBuffer()) : nullptr;
+      auto* argbDst = pixelBuffer32 != nullptr
+        ? static_cast<uint32_t*>(pixelBuffer32) : nullptr;
+
+      for (int y = y1; y <= y2; y++) {
+        int rowStart = y * fb_width + x1;
+        int rowEnd = y * fb_width + x2;
+        for (int i = rowStart; i <= rowEnd; i++) {
+          uint16_t px = src[i];
+          uint32_t r = ((px >> 11) & 0x1F) * 255 / 31;
+          uint32_t g = ((px >> 5) & 0x3F) * 255 / 63;
+          uint32_t b = (px & 0x1F) * 255 / 31;
+          if (grayDst != nullptr)
+            grayDst[i] = static_cast<uint8_t>((r * 77 + g * 150 + b * 29) >> 8);
+          if (argbDst != nullptr)
+            argbDst[i] = 0xFF000000 | (r << 16) | (g << 8) | b;
+        }
       }
     }
 

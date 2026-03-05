@@ -35,6 +35,19 @@ clear_line_dirty(struct terminal_t* term, int y) {
   term->col_dirty_max[y] = -1;
 }
 
+static inline bool
+cells_equal(const struct cell_t* a, const struct cell_t* b) {
+  return a->glyph.regularp == b->glyph.regularp &&
+         a->glyph.boldp == b->glyph.boldp &&
+         a->color_pair.fg == b->color_pair.fg &&
+         a->color_pair.bg == b->color_pair.bg &&
+         a->attribute == b->attribute &&
+         a->width == b->width &&
+         a->has_pixmap == b->has_pixmap &&
+         (!a->has_pixmap ||
+          memcmp(a->pixmap, b->pixmap, sizeof(a->pixmap)) == 0);
+}
+
 /* See LICENSE for licence details. */
 void
 erase_cell(struct terminal_t* term, int y, int x);

@@ -103,38 +103,34 @@ ScreenRenderObject::doDraw(rmlib::Canvas& canvas) {
     mark_col_dirty(&term, term.cursor.y, term.cursor.x);
   }
 
-  Rect currentRect;
+  const bool fullRefresh = shouldRefresh();
 
-  const auto maybeDraw = [&](bool last = false) {
-    if (currentRect.empty() || shouldRefresh()) {
-      return;
-    }
-
-    bool useA2 = widget->isLandscape
-                   ? term.lines * CELL_HEIGHT <= currentRect.width()
-                   : term.lines * CELL_HEIGHT <= currentRect.height();
-    fb->doUpdate(canvas.subCanvas(currentRect),
-                 useA2 ? fb::Waveform::A2 : fb::Waveform::DU,
-                 useA2 ? fb::UpdateFlags::None : fb::UpdateFlags::Priority);
-
-    currentRect = {};
-    numUpdates++;
-  };
+  // Render dirty lines and compute bounding box of all dirty regions.
+  // We send a single doUpdate() because the server converts the entire
+  // framebuffer on every call regardless of rect size.
+  Rect dirtyBounds;
 
   for (int line = 0; line < term.lines; line++) {
-    if (isFullDraw() || term.line_dirty[line]) {
-      currentRect |= drawLine(canvas, term, line);
-    } else {
-      maybeDraw();
-    }
-  }
-  maybeDraw(/* last */ true);
+    if (!isFullDraw() && !term.line_dirty[line])
+      continue;
 
-  if (shouldRefresh()) {
+    dirtyBounds |= drawLine(canvas, term, line);
+  }
+
+  if (fullRefresh) {
     term.shouldClear = false;
     numUpdates = 0;
-    // TODO: sync
     return { canvas.rect(), fb::Waveform::GC16, fb::UpdateFlags::FullRefresh };
+  }
+
+  if (!dirtyBounds.empty()) {
+    bool useA2 = widget->isLandscape
+                   ? term.lines * CELL_HEIGHT <= dirtyBounds.width()
+                   : term.lines * CELL_HEIGHT <= dirtyBounds.height();
+    fb->doUpdate(canvas.subCanvas(dirtyBounds),
+                 useA2 ? fb::Waveform::A2 : fb::Waveform::DU,
+                 useA2 ? fb::UpdateFlags::None : fb::UpdateFlags::Priority);
+    numUpdates++;
   }
 
   return {};

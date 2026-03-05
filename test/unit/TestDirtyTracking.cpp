@@ -33,6 +33,9 @@ TEST_CASE("Dirty tracking: erase_cell marks specific column", "[dirty]") {
 
   int testLine = 1;
   int testCol = 5;
+  // Write a character so the cell differs from erased state
+  set_cursor(&term, testLine, testCol);
+  addch(&term, 'A');
   clear_line_dirty(&term, testLine);
 
   erase_cell(&term, testLine, testCol);
@@ -49,8 +52,9 @@ TEST_CASE("Dirty tracking: copy_cell marks destination", "[dirty]") {
   REQUIRE(initTestTerm(term));
 
   int srcY = 0, srcX = 3, dstY = 2, dstX = 7;
-  // Set up a HALF-width source cell
-  erase_cell(&term, srcY, srcX);
+  // Write a character to source so it differs from erased destination
+  set_cursor(&term, srcY, srcX);
+  addch(&term, 'B');
   clear_line_dirty(&term, dstY);
 
   copy_cell(&term, dstY, dstX, srcY, srcX);
@@ -141,6 +145,13 @@ TEST_CASE("Dirty tracking: multiple modifications expand range", "[dirty]") {
   REQUIRE(initTestTerm(term));
 
   int testLine = 3;
+  // Write chars at cols 1, 2, 8 so erasing them actually changes content
+  set_cursor(&term, testLine, 1);
+  addch(&term, 'A');
+  set_cursor(&term, testLine, 2);
+  addch(&term, 'B');
+  set_cursor(&term, testLine, 8);
+  addch(&term, 'C');
   clear_line_dirty(&term, testLine);
 
   erase_cell(&term, testLine, 2);
@@ -163,7 +174,16 @@ TEST_CASE("Dirty tracking: clearing dirty resets range", "[dirty]") {
   REQUIRE(initTestTerm(term));
 
   int testLine = 2;
+  // Write chars so erasing actually changes content
+  set_cursor(&term, testLine, 3);
+  addch(&term, 'A');
+  set_cursor(&term, testLine, 5);
+  addch(&term, 'B');
+  clear_line_dirty(&term, testLine);
+
   erase_cell(&term, testLine, 5);
+
+  CHECK(term.line_dirty[testLine] == true);
   clear_line_dirty(&term, testLine);
 
   CHECK(term.line_dirty[testLine] == false);
@@ -200,6 +220,11 @@ TEST_CASE("Dirty tracking: edge columns 0 and cols-1", "[dirty]") {
   REQUIRE(initTestTerm(term));
 
   int testLine = 1;
+  // Write chars at edge columns so erasing changes content
+  set_cursor(&term, testLine, 0);
+  addch(&term, 'X');
+  set_cursor(&term, testLine, term.cols - 1);
+  addch(&term, 'Y');
   clear_line_dirty(&term, testLine);
 
   erase_cell(&term, testLine, 0);
@@ -259,6 +284,102 @@ TEST_CASE("Dirty tracking: mark_line_full_dirty helper", "[dirty]") {
   CHECK(term.line_dirty[testLine] == true);
   CHECK(term.col_dirty_min[testLine] == 0);
   CHECK(term.col_dirty_max[testLine] == term.cols - 1);
+
+  term_die(&term);
+}
+
+TEST_CASE("Dirty tracking: erase_cell on already-erased cell does NOT mark dirty",
+          "[dirty]") {
+  struct terminal_t term;
+  REQUIRE(initTestTerm(term));
+
+  int testLine = 1, testCol = 3;
+  // First erase to establish baseline
+  erase_cell(&term, testLine, testCol);
+  clear_line_dirty(&term, testLine);
+
+  // Second erase of same cell — should be a no-op
+  erase_cell(&term, testLine, testCol);
+
+  CHECK(term.line_dirty[testLine] == false);
+  CHECK(term.col_dirty_min[testLine] == -1);
+
+  term_die(&term);
+}
+
+TEST_CASE("Dirty tracking: addch with identical char does NOT mark dirty",
+          "[dirty]") {
+  struct terminal_t term;
+  REQUIRE(initTestTerm(term));
+
+  set_cursor(&term, 0, 0);
+  addch(&term, 'A');
+  clear_line_dirty(&term, 0);
+
+  // Write same char at same position
+  set_cursor(&term, 0, 0);
+  addch(&term, 'A');
+
+  CHECK(term.line_dirty[0] == false);
+  CHECK(term.col_dirty_min[0] == -1);
+
+  term_die(&term);
+}
+
+TEST_CASE("Dirty tracking: copy_cell to identical destination does NOT mark dirty",
+          "[dirty]") {
+  struct terminal_t term;
+  REQUIRE(initTestTerm(term));
+
+  int srcY = 0, srcX = 2, dstY = 1, dstX = 4;
+  // Copy once to make dst == src
+  copy_cell(&term, dstY, dstX, srcY, srcX);
+  clear_line_dirty(&term, dstY);
+
+  // Copy again — should be a no-op
+  copy_cell(&term, dstY, dstX, srcY, srcX);
+
+  CHECK(term.line_dirty[dstY] == false);
+  CHECK(term.col_dirty_min[dstY] == -1);
+
+  term_die(&term);
+}
+
+TEST_CASE("Dirty tracking: erase_cell with changed bce color DOES mark dirty",
+          "[dirty]") {
+  struct terminal_t term;
+  REQUIRE(initTestTerm(term));
+
+  int testLine = 2, testCol = 5;
+  erase_cell(&term, testLine, testCol);
+  clear_line_dirty(&term, testLine);
+
+  // Change background color (bce) and erase again
+  term.color_pair.bg = 4;
+  erase_cell(&term, testLine, testCol);
+
+  CHECK(term.line_dirty[testLine] == true);
+  CHECK(term.col_dirty_min[testLine] == testCol);
+
+  term_die(&term);
+}
+
+TEST_CASE("Dirty tracking: set_cell with different attribute DOES mark dirty",
+          "[dirty]") {
+  struct terminal_t term;
+  REQUIRE(initTestTerm(term));
+
+  set_cursor(&term, 0, 0);
+  addch(&term, 'X');
+  clear_line_dirty(&term, 0);
+
+  // Change attribute and write same char
+  term.attribute = ATTR_BOLD;
+  set_cursor(&term, 0, 0);
+  addch(&term, 'X');
+
+  CHECK(term.line_dirty[0] == true);
+  CHECK(term.col_dirty_min[0] == 0);
 
   term_die(&term);
 }

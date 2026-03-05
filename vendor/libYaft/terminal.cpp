@@ -12,15 +12,21 @@ extern "C" {
 void
 erase_cell(struct terminal_t* term, int y, int x) {
   struct cell_t* cellp;
+  struct cell_t erased;
 
   cellp = &term->cells[y][x];
-  cellp->glyph.regularp = term->glyph[DEFAULT_CHAR];
-  cellp->glyph.boldp = term->glyph[DEFAULT_CHAR];
-  cellp->color_pair = term->color_pair; /* bce */
-  cellp->attribute = ATTR_RESET;
-  cellp->width = HALF;
-  cellp->has_pixmap = false;
 
+  erased.glyph.regularp = term->glyph[DEFAULT_CHAR];
+  erased.glyph.boldp = term->glyph[DEFAULT_CHAR];
+  erased.color_pair = term->color_pair; /* bce */
+  erased.attribute = ATTR_RESET;
+  erased.width = HALF;
+  erased.has_pixmap = false;
+
+  if (cells_equal(cellp, &erased))
+    return;
+
+  *cellp = erased;
   mark_col_dirty(term, y, x);
 }
 
@@ -36,14 +42,22 @@ copy_cell(struct terminal_t* term, int dst_y, int dst_x, int src_y, int src_x) {
   } else if (src->width == WIDE && dst_x == (term->cols - 1)) {
     erase_cell(term, dst_y, dst_x);
   } else {
-    *dst = *src;
     if (src->width == WIDE) {
-      *(dst + 1) = *src;
-      (dst + 1)->width = NEXT_TO_WIDE;
-    }
-    mark_col_dirty(term, dst_y, dst_x);
-    if (src->width == WIDE) {
-      mark_col_dirty(term, dst_y, dst_x + 1);
+      struct cell_t next = *src;
+      next.width = NEXT_TO_WIDE;
+      if (!cells_equal(dst, src))  {
+        *dst = *src;
+        mark_col_dirty(term, dst_y, dst_x);
+      }
+      if (!cells_equal(dst + 1, &next)) {
+        *(dst + 1) = next;
+        mark_col_dirty(term, dst_y, dst_x + 1);
+      }
+    } else {
+      if (cells_equal(dst, src))
+        return;
+      *dst = *src;
+      mark_col_dirty(term, dst_y, dst_x);
     }
   }
 }
@@ -81,15 +95,25 @@ set_cell(struct terminal_t* term,
   cell.has_pixmap = false;
 
   cellp = &term->cells[y][x];
-  *cellp = cell;
-  mark_col_dirty(term, y, x);
 
   if (cell.width == WIDE && x + 1 < term->cols) {
+    struct cell_t next = cell;
+    next.width = NEXT_TO_WIDE;
+    if (!cells_equal(cellp, &cell)) {
+      *cellp = cell;
+      mark_col_dirty(term, y, x);
+    }
     cellp = &term->cells[y][x + 1];
-    *cellp = cell;
-    cellp->width = NEXT_TO_WIDE;
-    mark_col_dirty(term, y, x + 1);
+    if (!cells_equal(cellp, &next)) {
+      *cellp = next;
+      mark_col_dirty(term, y, x + 1);
+    }
     return WIDE;
+  }
+
+  if (!cells_equal(cellp, &cell)) {
+    *cellp = cell;
+    mark_col_dirty(term, y, x);
   }
 
   if (cell.width == HALF /* isolated NEXT_TO_WIDE cell */
