@@ -7,8 +7,11 @@ Upstream PR: https://github.com/timower/rM2-stuff/pull/50
 
 ```sh
 ssh root@10.11.99.1          # USB connection (password on Settings > General > Help)
-ssh root@192.168.1.168        # WiFi connection
+ssh root@192.168.1.168        # WiFi connection (fallback if USB IP doesn't work)
 ```
+
+If the USB IP (10.11.99.1) doesn't connect, use the WiFi IP (192.168.1.168) instead.
+The deploy/scp commands below use 10.11.99.1 but substitute 192.168.1.168 as needed.
 
 The device runs BusyBox — many GNU flags don't work:
 - `od -A n` → use `od -x`
@@ -86,6 +89,22 @@ ssh root@10.11.99.1 'systemctl stop rm2fb; systemctl reset-failed rm2fb; systemc
 
 If the service crash-loops: `systemctl reset-failed rm2fb` before restarting.
 
+### Quick Build-Deploy-Test Cycle
+```sh
+nix build .#dev-cross && \
+cp result/lib/librm2fb_server.so /tmp/librm2fb_server.so && \
+chmod +w /tmp/librm2fb_server.so && \
+nix shell nixpkgs#patchelf -c patchelf --set-rpath /opt/lib /tmp/librm2fb_server.so && \
+scp /tmp/librm2fb_server.so root@10.11.99.1:/opt/lib/librm2fb_server.so && \
+ssh root@10.11.99.1 'systemctl stop rm2fb; systemctl reset-failed rm2fb; systemctl start rm2fb'
+```
+
+### Screenshot (verify display output)
+```sh
+./scripts/screenshot_rm2.sh                         # saves to /tmp/rm2_screenshot.png, opens it
+./scripts/screenshot_rm2.sh out.png root@10.11.99.1 # custom output and host
+```
+
 ## Viewing the Screen Remotely
 
 Cannot read display output from /dev/fb0 — SWTCON doesn't write there.
@@ -126,11 +145,31 @@ Firmware 3.25 moved EPFramebufferSwtcon from libqsgepaper.so into xochitl
 
 Display update pipeline:
 ```
-yaft -> RGB565 shared FB -> rm2fb converts to Y8 gray + ARGB32
-     -> actualUpdate(0x57e6f0) creates UpdateMsgs
+yaft -> RGB565 shared FB -> rm2fb server converts RGB565→ARGB32 (+ Y8 gray)
+     -> actualUpdate(0x57e6f0) creates UpdateMsgs from ARGB32
      -> processAndSignal(0x57d5e4) wakes framegen
      -> SWTCON -> LCDIF -> e-ink panel
 ```
+
+### Buffer Requirements (actualUpdate)
+
+actualUpdate reads from the **ARGB32 buffer** for rendering. The gray buffer is used
+for dirty detection (current vs previous frame comparison). Key findings:
+
+- **ARGB32 is required** — actualUpdate does not render without it
+- **Gray buffer write can be skipped** when the client pre-populates it (GrayReady flag)
+- actualUpdate does NOT modify the gray buffer (confirmed by before/after comparison)
+- The GrayReady fast path (flag `0x8` in UpdateParams) skips the server's RGB565→Y8
+  conversion (~30% of the conversion loop work)
+
+### Canvas Rotation Caveat
+
+`getGrayCanvas()` returns an **unrotated** canvas (direct linear addressing), while
+drawing sub-canvases may have rotation applied via `Canvas::getPtr()`. In landscape
+mode, the same logical pixel maps to **different linear indices** in RGB565 vs Y8.
+This means Y8→ARGB32 expansion (using Y8 values to populate ARGB32) fails in
+landscape — the pixel positions don't correspond. The current approach writes Y8 at
+unrotated positions for the gray buffer and uses RGB565→ARGB32 for the ARGB buffer.
 
 ### Key Addresses (xochitl 3.25.1.1)
 ```
@@ -167,11 +206,26 @@ for insn in cs.disasm(code, addr):
 
 | File | Change |
 |------|--------|
-| `libs/rm2fb/Versions/Version3.25.cpp` | New — full 3.25 implementation |
+| `libs/rm2fb/Versions/Version3.25.cpp` | New — full 3.25 implementation with GrayReady fast path |
 | `libs/rm2fb/Versions/Version.cpp` | 3.25 build ID + ELF PT_NOTE parsing |
 | `libs/rm2fb/Versions/Version.h` | Declared `version_3_25_0` |
 | `libs/rm2fb/PreloadHooks.h` | Added `Mmap` hook |
 | `libs/rm2fb/CMakeLists.txt` | Added Version3.25.cpp |
+| `libs/rm2fb/Message.h` | Added `gray_prepopulated_flag = 0x8` to UpdateParams |
+| `libs/rMlib/include/FrameBuffer.h` | Added `GrayReady` flag, `getGrayCanvas()`, `canvasOffset()` |
+| `libs/rMlib/FrameBuffer.cpp` | Expanded mmap for Y8 gray buffer, `getGrayCanvas()` impl |
+| `apps/yaft/screen.cpp` | GrayReady flags, Y8 gray writes, cell-level dirty tracking |
+| `apps/yaft/screen.h` | Added `grayCanvas` member, updated `drawLine` signature |
+| `apps/yaft/YaftWidget.cpp` | 32ms debounce timer for batching terminal output |
+| `apps/yaft/YaftWidget.h` | Added `drawTimer`/`drawPending` members |
+
+### Performance: E-ink Refresh Batching
+
+The biggest performance lever is **minimizing panel refreshes** (each costs 50-250ms),
+not optimizing pixel conversion (1-5ms). yaft uses a 32ms debounce timer: terminal
+output is parsed immediately but `setState()` (triggering redraw + panel refresh) is
+deferred until 32ms of silence. This batches rapid output (e.g., scrolling, `ls`)
+into ~30 fps max instead of one refresh per pty read.
 
 ### Allocation Sizes
 - Gray buffer: `1404 * 1872 * 1 = 0x281ac0` (stable across versions)
@@ -240,8 +294,9 @@ During EPFramebuffer::instance() initialization, malloc/calloc hooks intercept:
 | `0xa06b00` (10,515,200) | 1404x1872x4 | ARGB32 buffer -> pointer captured |
 | `0x17BD800` (24,893,440) | /dev/fb0 mmap | Framebuffer -> pointer captured |
 
-The gray buffer redirect is the critical one — actualUpdate reads pixel data from it
-when building UpdateMsgs for the framegen thread.
+The gray buffer redirect allows clients to pre-populate Y8 data (GrayReady flag).
+actualUpdate primarily reads the **ARGB32 buffer** for rendering; the gray buffer is
+used for dirty detection (comparing current vs previous frame).
 
 ### Update Mechanism
 
