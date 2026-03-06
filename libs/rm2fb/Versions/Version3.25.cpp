@@ -242,25 +242,49 @@ struct AddressInfo : public AddressInfoBase {
       x1 = 0; y1 = 0; x2 = fb_width - 1; y2 = fb_height - 1;
     }
 
-    // Convert only the dirty rect from RGB565 → Y8 gray + ARGB32.
-    if (redirectedGray || pixelBuffer32 != nullptr) {
-      auto* grayDst = redirectedGray
-        ? static_cast<uint8_t*>(fb.getGrayBuffer()) : nullptr;
-      auto* argbDst = pixelBuffer32 != nullptr
-        ? static_cast<uint32_t*>(pixelBuffer32) : nullptr;
+    // actualUpdate reads from ARGB32 for rendering and uses the gray buffer
+    // for dirty detection (comparing current vs previous frame).
+    {
+      const bool grayReady =
+        (params.flags & UpdateParams::gray_prepopulated_flag) != 0;
 
-      for (int y = y1; y <= y2; y++) {
-        int rowStart = y * fb_width + x1;
-        int rowEnd = y * fb_width + x2;
-        for (int i = rowStart; i <= rowEnd; i++) {
-          uint16_t px = src[i];
-          uint32_t r = ((px >> 11) & 0x1F) * 255 / 31;
-          uint32_t g = ((px >> 5) & 0x3F) * 255 / 63;
-          uint32_t b = (px & 0x1F) * 255 / 31;
-          if (grayDst != nullptr)
-            grayDst[i] = static_cast<uint8_t>((r * 77 + g * 150 + b * 29) >> 8);
-          if (argbDst != nullptr)
+      if (grayReady && pixelBuffer32 != nullptr) {
+        // GrayReady fast path: client wrote Y8 to gray buffer (albeit at
+        // unrotated positions — rotation mismatch means we can't use Y8
+        // directly). Skip redundant gray write; only do RGB565→ARGB32.
+        auto* argbDst = static_cast<uint32_t*>(pixelBuffer32);
+
+        for (int y = y1; y <= y2; y++) {
+          int rowStart = y * fb_width + x1;
+          int rowEnd = y * fb_width + x2;
+          for (int i = rowStart; i <= rowEnd; i++) {
+            uint16_t px = src[i];
+            uint32_t r = ((px >> 11) & 0x1F) * 255 / 31;
+            uint32_t g = ((px >> 5) & 0x3F) * 255 / 63;
+            uint32_t b = (px & 0x1F) * 255 / 31;
             argbDst[i] = 0xFF000000 | (r << 16) | (g << 8) | b;
+          }
+        }
+      } else {
+        // Legacy path: convert RGB565 → Y8 gray + ARGB32.
+        auto* grayDst = redirectedGray
+          ? static_cast<uint8_t*>(fb.getGrayBuffer()) : nullptr;
+        auto* argbDst = pixelBuffer32 != nullptr
+          ? static_cast<uint32_t*>(pixelBuffer32) : nullptr;
+
+        for (int y = y1; y <= y2; y++) {
+          int rowStart = y * fb_width + x1;
+          int rowEnd = y * fb_width + x2;
+          for (int i = rowStart; i <= rowEnd; i++) {
+            uint16_t px = src[i];
+            uint32_t r = ((px >> 11) & 0x1F) * 255 / 31;
+            uint32_t g = ((px >> 5) & 0x3F) * 255 / 63;
+            uint32_t b = (px & 0x1F) * 255 / 31;
+            if (grayDst != nullptr)
+              grayDst[i] = static_cast<uint8_t>((r * 77 + g * 150 + b * 29) >> 8);
+            if (argbDst != nullptr)
+              argbDst[i] = 0xFF000000 | (r << 16) | (g << 8) | b;
+          }
         }
       }
     }

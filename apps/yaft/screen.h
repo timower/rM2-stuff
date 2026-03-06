@@ -42,7 +42,8 @@ protected:
   void doHandleInput(const rmlib::input::Event& ev) final;
 
 private:
-  rmlib::Rect drawLine(rmlib::Canvas& canvas, terminal_t& term, int line) const;
+  rmlib::Rect drawLine(rmlib::Canvas& canvas, terminal_t& term, int line,
+                       rmlib::Point grayOffset) const;
   template<typename Ev>
   void handleTouchEvent(const Ev& ev);
 
@@ -54,4 +55,5 @@ private:
   rmlib::Point lastMousePos;
 
   const rmlib::fb::FrameBuffer* fb = nullptr;
+  mutable rmlib::Canvas grayCanvas;
 };

@@ -14,13 +14,13 @@ myCeil(int val, int div) {
   return (val + div - 1) / div;
 }
 
-inline uint16_t
+inline uint8_t
 color2brightness(uint32_t color) {
   int r = 0xFF & (color >> (BITS_PER_RGB * 2));
   int g = 0xFF & (color >> BITS_PER_RGB);
   int b = 0xFF & (color >> 0);
 
-  return (54 * r + 182 * g + 19 * b) / 255;
+  return static_cast<uint8_t>((r * 77 + g * 150 + b * 29) >> 8);
 }
 
 enum GrayMode {
@@ -30,7 +30,7 @@ enum GrayMode {
 };
 
 GrayMode
-brightness2gray(uint16_t brightness) {
+brightness2gray(uint8_t brightness) {
   if (brightness <= 85) {
     return Black;
   }
@@ -105,6 +105,11 @@ ScreenRenderObject::doDraw(rmlib::Canvas& canvas) {
 
   const bool fullRefresh = shouldRefresh();
 
+  // The canvas passed to doDraw is a sub-canvas offset from the framebuffer
+  // base. grayCanvas covers the full gray buffer. Compute the offset so
+  // drawLine can write Y8 pixels at the correct position.
+  const Point grayOffset = fb->canvasOffset(canvas);
+
   // Render dirty lines and compute bounding box of all dirty regions.
   // We send a single doUpdate() because the server converts the entire
   // framebuffer on every call regardless of rect size.
@@ -114,13 +119,15 @@ ScreenRenderObject::doDraw(rmlib::Canvas& canvas) {
     if (!isFullDraw() && !term.line_dirty[line])
       continue;
 
-    dirtyBounds |= drawLine(canvas, term, line);
+    dirtyBounds |= drawLine(canvas, term, line, grayOffset);
   }
 
   if (fullRefresh) {
     term.shouldClear = false;
     numUpdates = 0;
-    return { canvas.rect(), fb::Waveform::GC16, fb::UpdateFlags::FullRefresh };
+    return { canvas.rect(), fb::Waveform::GC16,
+             static_cast<fb::UpdateFlags>(fb::UpdateFlags::FullRefresh |
+                                          fb::UpdateFlags::GrayReady) };
   }
 
   if (!dirtyBounds.empty()) {
@@ -129,7 +136,9 @@ ScreenRenderObject::doDraw(rmlib::Canvas& canvas) {
                    : term.lines * CELL_HEIGHT <= dirtyBounds.height();
     fb->doUpdate(canvas.subCanvas(dirtyBounds),
                  useA2 ? fb::Waveform::A2 : fb::Waveform::DU,
-                 useA2 ? fb::UpdateFlags::None : fb::UpdateFlags::Priority);
+                 static_cast<fb::UpdateFlags>(
+                   (useA2 ? fb::UpdateFlags::None : fb::UpdateFlags::Priority) |
+                   fb::UpdateFlags::GrayReady));
     numUpdates++;
   }
 
@@ -139,7 +148,8 @@ ScreenRenderObject::doDraw(rmlib::Canvas& canvas) {
 rmlib::Rect
 ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
                              terminal_t& term,
-                             int line) const {
+                             int line,
+                             rmlib::Point grayOffset) const {
 
   const bool isLandscape = widget->isLandscape;
 
@@ -227,22 +237,24 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
             ? fgGray
             : bgGray;
 
-        int pixel = 0;
+        // SWTCON Y8: 0xFF = bright (white paper), 0x00 = dark (black ink).
+        // Invert terminal brightness so dark bg → white paper, bright fg → dark ink.
+        uint8_t y8;
         switch (grayMode) {
           case White:
-            pixel = 0; // 0xFFFF;
+            y8 = 0x00;
             break;
           case Dither:
-            pixel = (h % 2) == (w % 2) ? 0x0 : 0xFFFF;
+            y8 = ((h % 2) == (w % 2)) ? 0x00 : 0xFF;
             break;
           case Black:
-            pixel = 0xFFFF; // 0;
+            y8 = 0xFF;
             break;
         }
 
-        // We only care about rgb555, as we assume that format above.
-        // So do a direct assign instead of memcpy.
-        canvas.setPixel(pos, pixel);
+        grayCanvas.setPixel(
+          { pos.x + grayOffset.x, pos.y + grayOffset.y }, y8);
+        canvas.setPixel(pos, y8 == 0x00 ? 0x0 : 0xFFFF);
       }
     }
   }
@@ -340,4 +352,5 @@ void
 ScreenRenderObject::doRebuild(AppContext& ctx,
                               const BuildContext& /*buildContext*/) {
   this->fb = &ctx.getFramebuffer();
+  this->grayCanvas = ctx.getFramebuffer().getGrayCanvas();
 }

@@ -9,6 +9,7 @@
 
 struct UpdateParams {
   static constexpr auto ioctl_waveform_flag = 0xf000;
+  static constexpr auto gray_prepopulated_flag = 0x8;
 
   int y1;
   int x1;
