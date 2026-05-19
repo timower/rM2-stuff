@@ -1,5 +1,5 @@
 {
-  inputs.nixpkgs.url = "nixpkgs/nixos-unstable";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
 
   nixConfig = {
     extra-substituters = [ "https://rm2-stuff.cachix.org" ];
