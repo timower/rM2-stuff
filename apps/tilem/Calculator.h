@@ -13,7 +13,7 @@ class CalcState;
 
 class Calculator : public rmlib::StatefulWidget<Calculator> {
 public:
-  Calculator(std::string romPath);
+  Calculator(std::string romPath, bool fullScreen = false);
 
   static CalcState createState();
 
@@ -22,6 +22,7 @@ private:
 
   std::string romPath;
   std::string savePath;
+  bool fullScreen;
 };
 
 class CalcState : public rmlib::StateBase<Calculator> {
@@ -38,10 +39,15 @@ public:
                  fontSize);
   }
 
-  static auto header(rmlib::AppContext& context, int width) {
+  rmlib::DynamicWidget header(rmlib::AppContext& context, int width) const {
     using namespace rmlib;
 
     constexpr auto font_size = 48;
+
+    if (getWidget().fullScreen) {
+      return Sized(Colored(white), width, std::nullopt);
+    }
+
     // TODO: expand option
     return Border(
       Row(Sized(Text("TilEm", font_size), width - font_size - 2, std::nullopt),
@@ -53,16 +59,22 @@ public:
              const rmlib::BuildContext& buildCtx) const {
     using namespace rmlib;
 
-    constexpr auto scale = 6.5;
-    constexpr auto width = scale * 96;
-    constexpr auto height = scale * 64;
+    constexpr auto default_width = 96;
+    constexpr auto default_height = 64;
 
-    return Cleared(
-      Center(Rotated(rotation,
-                     Border(Column(header(context, width),
-                                   Sized(Screen(mCalc), width, height),
-                                   Sized(Keypad(mCalc), width, std::nullopt)),
-                            Insets::all(1)))));
+    const auto scale = getWidget().fullScreen
+                         ? double(context.getFbCanvas().width()) / default_width
+                         : 6.5;
+    const auto width = std::floor(scale * default_width);
+    const auto height = std::floor(scale * default_height);
+
+    return Cleared(Center(
+      Rotated(rotation,
+              Border(Column(header(context, width),
+                            Sized(Screen(mCalc), width, height),
+                            Expanded(Sized(Keypad(mCalc), width, std::nullopt),
+                                     getWidget().fullScreen ? 1 : 0)),
+                     Insets::all(1)))));
   }
 
   ~CalcState();

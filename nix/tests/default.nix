@@ -87,6 +87,21 @@ rec {
     '';
   };
 
+  tilem-full = mkTest {
+    modules = [
+      ../modules/remarkable.nix
+      ../template/config.nix
+      { programs.tilem.fullscreen = true; }
+    ];
+    testScript = ''
+      wait_for "startup.png"
+      tap_at 644 1064
+      wait_for "tilem-full.png"
+
+      # tap_at 804 952
+    '';
+  };
+
   yaft-nouser = mkTest {
     modules = [
       ../modules/remarkable.nix

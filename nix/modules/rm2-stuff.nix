@@ -22,6 +22,7 @@ in
       };
       tilem = {
         enable = lib.mkEnableOption "Enable TilEm";
+        fullscreen = lib.mkEnableOption "Run in fullscreen mode";
       };
 
       rocket = {
@@ -57,7 +58,7 @@ in
         etc."draft/tilem.draft".text = ''
           name=TilEm
           desc=TI-84+ emulator
-          call=${lib.getExe' tilem "tilem"}
+          call=${lib.getExe' tilem "tilem"} ${lib.optionalString config.programs.tilem.fullscreen "--full"}
           term=:
           imgFile=tilem
         '';

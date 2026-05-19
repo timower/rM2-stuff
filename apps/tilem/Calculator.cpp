@@ -17,8 +17,10 @@ const auto tps = std::chrono::milliseconds(1000) / fps;
 
 } // namespace
 
-Calculator::Calculator(std::string romPath)
-  : romPath(romPath), savePath(romPath + calc_save_extension) {}
+Calculator::Calculator(std::string romPath, bool fullScreen)
+  : romPath(romPath)
+  , savePath(romPath + calc_save_extension)
+  , fullScreen(fullScreen) {}
 
 CalcState
 Calculator::createState() {

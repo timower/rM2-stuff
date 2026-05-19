@@ -11,10 +11,26 @@ main(int argc, char* argv[]) {
   const auto defaultRom = home == nullptr
                             ? std::string("/home/root/ti84plus.rom")
                             : std::string(home) + "/ti84plus.rom";
-  const auto* calcName = argc > 1 ? argv[1] : defaultRom.c_str();
+  const char* calcName = nullptr;
+  bool fullScreen = false;
+
+  for (int i = 1; i < argc; i++) {
+    if (argv[i] == std::string_view("--full")) {
+      fullScreen = true;
+    } else if (calcName == nullptr) {
+      calcName = argv[i];
+    } else {
+      std::cerr << "Too many arguments!\n";
+      return EXIT_FAILURE;
+    }
+  }
+
+  if (calcName == nullptr) {
+    calcName = defaultRom.c_str();
+  }
 
   unistdpp::fatalOnError(
-    runApp(Center(Navigator(tilem::Calculator(calcName)))));
+    runApp(Center(Navigator(tilem::Calculator(calcName, fullScreen)))));
 
   return EXIT_SUCCESS;
 }

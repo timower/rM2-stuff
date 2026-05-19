@@ -111,6 +111,11 @@ KeypadRenderObject::doLayout(const Constraints& constraints) {
   const auto height = std::clamp(keyHeight * int(widget->numRows),
                                  constraints.min.height,
                                  constraints.max.height);
+
+  // Set key size after clamping.
+  keyWidth = width / widget->maxRowSize;
+  keyHeight = height / widget->numRows;
+
   padding = int(constraints.max.width - (keyWidth * widget->maxRowSize));
 
   return { width, height };
