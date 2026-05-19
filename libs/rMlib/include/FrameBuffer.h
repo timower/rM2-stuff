@@ -10,7 +10,7 @@ namespace rmlib::fb {
 // Waveform ints that match rm2 'actual' updates
 enum class Waveform { DU = 0, GC16 = 1, GC16Fast = 2, A2 = 3 };
 
-enum UpdateFlags { None = 0, FullRefresh = 1, /*Sync = 2,*/ Priority = 4 };
+enum UpdateFlags { None = 0, FullRefresh = 1, /*Sync = 2,*/ Priority = 4, GrayReady = 8 };
 
 struct FrameBuffer {
   enum Type { rM1, Shim, rM2Stuff }; // NOLINT
@@ -63,16 +63,27 @@ struct FrameBuffer {
     doUpdate(canvas.rect(), Waveform::GC16Fast, UpdateFlags::None);
   }
 
+  Canvas getGrayCanvas() const;
+
+  /// Returns the (x,y) offset of a sub-canvas relative to the framebuffer origin.
+  Point canvasOffset(const Canvas& subCanvas) const {
+    std::ptrdiff_t memDiff = subCanvas.memory() - canvas.memory();
+    return { static_cast<int>(memDiff % canvas.lineSize()) / canvas.components(),
+             static_cast<int>(memDiff / canvas.lineSize()) };
+  }
+
   // members
   Type type;
   unistdpp::FD fd;
   Canvas canvas;
 
 private:
-  FrameBuffer(Type type, unistdpp::FD fd, Canvas canvas)
-    : type(type), fd(std::move(fd)), canvas(std::move(canvas)) {}
+  FrameBuffer(Type type, unistdpp::FD fd, Canvas canvas, size_t mmapSize)
+    : type(type), fd(std::move(fd)), canvas(std::move(canvas)), mmapSize(mmapSize) {}
 
   void close();
+
+  size_t mmapSize = 0;
 
   static ErrorOr<Type> detectType();
 };

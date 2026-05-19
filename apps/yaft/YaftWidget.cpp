@@ -17,7 +17,7 @@
 using namespace rmlib;
 
 namespace {
-const char* termName = "yaft-256color";
+const char* termName = "xterm-256color";
 
 AppContext* globalCtx = nullptr;
 
@@ -133,18 +133,24 @@ YaftState::init(rmlib::AppContext& ctx, const rmlib::BuildContext& /*unused*/) {
     std::exit(EXIT_FAILURE);
   }
 
-  ctx.listenFd(term->fd, [this] {
+  ctx.listenFd(term->fd, [this, &ctx] {
     std::array<char, 512> buf{};
     auto size = read(term->fd, buf.data(), buf.size());
+    if (size <= 0) return;
 
-    // Only update if the buffer isn't full. Otherwise more data is comming
-    // probably.
-    if (size != int(buf.size())) {
-      setState([&](auto& self) {
-        parse(self.term.get(), reinterpret_cast<uint8_t*>(buf.data()), size);
-      });
-    } else {
-      parse(term.get(), reinterpret_cast<uint8_t*>(buf.data()), size);
+    // Parse immediately — terminal state (cells, dirty flags) is updated.
+    parse(term.get(), reinterpret_cast<uint8_t*>(buf.data()), size);
+
+    // Debounce: schedule a draw after 32ms if not already pending.
+    // Batches rapid output into fewer panel refreshes (~30 fps max).
+    if (!drawPending) {
+      drawPending = true;
+      drawTimer = ctx.addTimer(
+        std::chrono::milliseconds(32),
+        [this] {
+          drawPending = false;
+          setState([](auto&) {}); // trigger redraw
+        });
     }
   });
 

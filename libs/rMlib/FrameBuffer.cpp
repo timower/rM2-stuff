@@ -74,23 +74,36 @@ FrameBuffer::open(std::optional<Size> requestedSize) {
   auto height = int(screeninfo.yres);
   auto stride = int(fixScreenInfo.line_length);
 
+  // For rM2Stuff, also map the Y8 grayscale buffer that follows the RGB565 region.
+  size_t mapSize = stride * height;
+  if (fbType == rM2Stuff) {
+    mapSize += width * height; // Y8: 1 byte per pixel
+  }
+
   auto* memory = static_cast<uint8_t*>(mmap(
-    nullptr, stride * height, PROT_READ | PROT_WRITE, MAP_SHARED, fd.fd, 0));
+    nullptr, mapSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd.fd, 0));
 
   if (memory == nullptr) {
     return Error::make("Error mapping fb");
   }
 
   Canvas canvas(memory, width, height, stride, components);
-  return FrameBuffer(fbType, std::move(fd), canvas);
+  return FrameBuffer(fbType, std::move(fd), canvas, mapSize);
 }
 
 void
 FrameBuffer::close() {
   if (canvas.memory() != nullptr && fd.isValid()) {
-    munmap(canvas.memory(), canvas.totalSize());
+    munmap(canvas.memory(), mmapSize);
   }
   canvas = Canvas{};
+}
+
+Canvas
+FrameBuffer::getGrayCanvas() const {
+  // Gray buffer starts immediately after the RGB565 data in shared memory.
+  auto* grayMem = canvas.memory() + canvas.totalSize();
+  return Canvas(grayMem, canvas.width(), canvas.height(), 1);
 }
 
 void

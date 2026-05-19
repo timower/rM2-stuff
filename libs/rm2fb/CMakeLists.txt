@@ -23,7 +23,8 @@ add_library(
   Versions/Version2.15.cpp
   Versions/Version3.5.cpp
   Versions/Version3.8.cpp
-  Versions/Version3.20.cpp)
+  Versions/Version3.20.cpp
+  Versions/Version3.25.cpp)
 
 target_include_directories(
   rm2fb_lib

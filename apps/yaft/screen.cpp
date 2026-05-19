@@ -14,13 +14,13 @@ myCeil(int val, int div) {
   return (val + div - 1) / div;
 }
 
-inline uint16_t
+inline uint8_t
 color2brightness(uint32_t color) {
   int r = 0xFF & (color >> (BITS_PER_RGB * 2));
   int g = 0xFF & (color >> BITS_PER_RGB);
   int b = 0xFF & (color >> 0);
 
-  return (54 * r + 182 * g + 19 * b) / 255;
+  return static_cast<uint8_t>((r * 77 + g * 150 + b * 29) >> 8);
 }
 
 enum GrayMode {
@@ -30,7 +30,7 @@ enum GrayMode {
 };
 
 GrayMode
-brightness2gray(uint16_t brightness) {
+brightness2gray(uint8_t brightness) {
   if (brightness <= 85) {
     return Black;
   }
@@ -100,41 +100,46 @@ ScreenRenderObject::doDraw(rmlib::Canvas& canvas) {
   auto& term = *widget->term;
 
   if ((term.mode & MODE_CURSOR) != 0U) {
-    term.line_dirty[term.cursor.y] = true;
+    mark_col_dirty(&term, term.cursor.y, term.cursor.x);
   }
 
-  Rect currentRect;
+  const bool fullRefresh = shouldRefresh();
 
-  const auto maybeDraw = [&](bool last = false) {
-    if (currentRect.empty() || shouldRefresh()) {
-      return;
-    }
+  // The canvas passed to doDraw is a sub-canvas offset from the framebuffer
+  // base. grayCanvas covers the full gray buffer. Compute the offset so
+  // drawLine can write Y8 pixels at the correct position.
+  const Point grayOffset = fb->canvasOffset(canvas);
 
-    bool useA2 = widget->isLandscape
-                   ? term.lines * CELL_HEIGHT <= currentRect.width()
-                   : term.lines * CELL_HEIGHT <= currentRect.height();
-    fb->doUpdate(canvas.subCanvas(currentRect),
-                 useA2 ? fb::Waveform::A2 : fb::Waveform::DU,
-                 useA2 ? fb::UpdateFlags::None : fb::UpdateFlags::Priority);
-
-    currentRect = {};
-    numUpdates++;
-  };
+  // Render dirty lines and compute bounding box of all dirty regions.
+  // We send a single doUpdate() because the server converts the entire
+  // framebuffer on every call regardless of rect size.
+  Rect dirtyBounds;
 
   for (int line = 0; line < term.lines; line++) {
-    if (isFullDraw() || term.line_dirty[line]) {
-      currentRect |= drawLine(canvas, term, line);
-    } else {
-      maybeDraw();
-    }
-  }
-  maybeDraw(/* last */ true);
+    if (!isFullDraw() && !term.line_dirty[line])
+      continue;
 
-  if (shouldRefresh()) {
+    dirtyBounds |= drawLine(canvas, term, line, grayOffset);
+  }
+
+  if (fullRefresh) {
     term.shouldClear = false;
     numUpdates = 0;
-    // TODO: sync
-    return { canvas.rect(), fb::Waveform::GC16, fb::UpdateFlags::FullRefresh };
+    return { canvas.rect(), fb::Waveform::GC16,
+             static_cast<fb::UpdateFlags>(fb::UpdateFlags::FullRefresh |
+                                          fb::UpdateFlags::GrayReady) };
+  }
+
+  if (!dirtyBounds.empty()) {
+    bool useA2 = widget->isLandscape
+                   ? term.lines * CELL_HEIGHT <= dirtyBounds.width()
+                   : term.lines * CELL_HEIGHT <= dirtyBounds.height();
+    fb->doUpdate(canvas.subCanvas(dirtyBounds),
+                 useA2 ? fb::Waveform::A2 : fb::Waveform::DU,
+                 static_cast<fb::UpdateFlags>(
+                   (useA2 ? fb::UpdateFlags::None : fb::UpdateFlags::Priority) |
+                   fb::UpdateFlags::GrayReady));
+    numUpdates++;
   }
 
   return {};
@@ -143,7 +148,8 @@ ScreenRenderObject::doDraw(rmlib::Canvas& canvas) {
 rmlib::Rect
 ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
                              terminal_t& term,
-                             int line) const {
+                             int line,
+                             rmlib::Point grayOffset) const {
 
   const bool isLandscape = widget->isLandscape;
 
@@ -151,7 +157,11 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
   int zStart = isLandscape ? term.height - (term.marginTop + line * CELL_HEIGHT)
                            : term.marginTop + line * CELL_HEIGHT;
 
-  for (int col = 0; col < term.cols; col++) {
+  int colStart = (term.col_dirty_min[line] >= 0) ? term.col_dirty_min[line] : 0;
+  int colEnd = (term.col_dirty_max[line] >= 0) ? term.col_dirty_max[line] + 1
+                                                : term.cols;
+
+  for (int col = colStart; col < colEnd; col++) {
     int marginLeft = term.marginLeft + col * CELL_WIDTH;
 
     auto& cell = term.cells[line][col];
@@ -227,34 +237,40 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
             ? fgGray
             : bgGray;
 
-        int pixel = 0;
+        // SWTCON Y8: 0xFF = bright (white paper), 0x00 = dark (black ink).
+        // Invert terminal brightness so dark bg → white paper, bright fg → dark ink.
+        uint8_t y8;
         switch (grayMode) {
           case White:
-            pixel = 0; // 0xFFFF;
+            y8 = 0x00;
             break;
           case Dither:
-            pixel = (h % 2) == (w % 2) ? 0x0 : 0xFFFF;
+            y8 = ((h % 2) == (w % 2)) ? 0x00 : 0xFF;
             break;
           case Black:
-            pixel = 0xFFFF; // 0;
+            y8 = 0xFF;
             break;
         }
 
-        // We only care about rgb555, as we assume that format above.
-        // So do a direct assign instead of memcpy.
-        canvas.setPixel(pos, pixel);
+        grayCanvas.setPixel(
+          { pos.x + grayOffset.x, pos.y + grayOffset.y }, y8);
+        canvas.setPixel(pos, y8 == 0x00 ? 0x0 : 0xFFFF);
       }
     }
   }
 
-  term.line_dirty[line] =
-    ((term.mode & MODE_CURSOR) != 0u) && term.cursor.y == line;
+  clear_line_dirty(&term, line);
+  if (((term.mode & MODE_CURSOR) != 0u) && term.cursor.y == line) {
+    mark_col_dirty(&term, line, term.cursor.x);
+  }
 
-  const auto size = this->getSize();
+  int pixelLeft = term.marginLeft + colStart * CELL_WIDTH;
+  int pixelRight = term.marginLeft + colEnd * CELL_WIDTH - 1;
   return isLandscape
-           ? Rect{ { zStart - CELL_HEIGHT, 0 }, { zStart, size.height - 1 } }
-           : Rect{ { 0, zStart },
-                   { size.width - 1, zStart + CELL_HEIGHT - 1 } };
+           ? Rect{ { zStart - CELL_HEIGHT, pixelLeft },
+                   { zStart, pixelRight } }
+           : Rect{ { pixelLeft, zStart },
+                   { pixelRight, zStart + CELL_HEIGHT - 1 } };
 }
 
 template<typename Ev>
@@ -336,4 +352,5 @@ void
 ScreenRenderObject::doRebuild(AppContext& ctx,
                               const BuildContext& /*buildContext*/) {
   this->fb = &ctx.getFramebuffer();
+  this->grayCanvas = ctx.getFramebuffer().getGrayCanvas();
 }

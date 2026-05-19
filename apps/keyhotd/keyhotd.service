@@ -1,0 +1,12 @@
+[Unit]
+Description=Keyboard Hotkey Daemon
+After=home.mount
+
+[Service]
+ExecStart=/opt/bin/keyhotd
+Restart=on-failure
+RestartSec=5
+Environment="HOME=/home/root"
+
+[Install]
+WantedBy=multi-user.target

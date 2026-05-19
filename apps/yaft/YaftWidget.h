@@ -95,4 +95,8 @@ private:
   rmlib::Rotation rotation = rmlib::Rotation::None;
   bool smallKeyboard = false;
   bool hideKeyboard = false;
+
+  // Debounce timer: batches rapid terminal output into fewer panel refreshes.
+  rmlib::TimerHandle drawTimer;
+  bool drawPending = false;
 };

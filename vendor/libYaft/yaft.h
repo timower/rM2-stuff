@@ -238,6 +238,8 @@ struct terminal_t {
   struct margin_t scroll; /* scroll margin */
   struct point_t cursor;  /* cursor pos (x, y) */
   bool* line_dirty;       /* dirty flag */
+  int* col_dirty_min;     /* leftmost dirty column, -1 if clean */
+  int* col_dirty_max;     /* rightmost dirty column, -1 if clean */
   bool* tabstop;          /* tabstop flag */
   enum term_mode mode;    /* for set/reset mode */
   bool wrap_occurred;     /* whether auto wrap occurred or not */

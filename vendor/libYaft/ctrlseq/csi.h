@@ -124,21 +124,33 @@ erase_display(struct terminal_t* term, struct parm_t* parm) {
     return;
 
   if (mode == 0) {
-    term->shouldClear = (term->cursor.y == 0) && (term->cursor.x == 0);
     for (i = term->cursor.y; i < term->lines; i++)
       for (j = 0; j < term->cols; j++)
         if (i > term->cursor.y || (i == term->cursor.y && j >= term->cursor.x))
           erase_cell(term, i, j);
+    if (term->cursor.y == 0 && term->cursor.x == 0) {
+      for (i = 0; i < term->lines; i++) {
+        if (term->line_dirty[i]) {
+          term->shouldClear = true;
+          break;
+        }
+      }
+    }
   } else if (mode == 1) {
     for (i = 0; i <= term->cursor.y; i++)
       for (j = 0; j < term->cols; j++)
         if (i < term->cursor.y || (i == term->cursor.y && j <= term->cursor.x))
           erase_cell(term, i, j);
   } else if (mode == 2) {
-    term->shouldClear = true;
     for (i = 0; i < term->lines; i++)
       for (j = 0; j < term->cols; j++)
         erase_cell(term, i, j);
+    for (i = 0; i < term->lines; i++) {
+      if (term->line_dirty[i]) {
+        term->shouldClear = true;
+        break;
+      }
+    }
   }
 }
 

@@ -21,7 +21,16 @@ using Ptr = T*;
     Ptr<void>(that),                                                           \
     int(width),                                                                \
     int(height),                                                               \
-    int(format))
+    int(format))                                                               \
+  X(Mmap,                                                                      \
+    Ptr<void>,                                                                 \
+    mmap,                                                                      \
+    Ptr<void>(addr),                                                           \
+    size_t(length),                                                            \
+    int(prot),                                                                 \
+    int(flags),                                                                \
+    int(fd),                                                                   \
+    off_t(offset))
 
 class PreloadHook {
   using HookTuple = std::tuple<

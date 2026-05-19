@@ -1,5 +1,7 @@
 #pragma once
 
+#include "yaft.h"
+
 #ifdef __cplusplus
 
 #include <cstdint>
@@ -9,6 +11,42 @@ extern "C" {
 
 #define X_MARGIN 2
 #define Y_MARGIN 2
+
+static inline void
+mark_col_dirty(struct terminal_t* term, int y, int x) {
+  term->line_dirty[y] = true;
+  if (term->col_dirty_min[y] < 0 || x < term->col_dirty_min[y])
+    term->col_dirty_min[y] = x;
+  if (term->col_dirty_max[y] < 0 || x > term->col_dirty_max[y])
+    term->col_dirty_max[y] = x;
+}
+
+static inline void
+mark_line_full_dirty(struct terminal_t* term, int y) {
+  term->line_dirty[y] = true;
+  term->col_dirty_min[y] = 0;
+  term->col_dirty_max[y] = term->cols - 1;
+}
+
+static inline void
+clear_line_dirty(struct terminal_t* term, int y) {
+  term->line_dirty[y] = false;
+  term->col_dirty_min[y] = -1;
+  term->col_dirty_max[y] = -1;
+}
+
+static inline bool
+cells_equal(const struct cell_t* a, const struct cell_t* b) {
+  return a->glyph.regularp == b->glyph.regularp &&
+         a->glyph.boldp == b->glyph.boldp &&
+         a->color_pair.fg == b->color_pair.fg &&
+         a->color_pair.bg == b->color_pair.bg &&
+         a->attribute == b->attribute &&
+         a->width == b->width &&
+         a->has_pixmap == b->has_pixmap &&
+         (!a->has_pixmap ||
+          memcmp(a->pixmap, b->pixmap, sizeof(a->pixmap)) == 0);
+}
 
 /* See LICENSE for licence details. */
 void
