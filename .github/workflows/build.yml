@@ -32,7 +32,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/toltec-dev/base:v3.3
+      image: ghcr.io/toltec-dev/base:v4.0
 
     steps:
       - name: Install Deps
