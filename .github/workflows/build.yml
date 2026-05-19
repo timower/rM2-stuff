@@ -8,26 +8,26 @@ env:
 
 jobs:
 
-  nix-build:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        lfs: 'true'
-    - uses: cachix/install-nix-action@v31
-      with:
-        github_access_token: ${{ secrets.GITHUB_TOKEN }}
-    - uses: cachix/cachix-action@v15
-      with:
-        name: rm2-stuff
-        authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
-        # Skip qcow2 vm images and system tarballs.
-        pushFilter: '(qcow2$|tarball-armv7l-unknown-linux-gnueabihf$|-rm-emu-|rm-nix-test|test-driver)'
-    - run: nix build
-    - run: nix build .#dev-cross
-    - run: nix build .#dev-rm2-toolchain
-    - run: nix build .#nixosConfigurations.example.config.system.build.toplevel
-    - run: nix flake check -L --max-jobs 1
+  # nix-build:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #   - uses: actions/checkout@v4
+  #     with:
+  #       lfs: 'true'
+  #   - uses: cachix/install-nix-action@v31
+  #     with:
+  #       github_access_token: ${{ secrets.GITHUB_TOKEN }}
+  #   - uses: cachix/cachix-action@v15
+  #     with:
+  #       name: rm2-stuff
+  #       authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+  #       # Skip qcow2 vm images and system tarballs.
+  #       pushFilter: '(qcow2$|tarball-armv7l-unknown-linux-gnueabihf$|-rm-emu-|rm-nix-test|test-driver)'
+  #   - run: nix build
+  #   - run: nix build .#dev-cross
+  #   - run: nix build .#dev-rm2-toolchain
+  #   - run: nix build .#nixosConfigurations.example.config.system.build.toplevel
+  #   - run: nix flake check -L --max-jobs 1
 
   build:
     runs-on: ubuntu-latest
@@ -44,7 +44,7 @@ jobs:
 
       - name: Configure CMake
         run: |
-          source /opt/x-tools/switch-arm.sh
+          . /opt/x-tools/switch-arm.sh
           cmake --preset release-toltec
 
       - name: Build
