@@ -43,7 +43,9 @@ jobs:
           lfs: 'true'
 
       - name: Configure CMake
-        run: cmake --preset release-toltec
+        run: |
+          source /opt/x-tools/switch-arm.sh
+          cmake --preset release-toltec
 
       - name: Build
         run: cmake --build build/release-toltec
