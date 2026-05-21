@@ -161,6 +161,17 @@ LauncherState::show() {
     return;
   }
 
+  const auto clientsOrErr = getWidget().ctlClient.getClients();
+  if (clientsOrErr) {
+    const auto it =
+      std::find_if(clientsOrErr->begin(),
+                   clientsOrErr->end(),
+                   [](const auto& client) { return client.active; });
+    lastActive = it == clientsOrErr->end() ? -1 : it->pid;
+  } else {
+    std::cerr << "Error getting clients: " << to_string(clientsOrErr.error())
+              << "\n";
+  }
   if (auto err = getWidget().ctlClient.switchTo(getpid()); !err) {
     std::cerr << "Error switching: " << to_string(err.error()) << "\n";
   }
@@ -172,13 +183,10 @@ LauncherState::hide(rmlib::AppContext* context) {
     return;
   }
 
-  // TODO:
-  // if (false) {
-  //   switchApp(*current);
-  // } else
-
-  // sleep?
-  if (context != nullptr) {
+  if (lastActive != -1) {
+    switchApp(lastActive);
+  } else if (context != nullptr) {
+    // sleep?
     startTimer(*context, 0);
   }
 }

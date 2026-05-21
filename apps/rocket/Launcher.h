@@ -96,7 +96,7 @@ public:
             kill(-getpgid(client.pid), SIGTERM);
           });
         },
-        client.active,
+        client.pid == lastActive,
         invert(rotation));
     }
     return Wrap(widgets);
@@ -199,4 +199,6 @@ private:
 
   bool modPressed = false;
   unistdpp::FD inhibitorLock;
+
+  pid_t lastActive = -1;
 };
