@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 project(qsgepaper-preload)
 
-add_executable(qsgepaper-test main.cpp)
+add_executable(qsgepaper-test main.cpp swtcon.cpp native_init.cpp)
 target_link_libraries(qsgepaper-test dl)
 
 install(
