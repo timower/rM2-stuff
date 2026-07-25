@@ -1,4 +1,5 @@
 #include "swtcon.h"
+#include <cerrno>
 #include <cstring>
 #include <dlfcn.h>
 #include <fcntl.h>
@@ -95,6 +96,119 @@ extern void* g_pLUTAddrNative;
 extern struct fb_var_screeninfo g_fbVarScreeninfoNative;
 extern struct fb_fix_screeninfo g_fbFixScreeninfoNative;
 
+// Forward declarations: implementations live later in this file, in the
+// "Re-implemented subroutines" section, but are needed by native_prime_display
+// below.
+int native_is_fb_blanked();
+void native_blank_fb();
+
+// Mirrors frame_buffer_addr (0x53fd0): address of frame slot `frame_idx`
+// within the mmap'd framebuffer (each slot is g_nFbSizeXNative bytes).
+static void*
+native_frame_buffer_addr(int frame_idx) {
+  return (uint8_t*)g_pFbAddrNative + (size_t)g_nFbSizeXNative * frame_idx;
+}
+
+// Mirrors upload_lut_to_frame_slot (0x53bc8): copies the full waveform LUT
+// table into one hardware-visible frame slot. The panel controller DMA-reads
+// the LUT straight out of the mapped framebuffer memory, so every frame slot
+// needs its own copy.
+static void
+native_upload_lut_to_frame_slot(void* dest) {
+  memcpy(dest, g_pLUTAddrNative, 0x165800);
+}
+
+// Path discovered once by native_init_temperature_sensor and reused by every
+// subsequent native_refresh_temperature_cache call.
+static std::string g_hwmonTempPathNative;
+
+// Mirrors refresh_temperature_cache (0x4681c): reads the hwmon sensor at the
+// discovered path (unconditionally, even if empty — matching the library,
+// which doesn't special-case a failed discovery here and just lets the open
+// fail with its own error message), subtracts the fixed 2.0C calibration
+// offset, and stores the result into the library's cached-temperature global
+// under its mutex. No-op if the read fails (leaves whatever value was cached
+// before).
+static void
+native_refresh_temperature_cache() {
+  int raw_value;
+  if (!native_read_temperature_raw(g_hwmonTempPathNative.c_str(), &raw_value))
+    return;
+
+  pthread_mutex_t* mutex = resolve_ptr<pthread_mutex_t*>(0x6d180); // g_dwTemperatureMutex
+  float* cached_temp = resolve_ptr<float*>(0x66e20);               // g_flCachedTemperature
+  pthread_mutex_lock(mutex);
+  *cached_temp = (float)raw_value - 2.0f;
+  pthread_mutex_unlock(mutex);
+}
+
+// Mirrors init_temperature_sensor (0x476dc): discovers the sy7636a_temperature
+// hwmon sysfs path once, then performs an initial cache refresh so
+// get_current_temperature has a valid reading before the display/worker
+// threads start.
+static void
+native_init_temperature_sensor() {
+  if (native_find_temperature_hwmon_path(&g_hwmonTempPathNative)) {
+    std::cout << "temperature_hwmon: found temperature path: "
+              << g_hwmonTempPathNative << std::endl;
+  } else {
+    std::cerr << "temperature_hwmon: failed to find path" << std::endl;
+  }
+  native_refresh_temperature_cache();
+}
+
+// Mirrors pan_and_unblank (0x53ebc): writes the given frame slot's yoffset
+// into the library's fb_var_screeninfo and issues FBIOPUT_VSCREENINFO, then
+// retries an FBIOBLANK unblank up to 5 times. If unblanking never succeeds,
+// falls back to a lightweight FBIOPAN_DISPLAY to the last frame slot as a
+// last resort (and still reports failure either way).
+static int
+native_pan_and_unblank(int frame_idx) {
+  int* g_nIsFbBlanked = resolve_ptr<int*>(0x6d448);
+  int* g_nFbFd = resolve_ptr<int*>(0x6d358);
+  auto* vinfo = resolve_ptr<struct fb_var_screeninfo*>(0x6d3a0);
+
+  if (*g_nIsFbBlanked == 0)
+    return 1;
+
+  vinfo->yoffset = frame_idx * vinfo->yres;
+  if (ioctl(*g_nFbFd, FBIOPUT_VSCREENINFO, vinfo) == -1) {
+    std::cerr << "Panning failed! start buffer = " << frame_idx << ", "
+              << strerror(errno) << std::endl;
+    return -1;
+  }
+
+  for (int retry = 5; retry > 0; retry--) {
+    if (ioctl(*g_nFbFd, FBIOBLANK, FB_BLANK_UNBLANK) != -1) {
+      *g_nIsFbBlanked = 0;
+      return 0;
+    }
+    std::cout << "FBIOBLANK failed (unblank)" << std::endl;
+  }
+
+  vinfo->yoffset = g_nFbSizeYNative * vinfo->yres;
+  if (ioctl(*g_nFbFd, FBIOPAN_DISPLAY, vinfo) == -1) {
+    std::cout << "Pan failed" << std::endl;
+  }
+  return -1;
+}
+
+// Mirrors prime_display (0x468f0). Called once from swtcon_init right after
+// g_nIsFbBlanked is forced to 1: briefly unblanks frame slot 16 so the panel
+// controller has a primed frame, refreshes the temperature cache, then
+// reblanks. Without this the frame counters are never seeded and the display
+// thread never produces a first visible refresh.
+static void
+native_prime_display() {
+  if (native_is_fb_blanked() == 0) {
+    native_refresh_temperature_cache();
+    return;
+  }
+  native_pan_and_unblank(16);
+  native_refresh_temperature_cache();
+  native_blank_fb();
+}
+
 uint16_t*
 swtcon_init() {
   load_lib();
@@ -102,10 +216,6 @@ swtcon_init() {
 
 #if 1
     // --- NATIVE INIT IMPLEMENTATION ---
-    auto dummy_func = resolve_ptr<void(*)(int)>(0x53fd0);
-    auto dummy_func2 = resolve_ptr<void(*)()>(0x53bc8);
-    auto dummy_func3 = resolve_ptr<void(*)()>(0x476dc);
-
     if (native_create_pid_file() != 0) return nullptr;
 
     if (native_init_statebuffer() != 0) return nullptr;
@@ -173,19 +283,19 @@ swtcon_init() {
     native_init_lut();
     *resolve_ptr<void**>(0x6d350) = g_pLUTAddrNative;
 
-    std::cout << "Calling dummy functions..." << std::endl;
-    for (int i = 0; i < 17; i++) {
-        dummy_func(i);
-        dummy_func2();
+    std::cout << "Uploading LUT to all frame slots..." << std::endl;
+    for (int i = 0; i < g_nFbSizeYNative; i++) {
+        native_upload_lut_to_frame_slot(native_frame_buffer_addr(i));
     }
-    dummy_func3();
+
+    native_init_temperature_sensor();
 
     // Prime the display exactly as qsgepaper_init does. init_framebuffer leaves
     // g_nIsFbBlanked = 1 (blanked); record the current wall-clock time in
     // g_time_var; init the display-timing mutex (0x6703c) used by the worker and
     // display threads to timestamp frame flushes; then run the priming sequence
-    // FUN_000468f0 (pan to frame 16, unblank, reblank). Without this the frame
-    // counters never get seeded and the worker streams frame 0 forever.
+    // native_prime_display (pan to frame 16, unblank, reblank). Without this the
+    // frame counters never get seeded and the worker streams frame 0 forever.
     *resolve_ptr<int*>(0x6d448) = 1; // g_nIsFbBlanked
 
     struct timeval tv;
@@ -197,7 +307,6 @@ swtcon_init() {
       resolve_ptr<pthread_mutex_t*>(0x6703c);
     pthread_mutex_init(g_display_timing_mutex, nullptr);
 
-    auto native_prime_display = resolve_ptr<void (*)()>(0x468f0); // FUN_000468f0
     native_prime_display();
 
     std::cout << "Starting threads natively..." << std::endl;

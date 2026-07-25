@@ -16,6 +16,36 @@ Our goal is to sever the dependency on the black-box `libqsgepaper.so` library b
 - Re-implemented `native_init_framebuffer`.
 - Re-implemented `native_init_lut` with correct hardware bit-swizzling and configuration values.
 - Re-implemented `native_load_waveform` with full `.wbf` format parser, RLE decompression, and native struct generation.
+- **All remaining dlsym'd leaf calls inside `swtcon_init` reversed and replaced
+  (previously tracked as "dummy functions" that still called into
+  `libqsgepaper` by address):**
+  - `frame_buffer_addr` (0x53fd0 → `native_frame_buffer_addr`): address of
+    frame slot N within the mmap'd framebuffer.
+  - `upload_lut_to_frame_slot` (0x53bc8, renamed from `dummy_func_53bc8` →
+    `native_upload_lut_to_frame_slot`): copies the full waveform LUT into one
+    hardware-visible frame slot. Called once per slot (0..`g_nFbSizeY`-1,
+    i.e. 17 slots) at init; the still-library `worker_thread_func` also calls
+    the *library's* copy of this whenever it recycles a slot (Phase 5).
+  - `init_temperature_sensor` / `find_temperature_hwmon_path` /
+    `read_temperature_raw` / `refresh_temperature_cache` (0x476dc/0x46924/
+    0x46644/0x4681c, renamed from `dummy_func_476dc`/`FUN_00046924`/
+    `FUN_00046644`/`FUN_0004681c` → `native_init_temperature_sensor` +
+    friends in `native_init.cpp`): scans `/sys/class/hwmon/*/name` for
+    `sy7636a_temperature`, reads its `temp0` file, and writes
+    `(raw - 2.0C)` into the library's cached-temperature global
+    `g_flCachedTemperature` (0x66e20) under `g_dwTemperatureMutex` (0x6d180) —
+    the same global `get_current_temperature` (Phase 4b) already reads.
+  - `pan_and_unblank` / `prime_display` (0x53ebc/0x468f0 →
+    `native_pan_and_unblank` / `native_prime_display`): PUT_VSCREENINFO to
+    frame slot 16, retry-unblank via FBIOBLANK, refresh the temperature
+    cache, then reblank. Without this the frame counters are never seeded.
+  - Ghidra functions and the relevant globals (`g_abTemperatureHwmonPath`,
+    `g_flCachedTemperature`, `g_dwTemperatureMutex`) were renamed to match.
+  - The only remaining by-address library calls inside `swtcon_init` are
+    `pthread_create(..., worker_thread_func, ...)` and
+    `pthread_create(..., display_thread_func, ...)` — starting the two
+    still-library display threads is explicitly Phase 5, not part of init
+    itself.
 
 Native init + all three update modes (HQ/medium/clearing) + shutdown now run
 end-to-end on the emulator with a clean exit (EXIT=0). Fixes applied this round:

@@ -4,11 +4,15 @@
 #include <fstream>
 #include <cmath>
 #include <cstring>
+#include <cstdlib>
+#include <cerrno>
+#include <dirent.h>
 #include <fcntl.h>
 #include <linux/fb.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 // The library keeps four separate buffers (see init_statebuffer + the
@@ -408,6 +412,85 @@ bool native_load_waveform(std::vector<ModeEntry*>* waveform_struct, const char* 
         
         waveform_struct->push_back(mode);
     }
-    
+
+    return true;
+}
+
+// Mirrors find_temperature_hwmon_path (0x46924): scans /sys/class/hwmon for
+// the entry whose "name" file reads "sy7636a_temperature", then confirms
+// .../temp0 exists (mirroring the original's __stat64_time64 check) before
+// returning that path. Keeps scanning past entries that don't match or whose
+// temp0 is missing; returns false with *out_path cleared if none match.
+bool native_find_temperature_hwmon_path(std::string* out_path) {
+    out_path->clear();
+
+    DIR* dir = opendir("/sys/class/hwmon");
+    if (!dir) return false;
+
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != nullptr) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+
+        std::string name_path = std::string("/sys/class/hwmon/") + entry->d_name + "/name";
+        FILE* f = fopen64(name_path.c_str(), "r");
+        if (!f) {
+            std::cout << "unable to open: " << name_path << std::endl;
+            continue;
+        }
+        char buf[256] = {0};
+        fread(buf, 1, sizeof(buf) - 1, f);
+        fclose(f);
+        buf[strcspn(buf, "\r\n")] = 0;
+
+        if (strcmp(buf, "sy7636a_temperature") != 0)
+            continue;
+
+        std::string temp_path = std::string("/sys/class/hwmon/") + entry->d_name + "/temp0";
+        struct stat st;
+        if (stat(temp_path.c_str(), &st) != 0)
+            continue;
+
+        *out_path = temp_path;
+        closedir(dir);
+        return true;
+    }
+    closedir(dir);
+    return false;
+}
+
+// Mirrors read_temperature_raw (0x46644): reads a hwmon sysfs value file and
+// strtol-parses the leading integer.
+bool native_read_temperature_raw(const char* path, int* out_value) {
+    FILE* f = fopen64(path, "r");
+    if (!f) {
+        std::cerr << "temperature_hwmon: unable to open temperature file: " << path << std::endl;
+        return false;
+    }
+    char buf[256] = {0};
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    if (n == 0) {
+        std::cerr << "temperature_hwmon: unable to read temperature file: " << path << std::endl;
+        return false;
+    }
+    if (buf[0] == '\0') {
+        std::cerr << "temperature_hwmon: buffer is empty" << std::endl;
+        return false;
+    }
+
+    errno = 0;
+    char* endptr = nullptr;
+    long value = strtol(buf, &endptr, 10);
+    if (endptr == buf) {
+        std::cerr << "temperature_hwmon: no digits found" << std::endl;
+        return false;
+    }
+    if (errno == ERANGE) {
+        std::cerr << "temperature_hwmon: conversion to a number failed: '" << buf << "'" << std::endl;
+        return false;
+    }
+
+    *out_value = (int)value;
     return true;
 }
