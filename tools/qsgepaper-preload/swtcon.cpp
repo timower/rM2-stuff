@@ -365,16 +365,15 @@ swtcon_init() {
 // unlock_and_post_swap / UnlockAndPostSwapMutex (0x3dd90) and WaitForUpdate
 // (0x3b644). The native code owns the control flow, work-item field packing and
 // the intrusive std::list / std::shared_ptr book-keeping. `update_item_ctor`,
-// `clamp_update_rect` and `get_current_temperature` are now reimplemented
-// natively (see below); the remaining leaf routines are still called into
-// libqsgepaper by address (to be reversed in later steps):
+// `clamp_update_rect`, `get_current_temperature`, `update_item_copy` and
+// `free_update_region_list` are now reimplemented natively (see below); the
+// remaining leaf routines are still called into libqsgepaper by address (to
+// be reversed in later steps):
 //   0x4fff8 dispatch_update_regions - diff image vs back buffer -> region rows
 //   0x4535c select_waveform_lut     - pick the LUT shared_ptr for temp+mode
 //   0x409e4 update_lut_is_valid     - sanity-check the selected LUT dims
 //   0x3be10 subtract_update_region  - clip this rect out of pending regions
-//   0x3e850 update_item_copy        - deep-copy the work item into a list node
 //   0x3ea98 build_update_batch      - clone accumulation list into a batch node
-//   0x3e540 free_update_region_list - free the accumulation list contents
 //   0x1ec58 _M_hook                 - std::__detail::_List_node_base::_M_hook
 //   0x408a8 (anonymous)             - allocate an empty LUTEntry + shared_ptr
 //                                     control block (used for the +0x2c
@@ -405,6 +404,99 @@ release_sp(void* ctrl_) {
       ((void (*)(void*))vt[3])(ctrl);
     }
   }
+}
+
+// Retain a libstdc++ _Sp_counted_base* by atomically incrementing its
+// use-count (ctrl+4), mirroring release_sp's decrement side. Used when a
+// shared_ptr is copied (not moved) into a new work item.
+static void
+retain_sp(void* ctrl_) {
+  if (!ctrl_)
+    return;
+  int* ctrl = (int*)ctrl_;
+  __atomic_fetch_add(&ctrl[1], 1, __ATOMIC_ACQ_REL);
+}
+
+// Native reimplementation of free_update_region_list (0x3e540): destroys and
+// frees every work-item node in a circular intrusive list (used for both the
+// pending-accumulation list and a claimed batch's region list). For each
+// 100-byte node (item lives at node+8): frees the embedded std::list<int> at
+// item+0x48, releases the three shared_ptrs (+0x00, +0x2c, +0x3c - exactly
+// the same trio release_sp already handles in swtcon_update's inline
+// work-item destructor), then frees the node itself.
+static void
+native_free_update_region_list(void* list_head_) {
+  void** head = (void**)list_head_;
+  void* node = head[0];
+  if (node == (void*)head)
+    return;
+  do {
+    void* next = *(void**)node;
+    char* item = (char*)node + 8;
+
+    void** sub = (void**)(item + 0x48);
+    for (void* n = sub[0]; n != (void*)sub;) {
+      void* nx = *(void**)n;
+      ::operator delete(n);
+      n = nx;
+    }
+    release_sp(*(void**)(item + 0x40)); // +0x3c shared_ptr
+    release_sp(*(void**)(item + 0x30)); // +0x2c shared_ptr (LUT)
+    release_sp(*(void**)(item + 0x04)); // +0x00 shared_ptr
+
+    ::operator delete(node);
+    node = next;
+  } while (node != (void*)head);
+}
+
+// Native reimplementation of update_item_copy (0x3e850): deep-copies a work
+// item into a fresh destination, retaining (incrementing use_count on) the
+// three shared_ptrs rather than moving them, deep-copying the embedded
+// std::list<int> at +0x48 (new 0xc-byte nodes carrying the same int
+// payloads, relinked via a plain circular-list append), and copying every
+// other scalar field verbatim (rect, sequence id, LUT-width shorts, mode,
+// temperature, sync/full-refresh flags, pixel_mode).
+static void*
+native_update_item_copy(void* dest_, const void* src_) {
+  char* D = (char*)dest_;
+  const char* S = (const char*)src_;
+
+  memcpy(D, S, 0x2c); // shared_ptr#1, gap, rect, seq id, +0x24, LUT-width shorts
+  retain_sp(*(void**)(D + 0x04));
+
+  memcpy(D + 0x2c, S + 0x2c, 8); // shared_ptr#2 (selected LUT)
+  retain_sp(*(void**)(D + 0x30));
+
+  memcpy(D + 0x34, S + 0x34, 8); // mode (+0x34), temp (+0x38)
+
+  memcpy(D + 0x3c, S + 0x3c, 8); // shared_ptr#3
+  retain_sp(*(void**)(D + 0x40));
+
+  *(int32_t*)(D + 0x44) = *(const int32_t*)(S + 0x44);
+
+  void** dest_head = (void**)(D + 0x48);
+  dest_head[0] = dest_head;
+  dest_head[1] = dest_head;
+  int count = 0;
+  void* const* src_head = (void* const*)(S + 0x48);
+  for (void* n = src_head[0]; n != (void*)src_head; n = *(void* const*)n) {
+    int value = *(const int32_t*)((const char*)n + 8);
+    void* node = ::operator new(0xc);
+    *(int32_t*)((char*)node + 8) = value;
+    void** new_node = (void**)node;
+    void* tail = dest_head[1];
+    new_node[0] = dest_head;
+    new_node[1] = tail;
+    ((void**)tail)[0] = node;
+    dest_head[1] = node;
+    count++;
+  }
+  *(int32_t*)(D + 0x50) = count;
+
+  *(int32_t*)(D + 0x54) = *(const int32_t*)(S + 0x54);
+  *(int32_t*)(D + 0x58) = *(const int32_t*)(S + 0x58);
+
+  return dest_;
 }
 
 // Native reimplementation of update_item_ctor (0x3ffd0): zero-initialises the
@@ -501,7 +593,6 @@ swtcon_update(update_data* data) {
   auto fn_select = resolve_ptr<void* (*)(float, void*, void*, unsigned)>(0x4535c);
   auto fn_valid = resolve_ptr<int (*)(void*)>(0x409e4);
   auto fn_subtract = resolve_ptr<void (*)(void*, void*)>(0x3be10);
-  auto fn_copy = resolve_ptr<void* (*)(void*, void*)>(0x3e850);
   auto fn_hook = resolve_ptr<void (*)(void*, void*)>(0x1ec58);
 
   void** g_pDataBuffer = resolve_ptr<void**>(0x670bc);
@@ -564,7 +655,7 @@ swtcon_update(update_data* data) {
       // Enqueue: 100-byte list node, deep-copy the item into node+8, hook it at
       // the tail of the accumulation list, bump the count.
       void* node = ::operator new(100);
-      fn_copy((char*)node + 8, item);
+      native_update_item_copy((char*)node + 8, item);
       fn_hook(node, accum);
       (*accum_count)++;
     } else {
@@ -602,7 +693,6 @@ swtcon_unlock_post() {
   sem_t* sem = resolve_ptr<sem_t*>(0x67068);
 
   auto fn_batch = resolve_ptr<void* (*)(void*, void*, void*)>(0x3ea98);
-  auto fn_free = resolve_ptr<void (*)(void*)>(0x3e540);
 
   // Find the insertion point: walk backwards from the head, skipping batches
   // already claimed by the worker (flag @+0x15 set), so this batch is queued
@@ -619,7 +709,7 @@ swtcon_unlock_post() {
   // Clone the accumulated regions into a fresh batch node hooked before `pos`,
   // then free the originals and reset the accumulation list to empty.
   fn_batch((void*)incoming, pos, (void*)accum);
-  fn_free((void*)accum);
+  native_free_update_region_list((void*)accum);
   accum[0] = (void*)accum;
   accum[1] = (void*)accum;
   *accum_count = 0;

@@ -173,13 +173,14 @@ native control flow calling into the library leaf routines.
 ## Phase 4b: Reversing the `swtcon_update` Leaf Routines [IN PROGRESS]
 With the native control flow confirmed correct end-to-end on hardware, the next
 step is to reverse and re-implement each remaining leaf routine one at a time
-(A/B against the library per-function, same discipline as Phase 3/4):
-`dispatch_update_regions` (0x4fff8), `select_waveform_lut` (0x4535c),
-`subtract_update_region` (0x3be10), `update_item_copy` (0x3e850),
-`build_update_batch` (0x3ea98), `free_update_region_list` (0x3e540).
+(A/B against the library per-function, same discipline as Phase 3/4). Still
+library calls: `dispatch_update_regions` (0x4fff8), `select_waveform_lut`
+(0x4535c), `subtract_update_region` (0x3be10), `build_update_batch` (0x3ea98).
 
-Three leaves are now natively reimplemented in `swtcon.cpp` (emulator-verified,
-all three update modes still run end-to-end with clean `EXIT=0`):
+Five leaves are now natively reimplemented in `swtcon.cpp`. **Confirmed on
+both the emulator and real hardware** (same ARM binary runs on both — the
+`build/dev` preset targets ARM/EABI5 directly, no separate toltec build
+needed): all three update modes still run end-to-end with clean `EXIT=0`.
 - **`update_item_ctor` (0x3ffd0 → `native_update_item_ctor`):** zero-inits the
   0x5c-byte work item to a degenerate rect `{y0=0,x0=0,y1=-1,x1=-1}`, 25°C
   default temp, `pixel_mode=5`, and a self-referencing empty list head; stamps
@@ -212,6 +213,85 @@ all three update modes still run end-to-end with clean `EXIT=0`):
   reads a hwmon sysfs path via `fopen`/`strtol`, subtracts a 2.0°C calibration
   offset) — Phase 5 hasn't reimplemented that thread natively yet, so this
   reads the library's cache directly rather than re-polling hwmon.
+- **`update_item_copy` (0x3e850 → `native_update_item_copy`):** deep-copies a
+  work item: *retains* (atomically increments use-count on, via the new
+  `retain_sp` — the mirror-image of `release_sp`) all three shared_ptrs rather
+  than moving them, deep-copies the embedded `std::list<int>` at +0x48 (new
+  0xc-byte nodes carrying only the int payload, relinked in source order via
+  a plain circular-list tail-append — no need for the library's `_M_hook` here
+  since we're building the list from scratch), and copies every other field
+  verbatim (rect, sequence id, LUT-width shorts, mode, temperature,
+  sync/full-refresh flags, pixel_mode). No register-mapping surprises here —
+  every argument is an int/pointer, so Ghidra's decompiled signature matched
+  the real ABI exactly.
+- **`free_update_region_list` (0x3e540 → `native_free_update_region_list`):**
+  walks a circular intrusive list of 100-byte nodes (item lives at node+8) and
+  for each: frees the embedded `std::list<int>` at item+0x48, releases the
+  three shared_ptrs (+0x00, +0x2c, +0x3c — the exact same trio
+  `swtcon_update`'s inline work-item destructor already handled via
+  `release_sp`), then frees the node. This is literally the same
+  destructor logic already written inline in `swtcon_update`, just looped
+  over an entire list instead of one stack item.
+
+### `subtract_update_region` (0x3be10) — algorithm fully reversed, native port blocked on `dispatch_update_regions`
+This is the heaviest leaf so far: a classic AABB rectangle-subtraction that
+carves the new update's rect out of every overlapping pending region, walking
+the accumulation (or a claimed batch's) list. Ghidra's decompiled C for this
+one is **actively misleading** in two places (it merges non-equivalent jump
+targets that happen to share a label at the assembly level, e.g. `LAB_bf70`
+gets reached both by a genuinely-dead fallback path *and* by the legitimate
+"only one piece, already stored" path, with different register liveness each
+time) — ground truth came from `mcp__ghidra__disassemble_function`, not the
+pseudocode. Verified register-level algorithm:
+- Per node: AABB overlap test (skip node untouched if no overlap; the checks
+  also cover degenerate rects defensively, though those can't occur given the
+  upstream `clamp_update_rect` invariants).
+- Compute the intersection ("cut") rect: `cut.y0=max(new.y0,old.y0)`,
+  `cut.x0=max(new.x0,old.x0)`, `cut.y1=min(new.y1,old.y1)`,
+  `cut.x1=min(new.x1,old.x1)`.
+- If the cut rect equals the old rect (full containment), the node is removed
+  outright — no replacement pieces.
+- Otherwise, emit up to 4 leftover axis-aligned strips, each only if
+  non-empty, in this fixed order (left, top, bottom, right), each a full copy
+  of the old item with only the rect replaced:
+  - **left**: `{y0=old.y0, x0=old.x0, y1=old.y1, x1=cut.x0-1}` (full old
+    y-range) — only if `old.x0 < cut.x0`.
+  - **top**: `{y0=old.y0, x0=cut.x0, y1=cut.y0-1, x1=cut.x1}` (cut's x-range
+    only, since left already claimed the old x-range) — only if
+    `old.y0 < cut.y0`.
+  - **bottom**: `{y0=cut.y1+1, x0=cut.x0, y1=old.y1, x1=cut.x1}` — only if
+    `cut.y1 < old.y1`.
+  - **right**: `{y0=old.y0, x0=cut.x1+1, y1=old.y1, x1=old.x1}` (full old
+    y-range again) — only if `cut.x1 < old.x1`.
+- For 1+ pieces: the old node is unhooked and freed (via the same
+  free-embedded-list + release-3-shared_ptrs + delete pattern as
+  `free_update_region_list`'s per-node body), a temp copy of the old item is
+  taken first (`update_item_copy`) to preserve its LUT/mode/temp/flags, then
+  each piece becomes a new 100-byte node built by `FUN_000400a8` (see below)
+  from that temp copy + the piece's rect, hooked into the list in place of the
+  old node.
+
+**Why this isn't ported yet:** the piece-builder `FUN_000400a8` (called once
+per emitted piece) does everything `update_item_copy` does, *plus*:
+1. overwrites the rect with the piece's rect (not the old rect),
+2. stamps a **new** sequence id (increments `DAT_0006d178` again — unlike
+   `update_item_copy`, which preserves the source's id),
+3. adjusts the `+0x08` field (the "gap" field beside the +0x00 shared_ptr,
+   never previously explained) by
+   `stride * (piece.x0 - old.x0) + (piece.y0 - old.y0)`, where `stride` is
+   read from `*(int*)(region_rows_object + 0x14)` and `region_rows_object` is
+   the +0x00 shared_ptr's *object* pointer (the thing `dispatch_update_regions`
+   produced). This is clearly a cached row/pixel index into that buffer being
+   re-based to the new piece's origin.
+
+So `+0x08` isn't padding — it's a stride-scaled offset into whatever
+`dispatch_update_regions` allocates at item+0x00, and reversing it correctly
+requires reversing `dispatch_update_regions`'s output struct first (in
+particular confirming the `+0x14` stride field). **Next step: reverse
+`dispatch_update_regions` before finishing the native ports of
+`subtract_update_region` and `build_update_batch`** (the latter likely shares
+this same clone-with-rect-and-offset-adjustment pattern, since it also clones
+whole region lists).
 
 ## Phase 5: Re-implementing the Display Threads [TODO]
 - The threads currently run the *library's* `worker_thread_func` (0x3ae38) and
