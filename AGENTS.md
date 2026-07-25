@@ -201,9 +201,9 @@ native control flow calling into the library leaf routines.
 ## Phase 4b: Reversing the `swtcon_update` Leaf Routines [IN PROGRESS]
 With the native control flow confirmed correct end-to-end on hardware, the next
 step is to reverse and re-implement each remaining leaf routine one at a time
-(A/B against the library per-function, same discipline as Phase 3/4). Still
-library calls: `dispatch_update_regions` (0x4fff8), `select_waveform_lut`
-(0x4535c), `subtract_update_region` (0x3be10), `build_update_batch` (0x3ea98).
+(A/B against the library per-function, same discipline as Phase 3/4). Only
+still-library call left: `dispatch_update_regions` (0x4fff8) — see its own
+entry below for why it's likely to stay that way.
 
 Five leaves are now natively reimplemented in `swtcon.cpp`. **Confirmed on
 both the emulator and real hardware** (same ARM binary runs on both — the
@@ -350,6 +350,42 @@ per-node (not per-piece) and without the rect/seq/gap adjustment — it's a
 straight list-of-items clone into a fresh batch node (list head + sub-list +
 count + mode-short-from-accum's-flag), hooked into the incoming list at a
 given position. See `native_build_update_batch` in `swtcon.cpp`.
+
+### `select_waveform_lut` (0x4535c) and `update_lut_is_valid` (0x409e4) — natively reimplemented
+The last two `swtcon_update`-path leaves short of `dispatch_update_regions`
+itself (see below) are now native (`native_select_waveform_lut` /
+`native_update_lut_is_valid` in `native_update.cpp`). **Confirmed on the
+emulator:** all three update modes (HQ/medium/clearing) plus the overlap test
+suite still run end-to-end with clean `EXIT=0`.
+- **`select_waveform_lut`:** picks the LUT `shared_ptr<LUTEntry>` for a given
+  `(temperature, mode)` pair out of `g_waveform_struct`
+  (`std::vector<ModeEntry*>`, `waveformStructRaw`). Ghidra's decompile here is
+  fine, but obscures the actual selection rule — read from the disassembly:
+  each `ModeEntry::luts` (`std::vector<shared_ptr<LUTEntry>>`, offset 0x18) is
+  sorted ascending by `LUTEntry::temperature` (offset +8), and the routine
+  scans from index 1, keeping the highest index whose threshold `temp` still
+  meets or exceeds, stopping at the first index whose threshold `temp` falls
+  short of — i.e. "last bucket not exceeding temp", defaulting to the last
+  entry if `temp` exceeds every threshold. A single-entry vector trivially
+  resolves to index 0 by the same loop, so no special case is needed (the
+  library *does* special-case it in assembly, but only as an optimization —
+  same result). The chosen `shared_ptr` is retained (atomic use-count
+  increment, `retain_sp`) into the caller's out-param. Falls back to an empty
+  placeholder LUT — via the same tiny allocator at 0x408a8
+  (`kMakeEmptyLutAddr`) `update_item_ctor`'s placeholder already uses — if
+  `mode` is out of range or its `ModeEntry` has no LUTs at all. Confirmed the
+  fallback call's real register wiring via disassembly (same
+  float-in-`s0`-not-r-args gotcha noted for 0x408a8 under Phase 4b's
+  `update_item_ctor` entry): `r0=out_sp, r1=size_kb=0, r2=mode_width=0,
+  r3=bit_depth=0, s0=temperature=0.0`.
+- **`update_lut_is_valid`:** trivial sanity check on the selected `LUTEntry`:
+  non-null pixel `data`, and positive `size_kb`/`bit_depth`/`mode_width`.
+
+The only remaining still-library call in the `swtcon_update` path is
+`dispatch_update_regions` (0x4fff8) itself — as noted above, its own
+control-flow and output-struct layout are reversed, but the pixel-diff kernel
+and thread-pool dispatcher it drives are a much bigger undertaking and likely
+to stay library-native for a while.
 
 ## Phase 5: Re-implementing the Display Threads [TODO]
 - The threads currently run the *library's* `worker_thread_func` (0x3ae38) and

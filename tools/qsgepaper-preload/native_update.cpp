@@ -1,8 +1,10 @@
 #include "native_update.h"
+#include "native_init.h"
 #include <cstring>
 #include <pthread.h>
 #include <semaphore.h>
 #include <unistd.h>
+#include <vector>
 
 // Set to 1 to use the native re-implementations of update/lock/unlock/wait;
 // 0 falls back to the library exports (for A/B comparison).
@@ -18,8 +20,6 @@ extern void (*qsgepaper_wait)();
 // Remaining library leaf routines swtcon_update still calls into by
 // address (see AGENTS.md Phase 4b for the reversing status of each).
 constexpr uintptr_t kDispatchUpdateRegionsAddr = 0x4fff8;
-constexpr uintptr_t kSelectWaveformLutAddr = 0x4535c;
-constexpr uintptr_t kUpdateLutIsValidAddr = 0x409e4;
 constexpr uintptr_t kMakeEmptyLutAddr = 0x408a8;
 
 // --- Native swtcon_update / lock / unlock_post / wait ---
@@ -40,8 +40,6 @@ constexpr uintptr_t kMakeEmptyLutAddr = 0x408a8;
 //                                     unlikely to be worth porting:
 //                                     dispatch_update_regions itself is a
 //                                     full custom thread-pool dispatcher)
-//   0x4535c select_waveform_lut     - pick the LUT shared_ptr for temp+mode
-//   0x409e4 update_lut_is_valid     - sanity-check the selected LUT dims
 //   0x1ec58 _M_hook                 - std::__detail::_List_node_base::_M_hook
 //                                     (superseded here by list_insert_before,
 //                                     a native reimplementation - kept as a
@@ -404,6 +402,51 @@ native_build_update_batch(ListHead* incoming, int32_t* incoming_count, void* pos
   return batch;
 }
 
+// Native reimplementation of select_waveform_lut (0x4535c): picks the LUT
+// shared_ptr for `mode`'s waveform entry whose temperature bucket contains
+// `temp`. Each ModeEntry's `luts` vector is sorted ascending by
+// LUTEntry::temperature; this scans from index 1, keeping the highest index
+// whose threshold `temp` still meets or exceeds, and stops at the first
+// index whose threshold `temp` falls short of (so a single-entry vector
+// trivially resolves to index 0 without a special case). Falls back to an
+// empty placeholder LUT (via the library's own tiny allocator,
+// kMakeEmptyLutAddr - same one update_item_ctor uses) if `mode` is out of
+// range or its ModeEntry has no LUTs at all.
+static void
+native_select_waveform_lut(float temp, SpRef* out, std::vector<ModeEntry*>* waveform, unsigned mode) {
+  if (mode < waveform->size()) {
+    ModeEntry* m = (*waveform)[mode];
+    auto& luts = m->luts;
+    if (!luts.empty()) {
+      size_t selected = 0;
+      for (size_t i = 1; i < luts.size(); i++) {
+        if (temp < luts[i]->temperature)
+          break;
+        selected = i;
+      }
+      *out = reinterpret_cast<SpRef&>(luts[selected]); // shared_ptr<LUTEntry> == SpRef (see SpRef's comment)
+      retain_sp(out->ctrl);
+      return;
+    }
+  }
+
+  auto fn_make_empty_lut = resolve_ptr<void* (*)(void*, int, int, int, float)>(kMakeEmptyLutAddr);
+  fn_make_empty_lut(out, 0, 0, 0, 0.0f);
+}
+
+// Native reimplementation of update_lut_is_valid (0x409e4): sanity-checks
+// the LUT select_waveform_lut just picked - non-null pixel data, and
+// positive size_kb/bit_depth/mode_width.
+static bool
+native_update_lut_is_valid(const SpRef& lut) {
+  auto* entry = (const LUTEntry*)lut.ptr;
+  if (!entry->data)
+    return false;
+  if (entry->size_kb > 0 && entry->bit_depth > 0)
+    return entry->mode_width > 0;
+  return false;
+}
+
 void
 swtcon_lock() {
 #if NATIVE_UPDATE
@@ -417,10 +460,8 @@ swtcon_lock() {
 void
 swtcon_update(update_data* data) {
 #if NATIVE_UPDATE
-  // Library leaf routines (see banner above).
+  // Remaining still-library leaf routine (see banner above).
   auto fn_dispatch = resolve_ptr<void (*)(void*, void*, void*)>(kDispatchUpdateRegionsAddr);
-  auto fn_select = resolve_ptr<void* (*)(float, void*, void*, unsigned)>(kSelectWaveformLutAddr);
-  auto fn_valid = resolve_ptr<int (*)(void*)>(kUpdateLutIsValidAddr);
 
   auto* queue = update_queue_globals();
 
@@ -457,11 +498,12 @@ swtcon_update(update_data* data) {
     // Select the LUT and move the returned shared_ptr into the item,
     // releasing whatever was there (empty after the ctor).
     SpRef selected{};
-    fn_select(temp, &selected, queue->waveformStructRaw, (unsigned)(int)item.mode);
+    native_select_waveform_lut(temp, &selected, (std::vector<ModeEntry*>*)(void*)queue->waveformStructRaw,
+                                (unsigned)(int)item.mode);
     release_sp(item.lut.ctrl);
     item.lut = selected;
 
-    if (fn_valid(&item.lut)) {
+    if (native_update_lut_is_valid(item.lut)) {
       auto* lut = (const int32_t*)item.lut.ptr;
       item.lutWidthMinus1 = (int16_t)(lut[0] - 1); // packed LUT width - 1
 
