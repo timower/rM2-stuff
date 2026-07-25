@@ -246,21 +246,220 @@ swtcon_init() {
 #endif
 }
 
+// Set to 1 to use the native re-implementations of update/lock/unlock/wait;
+// 0 falls back to the library exports (for A/B comparison).
+#define NATIVE_UPDATE 1
+
+// --- Native swtcon_update / lock / unlock_post / wait ---
+//
+// These mirror queue_update (0x3ccac), LockSwapMutex (0x3b690),
+// unlock_and_post_swap / UnlockAndPostSwapMutex (0x3dd90) and WaitForUpdate
+// (0x3b644). The native code owns the control flow, work-item field packing and
+// the intrusive std::list / std::shared_ptr book-keeping; the genuinely heavy
+// leaf routines are still called into libqsgepaper by address (to be reversed in
+// later steps):
+//   0x3ffd0 update_item_ctor        - construct the 0x5c-byte work item
+//   0x4fc40 clamp_update_rect       - clamp/normalise the damage rectangle
+//   0x468a4 get_current_temperature - read the panel temperature (float)
+//   0x4fff8 dispatch_update_regions - diff image vs back buffer -> region rows
+//   0x4535c select_waveform_lut     - pick the LUT shared_ptr for temp+mode
+//   0x409e4 update_lut_is_valid     - sanity-check the selected LUT dims
+//   0x3be10 subtract_update_region  - clip this rect out of pending regions
+//   0x3e850 update_item_copy        - deep-copy the work item into a list node
+//   0x3ea98 build_update_batch      - clone accumulation list into a batch node
+//   0x3e540 free_update_region_list - free the accumulation list contents
+//   0x1ec58 _M_hook                 - std::__detail::_List_node_base::_M_hook
+//
+// Work-item layout (0x5c bytes, lives at node+8 in a 100-byte list node):
+//   +0x00 shared_ptr  (region rows produced by dispatch_update_regions)
+//   +0x0c int rect[4] (x0,y0,x1,y1)   +0x1c seq id
+//   +0x28/+0x2a shorts (0, LUT width-1)
+//   +0x2c shared_ptr  (selected waveform LUT)   +0x34 short mode
+//   +0x38 float temp  +0x3c shared_ptr
+//   +0x48 std::list<int> head (0xc-byte nodes)  +0x50 int count
+//   +0x54 byte sync, +0x55 byte full-refresh, +0x58 int pixel_mode
+
+// Release a libstdc++ _Sp_counted_base* exactly like the inlined shared_ptr
+// destructor in queue_update: atomically drop the use-count, dispose on 0, then
+// drop the weak-count and destroy on 0. vtable[2]=_M_dispose, vtable[3]=_M_destroy.
+static void
+release_sp(void* ctrl_) {
+  if (!ctrl_)
+    return;
+  int* ctrl = (int*)ctrl_;
+  void** vt = *(void***)ctrl;
+  if (__atomic_fetch_sub(&ctrl[1], 1, __ATOMIC_ACQ_REL) == 1) {
+    ((void (*)(void*))vt[2])(ctrl);
+    if (__atomic_fetch_sub(&ctrl[2], 1, __ATOMIC_ACQ_REL) == 1) {
+      ((void (*)(void*))vt[3])(ctrl);
+    }
+  }
+}
+
 void
 swtcon_lock() {
+#if NATIVE_UPDATE
+  // LockSwapMutex: take the update-queue mutex (g_dwUpdateQueueMutex @0x6709c).
+  pthread_mutex_lock(resolve_ptr<pthread_mutex_t*>(0x6709c));
+#else
   qsgepaper_lock();
+#endif
 }
+
 void
 swtcon_update(update_data* data) {
+#if NATIVE_UPDATE
+  // Library leaf routines (see banner above).
+  auto fn_ctor = resolve_ptr<void* (*)(void*)>(0x3ffd0);
+  auto fn_norm = resolve_ptr<void (*)(void*, void*)>(0x4fc40);
+  auto fn_temp = resolve_ptr<float (*)()>(0x468a4);
+  auto fn_dispatch = resolve_ptr<void (*)(void*, void*, void*)>(0x4fff8);
+  auto fn_select = resolve_ptr<void* (*)(float, void*, void*, unsigned)>(0x4535c);
+  auto fn_valid = resolve_ptr<int (*)(void*)>(0x409e4);
+  auto fn_subtract = resolve_ptr<void (*)(void*, void*)>(0x3be10);
+  auto fn_copy = resolve_ptr<void* (*)(void*, void*)>(0x3e850);
+  auto fn_hook = resolve_ptr<void (*)(void*, void*)>(0x1ec58);
+
+  void** g_pDataBuffer = resolve_ptr<void**>(0x670bc);
+  void** g_pBackBuffer = resolve_ptr<void**>(0x670c0);
+  void* g_waveform = resolve_ptr<void*>(0x67080);
+  void** accum = resolve_ptr<void**>(0x670c4); // accumulation list head
+  int* accum_count = resolve_ptr<int*>(0x670cc);
+  void** incoming = resolve_ptr<void**>(0x67090); // batch list head
+
+  alignas(16) unsigned char item[0x5c];
+  char* I = (char*)item;
+  fn_ctor(item); // sets seq id at +0x1c, empties the shared_ptrs / list
+
+  // The input rect {y,x,height,width} is byte-reversed per 64-bit lane
+  // (vrev64.32) to {x,y,width,height} before clamping.
+  int rev[4] = { data->x, data->y, data->width, data->height };
+  int rect[4];
+  fn_norm(rect, rev);
+  memcpy(I + 0xc, rect, sizeof(rect));
+
+  int seq = *(int*)(I + 0x1c); // return value (unused by callers today)
+
+  // Reject empty/degenerate rectangles (x1>=x0 && y0<=y1).
+  bool ok = !(rect[2] < rect[0]) && !(rect[1] > rect[3]);
+
+  if (ok) {
+    int flags = data->flags;
+    *(int*)(I + 0x58) = data->pixel_mode;
+    *(short*)(I + 0x34) = (short)data->update_mode;
+    *(uint8_t*)(I + 0x54) = (uint8_t)(flags & 1);        // Sync
+    *(uint8_t*)(I + 0x55) = (uint8_t)((flags >> 1) & 1); // FullRefresh
+    float temp = fn_temp();
+    if (flags & 8) // FastDraw: caller supplies an explicit temperature
+      temp = (float)data->zero;
+    *(float*)(I + 0x38) = temp;
+
+    fn_dispatch(item, *g_pDataBuffer, *g_pBackBuffer);
+
+    // Select the LUT and move the returned shared_ptr into the item (+0x2c),
+    // releasing whatever was there (empty after the ctor).
+    void* out_sp[2] = { nullptr, nullptr };
+    fn_select(temp, out_sp, g_waveform, (unsigned)(int)*(short*)(I + 0x34));
+    void* old_ctrl = *(void**)(I + 0x30);
+    *(void**)(I + 0x2c) = out_sp[0];
+    *(void**)(I + 0x30) = out_sp[1];
+    release_sp(old_ctrl);
+
+    if (fn_valid(I + 0x2c)) {
+      int* lut = *(int**)(I + 0x2c);
+      *(short*)(I + 0x2a) = (short)(lut[0] - 1); // packed LUT width - 1
+
+      // Clip this rectangle out of the pending accumulation regions and out of
+      // every not-yet-locked batch already queued for the worker.
+      fn_subtract(accum, item);
+      for (void* b = incoming[0]; b != (void*)incoming; b = *(void**)b) {
+        if (*((uint8_t*)b + 0x15) == 0)
+          fn_subtract((char*)b + 8, item);
+      }
+
+      // Enqueue: 100-byte list node, deep-copy the item into node+8, hook it at
+      // the tail of the accumulation list, bump the count.
+      void* node = ::operator new(100);
+      fn_copy((char*)node + 8, item);
+      fn_hook(node, accum);
+      (*accum_count)++;
+    } else {
+      seq = -1;
+    }
+  } else {
+    seq = -1;
+  }
+
+  // Work-item destructor (inlined tail of queue_update): free the embedded
+  // std::list<int> at +0x48, then release the three shared_ptrs.
+  void** sub = (void**)(I + 0x48);
+  for (void* n = sub[0]; n != (void*)sub;) {
+    void* nx = *(void**)n;
+    ::operator delete(n);
+    n = nx;
+  }
+  release_sp(*(void**)(I + 0x40)); // +0x3c shared_ptr
+  release_sp(*(void**)(I + 0x30)); // +0x2c shared_ptr (LUT)
+  release_sp(*(void**)(I + 0x04)); // +0x00 shared_ptr
+  (void)seq;
+#else
   qsgepaper_update(data);
+#endif
 }
+
 void
 swtcon_unlock_post() {
+#if NATIVE_UPDATE
+  void** incoming = resolve_ptr<void**>(0x67090);  // batch list head
+  void** accum = resolve_ptr<void**>(0x670c4);     // accumulation list head
+  int* accum_count = resolve_ptr<int*>(0x670cc);
+  short* accum_flag = resolve_ptr<short*>(0x670d0);
+  pthread_mutex_t* mutex = resolve_ptr<pthread_mutex_t*>(0x6709c);
+  sem_t* sem = resolve_ptr<sem_t*>(0x67068);
+
+  auto fn_batch = resolve_ptr<void* (*)(void*, void*, void*)>(0x3ea98);
+  auto fn_free = resolve_ptr<void (*)(void*)>(0x3e540);
+
+  // Find the insertion point: walk backwards from the head, skipping batches
+  // already claimed by the worker (flag @+0x15 set), so this batch is queued
+  // after them but before any pending ones.
+  void* first = incoming[0];
+  void* pos = (void*)incoming;
+  while (pos != first) {
+    void* prev = ((void**)pos)[1];
+    if (*((uint8_t*)prev + 0x15) == 0)
+      break;
+    pos = prev;
+  }
+
+  // Clone the accumulated regions into a fresh batch node hooked before `pos`,
+  // then free the originals and reset the accumulation list to empty.
+  fn_batch((void*)incoming, pos, (void*)accum);
+  fn_free((void*)accum);
+  accum[0] = (void*)accum;
+  accum[1] = (void*)accum;
+  *accum_count = 0;
+  *accum_flag = 0;
+
+  pthread_mutex_unlock(mutex);
+  sem_post(sem); // wake the display thread
+#else
   qsgepaper_unlock_post();
+#endif
 }
+
 void
 swtcon_wait() {
+#if NATIVE_UPDATE
+  // WaitForUpdate: spin until shutdown or the batch queue drains.
+  int* g_nShutdownRequested = resolve_ptr<int*>(0x6708c);
+  void** incoming = resolve_ptr<void**>(0x67090);
+  while (*g_nShutdownRequested == 0 && incoming[0] != (void*)incoming) {
+    usleep(100);
+  }
+#else
   qsgepaper_wait();
+#endif
 }
 
 // Walk g_waveform_struct (a std::vector<ModeEntry*> at 0x67080) and print each

@@ -17,7 +17,6 @@ Our goal is to sever the dependency on the black-box `libqsgepaper.so` library b
 - Re-implemented `native_init_lut` with correct hardware bit-swizzling and configuration values.
 - Re-implemented `native_load_waveform` with full `.wbf` format parser, RLE decompression, and native struct generation.
 
-## Phase 4: Re-implementing `swtcon_update` [WORKING END-TO-END]
 Native init + all three update modes (HQ/medium/clearing) + shutdown now run
 end-to-end on the emulator with a clean exit (EXIT=0). Fixes applied this round:
 - **ABI (RESOLVED):** Earlier notes claimed the library used the old
@@ -86,8 +85,8 @@ built incorrectly. Verified by dumping+`cmp`-ing each table native-vs-library
   compute.
 
 With these, native init's LUT, gamma, statebuffer, AND waveform are all
-byte-identical to the library's on the device. **Needs re-test on hardware** to
-confirm the screen now renders correctly.
+byte-identical to the library's on the device. **Confirmed on hardware:** the
+screen renders correctly.
 
 ### Display frame streaming / `FBIOPAN` (FIXED)
 The worker (`worker_thread_func` 0x3ae38) streams sub-frames via
@@ -101,7 +100,55 @@ frame*0). Fix: `native_init_framebuffer` now fills the module globals
 `g_fbVarScreeninfoNative`/`g_fbFixScreeninfoNative`, and `swtcon_init` memcpys
 them into the library globals `g_fbVarScreeninfo` (0x6d3a0, 0xa0 bytes) and
 `g_fbFixScreeninfo` (0x6d35c, 0x44 bytes). Emulator now steps `FBIOPAN` 0..16.
-Needs re-test on real hardware to confirm the panel refreshes.
+**Confirmed on real hardware:** the panel refreshes correctly.
+
+## Phase 4: Re-implementing `swtcon_update` [NATIVE — CONFIRMED WORKING ON HARDWARE]
+`swtcon_update`, `swtcon_lock`, `swtcon_unlock_post` and `swtcon_wait` are now
+re-implemented natively in `swtcon.cpp` (guarded by `#define NATIVE_UPDATE 1`;
+set to 0 to A/B against the library exports). All three test update modes
+(HQ / medium / clearing) run end-to-end on the emulator with `FBIOPAN` streaming
+0..16 per update and a clean exit — i.e. the library worker thread successfully
+consumes the batches our native code enqueues, so the intrusive
+`std::list` / `std::shared_ptr` layout is byte-compatible.
+
+Mapping to the library:
+- **`swtcon_lock`** ↔ `LockSwapMutex` (0x3b690): `pthread_mutex_lock` on the
+  update-queue mutex `g_dwUpdateQueueMutex` @0x6709c.
+- **`swtcon_wait`** ↔ `WaitForUpdate` (0x3b644): spin on `g_nShutdownRequested`
+  @0x6708c / batch list `g_pListIncomingUpdates` @0x67090.
+- **`swtcon_update`** ↔ `queue_update` (0x3ccac): builds a 0x5c-byte work item
+  (in a 100-byte list node), normalises the damage rect, packs
+  flags/mode/temp/pixel_mode, runs `dispatch_update_regions`, picks the LUT via
+  `select_waveform_lut`, clips the rect out of the accumulation list and every
+  unlocked queued batch (`subtract_update_region`), then enqueues a deep copy
+  (`update_item_copy` + `_M_hook`). The inlined work-item destructor (embedded
+  `list<int>` free + three shared_ptr releases) is reproduced by `release_sp`.
+- **`swtcon_unlock_post`** ↔ `unlock_and_post_swap` / `UnlockAndPostSwapMutex`
+  (0x3dd90): clones the accumulation list into a batch node
+  (`build_update_batch`), hooks it into the incoming list after any
+  worker-claimed batches, frees the originals (`free_update_region_list`),
+  resets the accumulation head/count/flag (@0x670c4/@0x670cc/@0x670d0), unlocks
+  the mutex and `sem_post`s the display semaphore @0x67068.
+
+Native code owns the control flow, field packing and list/refcount book-keeping.
+The heavy **leaf** routines are still called into libqsgepaper by address and are
+the subjects of follow-up reversing: `dispatch_update_regions` (0x4fff8),
+`select_waveform_lut` (0x4535c), `subtract_update_region` (0x3be10),
+`update_item_ctor` (0x3ffd0), `update_item_copy` (0x3e850), `clamp_update_rect`
+(0x4fc40), `get_current_temperature` (0x468a4), `build_update_batch` (0x3ea98),
+`free_update_region_list` (0x3e540). **Confirmed on hardware:** all three test
+update modes (HQ/medium/clearing) render correctly on the device with this
+native control flow calling into the library leaf routines.
+
+## Phase 4b: Reversing the `swtcon_update` Leaf Routines [IN PROGRESS]
+With the native control flow confirmed correct end-to-end on hardware, the next
+step is to reverse and re-implement each remaining leaf routine one at a time
+(A/B against the library per-function, same discipline as Phase 3/4):
+`dispatch_update_regions` (0x4fff8), `select_waveform_lut` (0x4535c),
+`subtract_update_region` (0x3be10), `update_item_ctor` (0x3ffd0),
+`update_item_copy` (0x3e850), `clamp_update_rect` (0x4fc40),
+`get_current_temperature` (0x468a4), `build_update_batch` (0x3ea98),
+`free_update_region_list` (0x3e540).
 
 ## Phase 5: Re-implementing the Display Threads [TODO]
 - The threads currently run the *library's* `worker_thread_func` (0x3ae38) and
