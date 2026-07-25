@@ -109,7 +109,7 @@ int native_init_statebuffer() {
     return 0;
 }
 
-int native_init_framebuffer(int* fb_info) {
+int native_init_framebuffer(const FbInitParams& fb_info) {
     const char* file = "/dev/fb0";
     g_nFbFdNative = open(file, O_RDWR);
     if (g_nFbFdNative < 0) {
@@ -135,19 +135,19 @@ int native_init_framebuffer(int* fb_info) {
         return -1;
     }
 
-    vinfo.xres = fb_info[1];
-    vinfo.yres = fb_info[2];
-    vinfo.xres_virtual = fb_info[1];
-    vinfo.yres_virtual = fb_info[2] * (fb_info[11] + 1);
-    vinfo.yoffset = fb_info[11] * fb_info[2];
-    vinfo.bits_per_pixel = fb_info[3];
-    vinfo.pixclock = fb_info[4];
-    vinfo.left_margin = fb_info[5];
-    vinfo.right_margin = fb_info[6];
-    vinfo.upper_margin = fb_info[7];
-    vinfo.lower_margin = fb_info[8];
-    vinfo.hsync_len = fb_info[9];
-    vinfo.vsync_len = fb_info[10];
+    vinfo.xres = fb_info.xres;
+    vinfo.yres = fb_info.yres;
+    vinfo.xres_virtual = fb_info.xres;
+    vinfo.yres_virtual = fb_info.yres * (fb_info.frameCount + 1);
+    vinfo.yoffset = fb_info.frameCount * fb_info.yres;
+    vinfo.bits_per_pixel = fb_info.bitsPerPixel;
+    vinfo.pixclock = fb_info.pixclock;
+    vinfo.left_margin = fb_info.leftMargin;
+    vinfo.right_margin = fb_info.rightMargin;
+    vinfo.upper_margin = fb_info.upperMargin;
+    vinfo.lower_margin = fb_info.lowerMargin;
+    vinfo.hsync_len = fb_info.hsyncLen;
+    vinfo.vsync_len = fb_info.vsyncLen;
 
     if (ioctl(g_nFbFdNative, FBIOPUT_VSCREENINFO, &vinfo) == -1) {
         std::cerr << "Error writing variable information" << std::endl;
@@ -155,10 +155,10 @@ int native_init_framebuffer(int* fb_info) {
     }
 
     // g_nFbSizeX is one full frame in bytes (bpp*xres*yres/8); g_nFbSizeY is the
-    // number of stacked frames (fb_info[11]+1). The mmap covers all of them.
-    int y_factor = (char)(fb_info[11] + 1);
+    // number of stacked frames (frameCount+1). The mmap covers all of them.
+    int y_factor = (char)(fb_info.frameCount + 1);
     unsigned int frame_bytes =
-      (unsigned int)(fb_info[3] * fb_info[1] * fb_info[2]) >> 3;
+      (unsigned int)(fb_info.bitsPerPixel * fb_info.xres * fb_info.yres) >> 3;
     size_t size = (size_t)y_factor * frame_bytes;
 
     g_pFbAddrNative =
@@ -493,4 +493,135 @@ bool native_read_temperature_raw(const char* path, int* out_value) {
 
     *out_value = (int)value;
     return true;
+}
+
+// Path discovered once by native_init_temperature_sensor and reused by every
+// subsequent native_refresh_temperature_cache call.
+static std::string g_hwmonTempPathNative;
+
+void native_refresh_temperature_cache() {
+    int raw_value;
+    if (!native_read_temperature_raw(g_hwmonTempPathNative.c_str(), &raw_value))
+        return;
+
+    pthread_mutex_t* mutex = resolve_ptr<pthread_mutex_t*>(kTemperatureMutexAddr);
+    float* cached_temp = resolve_ptr<float*>(kCachedTemperatureAddr);
+    pthread_mutex_lock(mutex);
+    *cached_temp = (float)raw_value - 2.0f;
+    pthread_mutex_unlock(mutex);
+}
+
+void native_init_temperature_sensor() {
+    if (native_find_temperature_hwmon_path(&g_hwmonTempPathNative)) {
+        std::cout << "temperature_hwmon: found temperature path: "
+                  << g_hwmonTempPathNative << std::endl;
+    } else {
+        std::cerr << "temperature_hwmon: failed to find path" << std::endl;
+    }
+    native_refresh_temperature_cache();
+}
+
+void* native_frame_buffer_addr(int frame_idx) {
+    return (uint8_t*)g_pFbAddrNative + (size_t)g_nFbSizeXNative * frame_idx;
+}
+
+void native_upload_lut_to_frame_slot(void* dest) {
+    memcpy(dest, g_pLUTAddrNative, 0x165800);
+}
+
+int native_pan_and_unblank(int frame_idx) {
+    auto* fb = framebuffer_globals();
+    auto* vinfo = &fb->fbVar;
+
+    if (fb->nIsFbBlanked == 0)
+        return 1;
+
+    vinfo->yoffset = frame_idx * vinfo->yres;
+    if (ioctl(fb->nFbFd, FBIOPUT_VSCREENINFO, vinfo) == -1) {
+        std::cerr << "Panning failed! start buffer = " << frame_idx << ", "
+                  << strerror(errno) << std::endl;
+        return -1;
+    }
+
+    for (int retry = 5; retry > 0; retry--) {
+        if (ioctl(fb->nFbFd, FBIOBLANK, FB_BLANK_UNBLANK) != -1) {
+            fb->nIsFbBlanked = 0;
+            return 0;
+        }
+        std::cout << "FBIOBLANK failed (unblank)" << std::endl;
+    }
+
+    vinfo->yoffset = g_nFbSizeYNative * vinfo->yres;
+    if (ioctl(fb->nFbFd, FBIOPAN_DISPLAY, vinfo) == -1) {
+        std::cout << "Pan failed" << std::endl;
+    }
+    return -1;
+}
+
+void native_prime_display() {
+    if (native_is_fb_blanked() == 0) {
+        native_refresh_temperature_cache();
+        return;
+    }
+    native_pan_and_unblank(16);
+    native_refresh_temperature_cache();
+    native_blank_fb();
+}
+
+int native_is_fb_blanked() {
+    return framebuffer_globals()->nIsFbBlanked;
+}
+
+void native_blank_fb() {
+    auto* fb = framebuffer_globals();
+    if (fb->nIsFbBlanked == 0) {
+        fb->nIsFbBlanked = 1;
+        if (ioctl(fb->nFbFd, FBIOBLANK, FB_BLANK_POWERDOWN) == -1) {
+            std::cerr << "FBIOBLANK failed (blank)" << std::endl;
+        }
+    }
+}
+
+void native_save_statebuffer(int state_ptr_or_zero) {
+    auto* sb = statebuffer_globals();
+    char* filename = (char*)state_ptr_or_zero;
+    FILE* f = fopen64(filename, "w");
+    if (f) {
+        fwrite(sb->pStatebuffer, sb->nSize, 1, f);
+        fclose(f);
+    }
+}
+
+void native_free_statebuffer() {
+    auto* sb = statebuffer_globals();
+    free(sb->pStatebuffer);
+    if (sb->pGammaTable != nullptr) {
+        ::operator delete(sb->pGammaTable);
+    }
+}
+
+void native_close_fb() {
+    auto* fb = framebuffer_globals();
+    munmap(fb->pFbMmap, (size_t)fb->nFbSizeX * fb->nFbSizeY);
+    fb->pFbMmap = nullptr;
+    close(fb->nFbFd);
+    fb->nFbFd = -1;
+}
+
+void native_free_LUT() {
+    auto* fb = framebuffer_globals();
+    if (fb->pLUT != nullptr) {
+        ::operator delete(fb->pLUT);
+    }
+}
+
+void native_unlock_pid_file() {
+    int* g_nPidFd = resolve_ptr<int*>(kPidFdAddr);
+    if (*g_nPidFd > -1) {
+        // LOCK_UN = 8
+        if (flock(*g_nPidFd, 8) == -1) {
+            std::cerr << "unable to unlock exclusive lock" << std::endl;
+        }
+        close(*g_nPidFd);
+    }
 }

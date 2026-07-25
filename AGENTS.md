@@ -2,6 +2,34 @@
 
 Our goal is to sever the dependency on the black-box `libqsgepaper.so` library by fully reversing and re-implementing the Software Timing Controller (swtcon) logic natively in C++.
 
+## Code layout (as of the Phase 4b cleanup)
+The `tools/qsgepaper-preload/` native code is split by concern:
+- **`swtcon.h`** - public API (`swtcon_init/update/lock/unlock_post/wait/shutdown`),
+  unchanged since Phase 1; `main.cpp` only ever includes this.
+- **`swtcon.cpp`** - `dlopen`/`dlsym` loading (`load_lib`), `swtcon_init`/
+  `swtcon_shutdown` orchestration (wiring native buffers into the library's
+  globals, starting/joining the still-library display/worker threads), and
+  the `swtcon_dump_waveform`/`swtcon_dump_buffers` A/B debug helpers.
+- **`native_init.h`/`.cpp`** - everything owning the init-allocated resources'
+  full lifecycle (pid file, statebuffer/gamma table, framebuffer/LUT,
+  waveform loading, temperature sensor discovery+polling) - both the
+  `native_*` constructors called from `swtcon_init` and the `native_*`
+  destructors called from `swtcon_shutdown`.
+- **`native_update.h`/`.cpp`** (new) - `swtcon_lock/update/unlock_post/wait`
+  and every native leaf reimplementation they depend on (work-item ctor/copy,
+  `clamp_update_rect`, `subtract_update_region`, `build_update_batch`, the
+  piece-builder, etc.) - see Phase 4/4b below.
+- **`qsgepaper_globals.h`** (new) - named struct layouts for the library's own
+  global state we read/write directly by address (`resolve_ptr<T*>(addr)`),
+  replacing what used to be individual `resolve_ptr<T*>(0x1234)` calls with a
+  trailing name comment. Structs model runs of `.bss` we've confirmed are
+  *fully contiguous* by exact address arithmetic between independently-known
+  fields (cross-checked with `static_assert`, not guessed); isolated globals
+  stay as standalone named address constants. `native_update.h` additionally
+  defines the update work-item wire format (`WorkItem`, `WorkItemNode`,
+  `BatchNode`, `RegionRows`) the same way, replacing raw `+0x2c`-style byte
+  offsets throughout the update leaf functions.
+
 ## Phase 1: Architectural Refactoring [COMPLETE]
 - Created `swtcon.h` and `swtcon.cpp` to provide a clean abstraction.
 - Moved `libqsgepaper.so` `dlsym` loading logic into the backend.
