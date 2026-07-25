@@ -233,7 +233,53 @@ needed): all three update modes still run end-to-end with clean `EXIT=0`.
   destructor logic already written inline in `swtcon_update`, just looped
   over an entire list instead of one stack item.
 
-### `subtract_update_region` (0x3be10) — algorithm fully reversed, native port blocked on `dispatch_update_regions`
+### `subtract_update_region` (0x3be10) and `build_update_batch` (0x3ea98) — natively reimplemented
+Both are now native (`native_subtract_update_region` / `native_build_update_batch` in
+`swtcon.cpp`), unblocked by reversing `dispatch_update_regions`'s output struct
+first (see below). **Confirmed on the emulator:** all three update modes
+(HQ/medium/clearing) still run end-to-end with clean `EXIT=0` after swapping
+both leaves to native. Hardware re-confirmation is still pending (not run this
+round). Note the emulator's `main.cpp` test only ever queues one full-screen,
+non-overlapping update at a time (each `do_update` call is `Sync`, draining
+the accumulation list before the next), so this test exercises the
+no-overlap/single-node path and `build_update_batch`'s clone-on-drain path,
+but not `subtract_update_region`'s multi-piece splitting logic (which only
+triggers when a *new* rect partially overlaps an *already-queued, not-yet-locked*
+region) — that path still wants a dedicated overlapping-updates test.
+
+`dispatch_update_regions` (0x4fff8) itself is **not** reimplemented — it's a
+full custom thread-pool dispatcher (spins up `hardware_concurrency()` worker
+threads via a task queue, or falls back to a single synchronous call, to
+`render_update_kernel` @0x4e7b8, which is the actual per-pixel diff kernel).
+Porting the dispatcher *and* the pixel kernel is a much bigger undertaking than
+the other leaves and isn't required for anything else, so it's likely to stay
+library-native for a while. What *was* needed and is now confirmed: its output
+struct layout. It allocates a 0x28-byte control block (shared_ptr control
+block + an aliased `RegionRows` sub-struct at +0xc) and stores it into the new
+item's +0x00 shared_ptr; the *raw pointer* half of that shared_ptr (item+0x00)
+points at the `RegionRows` sub-struct itself:
+```
+RegionRows (via item+0x00's raw pointer):
+  +0x00 dataPtr   (uint8_t*, size = stride * (x1-x0+1), column-major:
+                   address(y,x) = dataPtr + stride*(x-x0) + (y-y0))
+  +0x04 y0  +0x08 x0  +0x0c y1  +0x10 x1
+  +0x14 stride  (round_up(y1-y0+1, 16) — the field `native_piece_builder`'s
+                 gap-offset math reads)
+  +0x18 size
+```
+item+0x08 (previously an unexplained "gap" field) is simply `*rawPtr`, i.e. a
+cached copy of `RegionRows::dataPtr` — but re-based per item to that item's own
+rect origin, which is exactly what `native_piece_builder`'s
+`stride*(piece.x0-old.x0) + (piece.y0-old.y0)` adjustment maintains when a
+region gets split into pieces with a new origin.
+
+`FUN_000400a8` (the piece-builder `subtract_update_region` calls once per
+emitted piece) is now `native_piece_builder`: it's `update_item_copy` plus (1)
+overwrite the rect with the piece's rect, (2) stamp a *new* sequence id
+(unlike `update_item_copy`, which preserves the source's id), (3) apply the
+`RegionRows`-relative gap adjustment above.
+
+#### `subtract_update_region` — algorithm
 This is the heaviest leaf so far: a classic AABB rectangle-subtraction that
 carves the new update's rect out of every overlapping pending region, walking
 the accumulation (or a claimed batch's) list. Ghidra's decompiled C for this
@@ -271,27 +317,11 @@ pseudocode. Verified register-level algorithm:
   from that temp copy + the piece's rect, hooked into the list in place of the
   old node.
 
-**Why this isn't ported yet:** the piece-builder `FUN_000400a8` (called once
-per emitted piece) does everything `update_item_copy` does, *plus*:
-1. overwrites the rect with the piece's rect (not the old rect),
-2. stamps a **new** sequence id (increments `DAT_0006d178` again — unlike
-   `update_item_copy`, which preserves the source's id),
-3. adjusts the `+0x08` field (the "gap" field beside the +0x00 shared_ptr,
-   never previously explained) by
-   `stride * (piece.x0 - old.x0) + (piece.y0 - old.y0)`, where `stride` is
-   read from `*(int*)(region_rows_object + 0x14)` and `region_rows_object` is
-   the +0x00 shared_ptr's *object* pointer (the thing `dispatch_update_regions`
-   produced). This is clearly a cached row/pixel index into that buffer being
-   re-based to the new piece's origin.
-
-So `+0x08` isn't padding — it's a stride-scaled offset into whatever
-`dispatch_update_regions` allocates at item+0x00, and reversing it correctly
-requires reversing `dispatch_update_regions`'s output struct first (in
-particular confirming the `+0x14` stride field). **Next step: reverse
-`dispatch_update_regions` before finishing the native ports of
-`subtract_update_region` and `build_update_batch`** (the latter likely shares
-this same clone-with-rect-and-offset-adjustment pattern, since it also clones
-whole region lists).
+`build_update_batch` shares the same clone pattern as `update_item_copy`, but
+per-node (not per-piece) and without the rect/seq/gap adjustment — it's a
+straight list-of-items clone into a fresh batch node (list head + sub-list +
+count + mode-short-from-accum's-flag), hooked into the incoming list at a
+given position. See `native_build_update_batch` in `swtcon.cpp`.
 
 ## Phase 5: Re-implementing the Display Threads [TODO]
 - The threads currently run the *library's* `worker_thread_func` (0x3ae38) and

@@ -365,15 +365,21 @@ swtcon_init() {
 // unlock_and_post_swap / UnlockAndPostSwapMutex (0x3dd90) and WaitForUpdate
 // (0x3b644). The native code owns the control flow, work-item field packing and
 // the intrusive std::list / std::shared_ptr book-keeping. `update_item_ctor`,
-// `clamp_update_rect`, `get_current_temperature`, `update_item_copy` and
-// `free_update_region_list` are now reimplemented natively (see below); the
-// remaining leaf routines are still called into libqsgepaper by address (to
-// be reversed in later steps):
-//   0x4fff8 dispatch_update_regions - diff image vs back buffer -> region rows
+// `clamp_update_rect`, `get_current_temperature`, `update_item_copy`,
+// `free_update_region_list`, `subtract_update_region` and `build_update_batch`
+// are now reimplemented natively (see below); the remaining leaf routines are
+// still called into libqsgepaper by address (to be reversed in later steps):
+//   0x4fff8 dispatch_update_regions - diffs image vs back buffer into a
+//                                     RegionRows buffer (own control-flow
+//                                     reversed - see native_piece_builder's
+//                                     comment for its output layout - but the
+//                                     actual per-pixel diff/threading kernel,
+//                                     render_update_kernel @0x4e7b8, is still
+//                                     library code and unlikely to be worth
+//                                     porting: dispatch_update_regions itself
+//                                     is a full custom thread-pool dispatcher)
 //   0x4535c select_waveform_lut     - pick the LUT shared_ptr for temp+mode
 //   0x409e4 update_lut_is_valid     - sanity-check the selected LUT dims
-//   0x3be10 subtract_update_region  - clip this rect out of pending regions
-//   0x3ea98 build_update_batch      - clone accumulation list into a batch node
 //   0x1ec58 _M_hook                 - std::__detail::_List_node_base::_M_hook
 //   0x408a8 (anonymous)             - allocate an empty LUTEntry + shared_ptr
 //                                     control block (used for the +0x2c
@@ -417,13 +423,30 @@ retain_sp(void* ctrl_) {
   __atomic_fetch_add(&ctrl[1], 1, __ATOMIC_ACQ_REL);
 }
 
+// Frees a single 100-byte work-item list node (item lives at node+8): frees
+// the embedded std::list<int> at item+0x48, releases the three shared_ptrs
+// (+0x00, +0x2c, +0x3c - the same trio release_sp already handles in
+// swtcon_update's inline work-item destructor), then frees the node itself.
+// Shared by native_free_update_region_list (whole-list teardown) and
+// native_subtract_update_region (single-node removal when clipping).
+static void
+native_destroy_item_node(void* node_) {
+  char* item = (char*)node_ + 8;
+  void** sub = (void**)(item + 0x48);
+  for (void* n = sub[0]; n != (void*)sub;) {
+    void* nx = *(void**)n;
+    ::operator delete(n);
+    n = nx;
+  }
+  release_sp(*(void**)(item + 0x40)); // +0x3c shared_ptr
+  release_sp(*(void**)(item + 0x30)); // +0x2c shared_ptr (LUT)
+  release_sp(*(void**)(item + 0x04)); // +0x00 shared_ptr
+  ::operator delete(node_);
+}
+
 // Native reimplementation of free_update_region_list (0x3e540): destroys and
 // frees every work-item node in a circular intrusive list (used for both the
-// pending-accumulation list and a claimed batch's region list). For each
-// 100-byte node (item lives at node+8): frees the embedded std::list<int> at
-// item+0x48, releases the three shared_ptrs (+0x00, +0x2c, +0x3c - exactly
-// the same trio release_sp already handles in swtcon_update's inline
-// work-item destructor), then frees the node itself.
+// pending-accumulation list and a claimed batch's region list).
 static void
 native_free_update_region_list(void* list_head_) {
   void** head = (void**)list_head_;
@@ -432,19 +455,7 @@ native_free_update_region_list(void* list_head_) {
     return;
   do {
     void* next = *(void**)node;
-    char* item = (char*)node + 8;
-
-    void** sub = (void**)(item + 0x48);
-    for (void* n = sub[0]; n != (void*)sub;) {
-      void* nx = *(void**)n;
-      ::operator delete(n);
-      n = nx;
-    }
-    release_sp(*(void**)(item + 0x40)); // +0x3c shared_ptr
-    release_sp(*(void**)(item + 0x30)); // +0x2c shared_ptr (LUT)
-    release_sp(*(void**)(item + 0x04)); // +0x00 shared_ptr
-
-    ::operator delete(node);
+    native_destroy_item_node(node);
     node = next;
   } while (node != (void*)head);
 }
@@ -575,6 +586,243 @@ native_get_current_temperature() {
   return temp;
 }
 
+// Native reimplementation of FUN_000400a8, the piece-builder used internally
+// by subtract_update_region: clones `src` (deep-copying the three shared_ptrs
+// and the embedded std::list<int>, exactly like native_update_item_copy) but
+// overwrites the rect with `piece_rect`, stamps a fresh sequence id, and
+// re-bases the cached data-pointer field at +0x08 ("gap") to the piece's new
+// origin. +0x08 is a pointer into the RegionRows buffer dispatch_update_regions
+// (0x4fff8) allocates and hangs off the +0x00 shared_ptr: {dataPtr(+0x00),
+// y0(+0x04),x0(+0x08),y1(+0x0c),x1(+0x10),stride(+0x14),size(+0x18)}, laid out
+// column-major (stride bytes per x column, 1 byte per y row) so
+// address(y,x) = dataPtr + stride*(x-x0) + (y-y0). Re-basing by
+// stride*(piece.x0-src.x0) + (piece.y0-src.y0) keeps +0x08 pointing at the
+// pixel data for the piece's own top-left corner.
+static void*
+native_piece_builder(void* dest_, const void* src_, const int* piece_rect) {
+  char* D = (char*)dest_;
+  const char* S = (const char*)src_;
+
+  // shared_ptr#1 (+0x00), gap (+0x08), old rect+seq+unknown (+0xc..+0x27),
+  // LUT-width shorts (+0x28..+0x2b) - all copied verbatim first.
+  memcpy(D, S, 0x2c);
+  retain_sp(*(void**)(D + 0x04));
+
+  memcpy(D + 0x2c, S + 0x2c, 8); // shared_ptr#2 (selected LUT)
+  retain_sp(*(void**)(D + 0x30));
+
+  memcpy(D + 0x34, S + 0x34, 8); // mode (+0x34), temp (+0x38)
+
+  memcpy(D + 0x3c, S + 0x3c, 8); // shared_ptr#3
+  retain_sp(*(void**)(D + 0x40));
+
+  *(int32_t*)(D + 0x44) = *(const int32_t*)(S + 0x44);
+
+  void** dest_head = (void**)(D + 0x48);
+  dest_head[0] = dest_head;
+  dest_head[1] = dest_head;
+  int count = 0;
+  void* const* src_head = (void* const*)(S + 0x48);
+  for (void* n = src_head[0]; n != (void*)src_head; n = *(void* const*)n) {
+    int value = *(const int32_t*)((const char*)n + 8);
+    void* node = ::operator new(0xc);
+    *(int32_t*)((char*)node + 8) = value;
+    void** new_node = (void**)node;
+    void* tail = dest_head[1];
+    new_node[0] = dest_head;
+    new_node[1] = tail;
+    ((void**)tail)[0] = node;
+    dest_head[1] = node;
+    count++;
+  }
+  *(int32_t*)(D + 0x50) = count;
+
+  *(int32_t*)(D + 0x54) = *(const int32_t*)(S + 0x54);
+  *(int32_t*)(D + 0x58) = *(const int32_t*)(S + 0x58);
+
+  int32_t src_y0 = *(const int32_t*)(S + 0xc);
+  int32_t src_x0 = *(const int32_t*)(S + 0x10);
+
+  int* seq_counter = resolve_ptr<int*>(0x6d178);
+  int seq = ++(*seq_counter);
+  memcpy(D + 0xc, piece_rect, 4 * sizeof(int));
+  *(int32_t*)(D + 0x1c) = seq;
+
+  void* region_rows = *(void**)(D + 0x00); // shared_ptr#1's raw pointer
+  if (region_rows) {
+    int stride = *(int*)((char*)region_rows + 0x14);
+    *(int32_t*)(D + 0x08) +=
+      stride * (piece_rect[1] - src_x0) + (piece_rect[0] - src_y0);
+  }
+
+  return dest_;
+}
+
+// Native reimplementation of subtract_update_region (0x3be10): clips the
+// newly-queued item's rect out of every overlapping region in `list_head_`
+// (either the pending accumulation list, or an unclaimed batch's region
+// list). Both callers pass a list-head pointer immediately followed in
+// memory by that list's own item counter (accum's count global sits right
+// after its head at +8; a batch's count field sits right after its embedded
+// sub-list head at +8), so the counter is addressed as list_head+8 rather
+// than threaded through as a separate parameter - mirroring param_1[2] in the
+// original.
+//
+// Algorithm (verified against the disassembly - the decompiled pseudocode
+// here is misleading, see AGENTS.md): per node, skip on no AABB overlap;
+// otherwise compute the intersection ("cut") rect. If cut == the node's own
+// rect, the node is removed outright. Otherwise up to four leftover
+// axis-aligned strips are emitted (left, top, bottom, right - each only if
+// non-empty), each cloned from the old item via native_piece_builder, and the
+// old node is replaced by them.
+static void
+native_subtract_update_region(void* list_head_, const void* new_item_) {
+  void** head = (void**)list_head_;
+  int* count = (int*)((char*)list_head_ + 8);
+  const char* N = (const char*)new_item_;
+  int32_t new_y0 = *(const int32_t*)(N + 0xc);
+  int32_t new_x0 = *(const int32_t*)(N + 0x10);
+  int32_t new_y1 = *(const int32_t*)(N + 0x14);
+  int32_t new_x1 = *(const int32_t*)(N + 0x18);
+
+  if (new_y1 < new_y0 || new_x1 < new_x0)
+    return; // degenerate new rect - nothing to subtract
+
+  void* node = head[0];
+  while (node != (void*)head) {
+    void* next = *(void**)node;
+    char* item = (char*)node + 8;
+    int32_t old_y0 = *(int32_t*)(item + 0xc);
+    int32_t old_x0 = *(int32_t*)(item + 0x10);
+    int32_t old_y1 = *(int32_t*)(item + 0x14);
+    int32_t old_x1 = *(int32_t*)(item + 0x18);
+
+    bool degenerate_old = old_y1 < old_y0 || old_x1 < old_x0;
+    bool no_overlap = new_x1 < old_x0 || old_x1 < new_x0 ||
+                       new_y1 < old_y0 || old_y1 < new_y0;
+
+    if (!degenerate_old && !no_overlap) {
+      int32_t cut_y0 = new_y0 > old_y0 ? new_y0 : old_y0;
+      int32_t cut_x0 = new_x0 > old_x0 ? new_x0 : old_x0;
+      int32_t cut_y1 = new_y1 < old_y1 ? new_y1 : old_y1;
+      int32_t cut_x1 = new_x1 < old_x1 ? new_x1 : old_x1;
+
+      int piece_rects[4][4];
+      int piece_count = 0;
+      alignas(16) unsigned char tmp[0x5c];
+
+      bool full_containment =
+        cut_y0 == old_y0 && cut_x0 == old_x0 && cut_y1 == old_y1 && cut_x1 == old_x1;
+
+      if (!full_containment) {
+        native_update_item_copy(tmp, item); // preserve LUT/mode/temp/flags
+
+        if (old_x0 < cut_x0) {
+          int* r = piece_rects[piece_count++];
+          r[0] = old_y0; r[1] = old_x0; r[2] = old_y1; r[3] = cut_x0 - 1;
+        }
+        if (old_y0 < cut_y0) {
+          int* r = piece_rects[piece_count++];
+          r[0] = old_y0; r[1] = cut_x0; r[2] = cut_y0 - 1; r[3] = cut_x1;
+        }
+        if (cut_y1 < old_y1) {
+          int* r = piece_rects[piece_count++];
+          r[0] = cut_y1 + 1; r[1] = cut_x0; r[2] = old_y1; r[3] = cut_x1;
+        }
+        if (cut_x1 < old_x1) {
+          int* r = piece_rects[piece_count++];
+          r[0] = old_y0; r[1] = cut_x1 + 1; r[2] = old_y1; r[3] = old_x1;
+        }
+      }
+
+      // Unhook and free the old node.
+      void** np = (void**)node;
+      void* prev = np[1];
+      ((void**)prev)[0] = next;
+      ((void**)next)[1] = prev;
+      native_destroy_item_node(node);
+      (*count)--;
+
+      for (int i = 0; i < piece_count; i++) {
+        void* new_node = ::operator new(100);
+        native_piece_builder((char*)new_node + 8, tmp, piece_rects[i]);
+        // Hook at the tail of the run of pieces just inserted (i.e.
+        // immediately before `next`, in the old node's place).
+        void** nn = (void**)new_node;
+        void* p = ((void**)next)[1];
+        nn[0] = next;
+        nn[1] = p;
+        ((void**)p)[0] = new_node;
+        ((void**)next)[1] = new_node;
+        (*count)++;
+      }
+
+      if (piece_count > 0) {
+        // Release the temp copy's own shared_ptrs/list now that every piece
+        // has retained/cloned what it needs.
+        void** sub = (void**)(tmp + 0x48);
+        for (void* n = sub[0]; n != (void*)sub;) {
+          void* nx = *(void**)n;
+          ::operator delete(n);
+          n = nx;
+        }
+        release_sp(*(void**)(tmp + 0x40));
+        release_sp(*(void**)(tmp + 0x30));
+        release_sp(*(void**)(tmp + 0x04));
+      }
+    }
+
+    node = next;
+  }
+}
+
+// Native reimplementation of build_update_batch (0x3ea98): clones
+// `accum_head_`'s list into a fresh 0x18-byte batch node (self-referencing
+// sub-list head at +0x08, item count at +0x10, mode/flag short at +0x14 -
+// copied from accum's own flag global at accum_head_+0xc), deep-copying each
+// item via native_update_item_copy, then hooks the batch node into the
+// incoming list immediately before `pos_` and bumps the counter that sits
+// right after the incoming list head (incoming_+8, mirroring param_1[8] in
+// the original - same "count lives right after the head" convention as
+// native_subtract_update_region).
+static void*
+native_build_update_batch(void* incoming_, void* pos_, void* accum_head_) {
+  void* batch = ::operator new(0x18);
+  char* B = (char*)batch;
+  void** sub_head = (void**)(B + 8);
+  sub_head[0] = sub_head;
+  sub_head[1] = sub_head;
+
+  void** accum = (void**)accum_head_;
+  int count = 0;
+  for (void* n = accum[0]; n != (void*)accum;) {
+    void* next = *(void**)n;
+    void* node = ::operator new(100);
+    native_update_item_copy((char*)node + 8, (char*)n + 8);
+    void** nn = (void**)node;
+    void* tail = sub_head[1];
+    nn[0] = sub_head;
+    nn[1] = tail;
+    ((void**)tail)[0] = node;
+    sub_head[1] = node;
+    count++;
+    n = next;
+  }
+  *(int32_t*)(B + 0x10) = count;
+  *(int16_t*)(B + 0x14) = *(const int16_t*)((char*)accum_head_ + 0xc);
+
+  void** nb = (void**)batch;
+  void* prev = ((void**)pos_)[1];
+  nb[0] = pos_;
+  nb[1] = prev;
+  ((void**)prev)[0] = batch;
+  ((void**)pos_)[1] = batch;
+
+  (*(int32_t*)((char*)incoming_ + 8))++;
+
+  return batch;
+}
+
 void
 swtcon_lock() {
 #if NATIVE_UPDATE
@@ -592,7 +840,6 @@ swtcon_update(update_data* data) {
   auto fn_dispatch = resolve_ptr<void (*)(void*, void*, void*)>(0x4fff8);
   auto fn_select = resolve_ptr<void* (*)(float, void*, void*, unsigned)>(0x4535c);
   auto fn_valid = resolve_ptr<int (*)(void*)>(0x409e4);
-  auto fn_subtract = resolve_ptr<void (*)(void*, void*)>(0x3be10);
   auto fn_hook = resolve_ptr<void (*)(void*, void*)>(0x1ec58);
 
   void** g_pDataBuffer = resolve_ptr<void**>(0x670bc);
@@ -646,10 +893,10 @@ swtcon_update(update_data* data) {
 
       // Clip this rectangle out of the pending accumulation regions and out of
       // every not-yet-locked batch already queued for the worker.
-      fn_subtract(accum, item);
+      native_subtract_update_region(accum, item);
       for (void* b = incoming[0]; b != (void*)incoming; b = *(void**)b) {
         if (*((uint8_t*)b + 0x15) == 0)
-          fn_subtract((char*)b + 8, item);
+          native_subtract_update_region((char*)b + 8, item);
       }
 
       // Enqueue: 100-byte list node, deep-copy the item into node+8, hook it at
@@ -692,8 +939,6 @@ swtcon_unlock_post() {
   pthread_mutex_t* mutex = resolve_ptr<pthread_mutex_t*>(0x6709c);
   sem_t* sem = resolve_ptr<sem_t*>(0x67068);
 
-  auto fn_batch = resolve_ptr<void* (*)(void*, void*, void*)>(0x3ea98);
-
   // Find the insertion point: walk backwards from the head, skipping batches
   // already claimed by the worker (flag @+0x15 set), so this batch is queued
   // after them but before any pending ones.
@@ -708,7 +953,7 @@ swtcon_unlock_post() {
 
   // Clone the accumulated regions into a fresh batch node hooked before `pos`,
   // then free the originals and reset the accumulation list to empty.
-  fn_batch((void*)incoming, pos, (void*)accum);
+  native_build_update_batch((void*)incoming, pos, (void*)accum);
   native_free_update_region_list((void*)accum);
   accum[0] = (void*)accum;
   accum[1] = (void*)accum;
