@@ -4,6 +4,7 @@
 #include <cstring>
 #include <cstdio>
 #include <csignal>
+#include <initializer_list>
 #include <ucontext.h>
 #include "swtcon.h"
 
@@ -122,6 +123,107 @@ int main(int argc, char** argv) {
         
         update_data req3 = { 0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, FullRefresh | Sync, HQ, 0, 9 };
         TIME(do_update(req3));
+        std::cout << "Done" << std::endl;
+        getchar();
+
+        // --- Region-overlap coverage ---
+        //
+        // Everything above is a single full-screen Sync update, which always
+        // finds the accumulation list empty: it never exercises
+        // native_subtract_update_region's overlap/split logic. The tests
+        // below issue *multiple* swtcon_update() calls under one
+        // swtcon_lock()/swtcon_unlock_post() pair (a real, intended usage
+        // pattern - e.g. an app coalescing several dirty regions into one
+        // hardware pass) so each later update's rect is clipped against the
+        // earlier ones still sitting in the accumulation list.
+        //
+        // update_data's "height"/"width" fields are actually the
+        // opposite-corner (y1/x1) coordinates, not sizes - see AGENTS.md.
+        auto rect_req = [](int y0, int x0, int y1, int x1, int mode, int pixel_mode) {
+            return update_data{ y0, x0, y1, x1, 0, mode, 0, pixel_mode };
+        };
+        auto fill_rect = [&](int y0, int x0, int y1, int x1, uint16_t value) {
+            for (int y = y0; y < y1 && y < SCREEN_HEIGHT; y++)
+                for (int x = x0; x < x1 && x < SCREEN_WIDTH; x++)
+                    image[y * SCREEN_WIDTH + x] = value;
+        };
+        auto do_batch = [&](std::initializer_list<update_data> reqs) {
+            swtcon_lock();
+            for (update_data req : reqs) {
+                swtcon_update(&req);
+            }
+            swtcon_unlock_post();
+            swtcon_wait();
+        };
+
+        std::cout << "Overlap: two non-overlapping regions in one batch" << std::endl;
+        fill_rect(0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, 0xFFFF);
+        fill_rect(0, 0, 800, 600, 0x0);
+        fill_rect(1100, 900, SCREEN_HEIGHT, SCREEN_WIDTH, 0x0);
+        TIME(do_batch({
+          rect_req(0, 0, 800, 600, HQ, 9),
+          rect_req(1100, 900, SCREEN_HEIGHT, SCREEN_WIDTH, HQ, 9),
+        }));
+        std::cout << "Done" << std::endl;
+        getchar();
+
+        std::cout << "Overlap: hole punched in the middle of a pending region "
+                     "(exercises all four split pieces)" << std::endl;
+        fill_rect(0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, 0xFFFF);
+        fill_rect(200, 200, 1600, 1200, 0x0);
+        fill_rect(600, 500, 1200, 800, 0xFFFF);
+        TIME(do_batch({
+          rect_req(200, 200, 1600, 1200, HQ, 9),  // queued first -> becomes the "old" region
+          rect_req(600, 500, 1200, 800, HQ, 9),   // queued second -> punches a hole in it
+        }));
+        std::cout << "Done" << std::endl;
+        getchar();
+
+        std::cout << "Overlap: single-edge overlap (exercises exactly one "
+                     "split piece)" << std::endl;
+        fill_rect(0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, 0xFFFF);
+        fill_rect(300, 300, 1400, 900, 0x0);
+        fill_rect(300, 700, 1400, 1200, 0x8410);
+        TIME(do_batch({
+          rect_req(300, 300, 1400, 900, HQ, 9),
+          rect_req(300, 700, 1400, 1200, HQ, 9), // same y-range, x-range only partially overlaps
+        }));
+        std::cout << "Done" << std::endl;
+        getchar();
+
+        std::cout << "Overlap: second region fully contains the first "
+                     "(exercises full-containment removal, zero pieces)" << std::endl;
+        fill_rect(0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, 0xFFFF);
+        fill_rect(700, 600, 1100, 900, 0x0);
+        fill_rect(100, 100, 1700, 1300, 0x8410);
+        TIME(do_batch({
+          rect_req(700, 600, 1100, 900, HQ, 9),   // small, queued first
+          rect_req(100, 100, 1700, 1300, HQ, 9),  // fully contains the first, queued second
+        }));
+        std::cout << "Done" << std::endl;
+        getchar();
+
+        std::cout << "Overlap: burst of un-synced overlapping updates "
+                     "(best-effort coverage of clipping against not-yet-"
+                     "claimed queued batches, races the worker thread)" << std::endl;
+        fill_rect(0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, 0xFFFF);
+        for (int i = 0; i < 8; i++) {
+            int y0 = 100 * i, x0 = 100 * i;
+            int y1 = y0 + 300, x1 = x0 + 300;
+            fill_rect(y0, x0, y1, x1, (i % 2) ? 0x0 : 0x8410);
+            update_data req = rect_req(y0, x0, y1, x1, HQ, 9);
+            swtcon_lock();
+            swtcon_update(&req);
+            swtcon_unlock_post();
+            // Deliberately no swtcon_wait() here - the next iteration's queue_update
+            // may run before the worker claims this batch, exercising the
+            // "clip pending, unclaimed batches too" loop in swtcon_update.
+        }
+        swtcon_lock();
+        update_data drain = rect_req(0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, HQ, 9);
+        swtcon_update(&drain);
+        swtcon_unlock_post();
+        swtcon_wait();
         std::cout << "Done" << std::endl;
         getchar();
     }
