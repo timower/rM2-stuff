@@ -23,3 +23,12 @@ void swtcon_wait();
 
 // Re-implemented natively
 void swtcon_shutdown(int state_ptr_or_zero);
+
+// Runtime load bias of libqsgepaper.so: ghidra_addr = runtime_pc - offset.
+uintptr_t swtcon_runtime_offset();
+
+// Debug: dump the loaded waveform LUTs (metadata + data checksum).
+void swtcon_dump_waveform();
+
+// Debug: checksum the fixed init tables (LUT, gamma, statebuffer).
+void swtcon_dump_buffers();

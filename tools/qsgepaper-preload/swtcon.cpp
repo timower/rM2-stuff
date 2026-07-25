@@ -7,8 +7,10 @@
 #include <semaphore.h>
 #include <string>
 #include <sys/file.h>
+#include <linux/fb.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 // Symbol addresses for version 3.23.0.54 / 3.23.0.64 (assumes 0x10000 image
@@ -68,6 +70,11 @@ load_lib() {
   qsgepaper_wait = (wait_func_t)(runtime_offset + WAIT_ADDR);
 }
 
+uintptr_t
+swtcon_runtime_offset() {
+  return runtime_offset;
+}
+
 // Helper to resolve pointers directly
 template<typename T>
 T
@@ -76,20 +83,24 @@ resolve_ptr(uintptr_t addr) {
 }
 
 #include "native_init.h"
-extern void* g_pDataBufferNative;
-extern void* g_pBackBufferNative;
+extern void* g_pImageBufferNative;
+extern void* g_pScreenBufferNative;
+extern void* g_pStateBufferNative;
+extern void* g_pGammaTableNative;
 extern int g_nFbFdNative;
 extern int g_nFbSizeXNative;
 extern int g_nFbSizeYNative;
 extern void* g_pFbAddrNative;
 extern void* g_pLUTAddrNative;
+extern struct fb_var_screeninfo g_fbVarScreeninfoNative;
+extern struct fb_fix_screeninfo g_fbFixScreeninfoNative;
 
 uint16_t*
 swtcon_init() {
   load_lib();
   std::cout << "swtcon_init: initialization sequence starting..." << std::endl;
 
-#if 0
+#if 1
     // --- NATIVE INIT IMPLEMENTATION ---
     auto dummy_func = resolve_ptr<void(*)(int)>(0x53fd0);
     auto dummy_func2 = resolve_ptr<void(*)()>(0x53bc8);
@@ -99,24 +110,31 @@ swtcon_init() {
 
     if (native_init_statebuffer() != 0) return nullptr;
 
-    *resolve_ptr<void**>(0x670bc) = g_pDataBufferNative;
-    *resolve_ptr<void**>(0x670c0) = g_pBackBufferNative;
-    *resolve_ptr<void**>(0x6d1d0) = g_pDataBufferNative;
+    *resolve_ptr<void**>(0x670bc) = g_pImageBufferNative;  // g_pDataBuffer
+    *resolve_ptr<void**>(0x670c0) = g_pScreenBufferNative; // g_pBackBuffer
+    *resolve_ptr<void**>(0x6d1d0) = g_pStateBufferNative;  // statebuffer
+    *resolve_ptr<void**>(0x6d1d4) = g_pGammaTableNative;   // gamma/temp table
     *resolve_ptr<int*>(0x6d1d8) = 0x503580;
 
     void* g_waveform_struct = resolve_ptr<void*>(0x67080);
 
     char* path1 = (char*)"/usr/share/remarkable/320_R467_AF4731_ED103TC2C6_VB3300-KCD_TC.wbf";
 
-    static std::vector<ModeEntry*> native_waveform_struct;
+    // Heap-allocated and intentionally leaked: the library registers an exit-time
+    // destructor for g_waveform_struct (FUN_000451b0 via _INIT_3) that frees every
+    // ModeEntry and the backing array. This handle shares that same array after
+    // the memcpy below, so it must NOT also free it — hence the deliberate leak
+    // (of the 12-byte vector object only; the contents are owned by
+    // g_waveform_struct).
+    auto* native_waveform_struct = new std::vector<ModeEntry*>();
     std::cout << "Calling native_load_waveform with path=" << path1 << std::endl;
-    if (!native_load_waveform(&native_waveform_struct, path1)) {
+    if (!native_load_waveform(native_waveform_struct, path1)) {
         std::cerr << "swtcon_init: failed to load waveform natively" << std::endl;
         return nullptr;
     }
 
     // Sync vector structure to library memory layout
-    memcpy(g_waveform_struct, &native_waveform_struct, sizeof(std::vector<ModeEntry*>));
+    memcpy(g_waveform_struct, native_waveform_struct, sizeof(std::vector<ModeEntry*>));
 
     std::cout << "Initializing framebuffer..." << std::endl;
     int fb_info[14] = {0};
@@ -142,6 +160,15 @@ swtcon_init() {
     *resolve_ptr<int*>(0x6d444) = g_nFbSizeYNative;
     *resolve_ptr<int*>(0x6d358) = g_nFbFdNative;
 
+    // The library's pan/display code reads the full fb_var_screeninfo /
+    // fb_fix_screeninfo from these globals (g_fbFixScreeninfo @0x6d35c,
+    // g_fbVarScreeninfo @0x6d3a0). pan_to_frame only rewrites yoffset in place,
+    // so the whole struct must be present or FBIOPAN_DISPLAY fails ("Pan failed").
+    memcpy(resolve_ptr<void*>(0x6d35c), &g_fbFixScreeninfoNative,
+           sizeof(g_fbFixScreeninfoNative));
+    memcpy(resolve_ptr<void*>(0x6d3a0), &g_fbVarScreeninfoNative,
+           sizeof(g_fbVarScreeninfoNative));
+
     std::cout << "Calling init_LUT..." << std::endl;
     native_init_lut();
     *resolve_ptr<void**>(0x6d350) = g_pLUTAddrNative;
@@ -152,9 +179,28 @@ swtcon_init() {
         dummy_func2();
     }
     dummy_func3();
-    std::cout << "Starting threads natively..." << std::endl;
+
+    // Prime the display exactly as qsgepaper_init does. init_framebuffer leaves
+    // g_nIsFbBlanked = 1 (blanked); record the current wall-clock time in
+    // g_time_var; init the display-timing mutex (0x6703c) used by the worker and
+    // display threads to timestamp frame flushes; then run the priming sequence
+    // FUN_000468f0 (pan to frame 16, unblank, reblank). Without this the frame
+    // counters never get seeded and the worker streams frame 0 forever.
+    *resolve_ptr<int*>(0x6d448) = 1; // g_nIsFbBlanked
+
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
     int* g_time_var = resolve_ptr<int*>(0x67078);
-    *g_time_var = 0;
+    *g_time_var = (int)tv.tv_sec;
+
+    pthread_mutex_t* g_display_timing_mutex =
+      resolve_ptr<pthread_mutex_t*>(0x6703c);
+    pthread_mutex_init(g_display_timing_mutex, nullptr);
+
+    auto native_prime_display = resolve_ptr<void (*)()>(0x468f0); // FUN_000468f0
+    native_prime_display();
+
+    std::cout << "Starting threads natively..." << std::endl;
 
     pthread_mutex_t* g_update_queue_mutex = resolve_ptr<pthread_mutex_t*>(0x6709c);
     sem_t* g_display_thread_sem = resolve_ptr<sem_t*>(0x67068);
@@ -182,7 +228,7 @@ swtcon_init() {
     pthread_setschedparam(*g_display_thread, SCHED_FIFO, &param);
 
     std::cout << "swtcon_init: native initialization complete!" << std::endl;
-    return (uint16_t*)g_pDataBufferNative;
+    return (uint16_t*)g_pImageBufferNative;
 
 #else
   char state[256];
@@ -215,6 +261,77 @@ swtcon_unlock_post() {
 void
 swtcon_wait() {
   qsgepaper_wait();
+}
+
+// Walk g_waveform_struct (a std::vector<ModeEntry*> at 0x67080) and print each
+// LUT's metadata plus a checksum of its packed data. The ModeEntry/LUTEntry
+// layout matches the library (ABI=1), so this works whether the struct was
+// populated by native_load_waveform or the library's load_waveform, letting us
+// A/B the two byte-for-byte.
+void
+swtcon_dump_waveform() {
+  auto* vec = (std::vector<ModeEntry*>*)resolve_ptr<void*>(0x67080);
+  std::cout << "=== waveform dump: " << vec->size() << " modes ===" << std::endl;
+  for (size_t mi = 0; mi < vec->size(); mi++) {
+    ModeEntry* m = (*vec)[mi];
+    std::cout << "mode[" << mi << "] name='" << m->name
+              << "' luts=" << m->luts.size() << std::endl;
+    for (size_t li = 0; li < m->luts.size(); li++) {
+      LUTEntry* lut = m->luts[li].get();
+      int uVar3 = (7 + lut->size_kb) / 8;
+      int words = lut->mode_width * lut->mode_width * uVar3 + uVar3;
+      size_t len = (size_t)words * 2;
+      uint32_t sum = 2166136261u;
+      if (lut->data) {
+        uint8_t* p = (uint8_t*)lut->data;
+        for (size_t b = 0; b < len; b++) {
+          sum = (sum ^ p[b]) * 16777619u;
+        }
+      }
+      std::cout << "  lut[" << li << "] size_kb=" << lut->size_kb
+                << " mode_width=" << lut->mode_width
+                << " temp=" << lut->temperature
+                << " bit_depth=" << lut->bit_depth << " len=" << len
+                << " fnv=0x" << std::hex << sum << std::dec << std::endl;
+    }
+  }
+  std::cout << "=== end waveform dump ===" << std::endl;
+}
+
+// Checksum the fixed tables that init produces and the render kernels read, so
+// they can be A/B'd between native and library init the same way as the waveform.
+void
+swtcon_dump_buffers() {
+  struct {
+    const char* name;
+    uintptr_t ptr_addr;
+    size_t len;
+  } bufs[] = {
+    { "LUT", 0x6d350, 0x165800 },
+    { "gamma", 0x6d1d4, 0x4400 },
+    { "statebuffer", 0x6d1d0, 0x503580 },
+  };
+  for (auto& b : bufs) {
+    void* p = *resolve_ptr<void**>(b.ptr_addr);
+    uint32_t sum = 2166136261u;
+    if (p) {
+      uint8_t* d = (uint8_t*)p;
+      for (size_t i = 0; i < b.len; i++)
+        sum = (sum ^ d[i]) * 16777619u;
+    }
+    std::cout << "buf " << b.name << " ptr=" << p << " len=" << b.len
+              << " fnv=0x" << std::hex << sum << std::dec << std::endl;
+    // Also write the raw bytes to /tmp for byte-level A/B (cmp) between native
+    // and library init.
+    if (p) {
+      std::string path = std::string("/tmp/dump_") + b.name + ".bin";
+      FILE* f = fopen(path.c_str(), "wb");
+      if (f) {
+        fwrite(p, 1, b.len, f);
+        fclose(f);
+      }
+    }
+  }
 }
 
 // --- Re-implemented subroutines ---
