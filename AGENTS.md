@@ -145,10 +145,43 @@ With the native control flow confirmed correct end-to-end on hardware, the next
 step is to reverse and re-implement each remaining leaf routine one at a time
 (A/B against the library per-function, same discipline as Phase 3/4):
 `dispatch_update_regions` (0x4fff8), `select_waveform_lut` (0x4535c),
-`subtract_update_region` (0x3be10), `update_item_ctor` (0x3ffd0),
-`update_item_copy` (0x3e850), `clamp_update_rect` (0x4fc40),
-`get_current_temperature` (0x468a4), `build_update_batch` (0x3ea98),
-`free_update_region_list` (0x3e540).
+`subtract_update_region` (0x3be10), `update_item_copy` (0x3e850),
+`build_update_batch` (0x3ea98), `free_update_region_list` (0x3e540).
+
+Three leaves are now natively reimplemented in `swtcon.cpp` (emulator-verified,
+all three update modes still run end-to-end with clean `EXIT=0`):
+- **`update_item_ctor` (0x3ffd0 → `native_update_item_ctor`):** zero-inits the
+  0x5c-byte work item to a degenerate rect `{y0=0,x0=0,y1=-1,x1=-1}`, 25°C
+  default temp, `pixel_mode=5`, and a self-referencing empty list head; stamps
+  the library's own global sequence counter (`DAT_0006d178` @0x6d178) at
+  +0x1c. The rect field order is actually `{y0,x0,y1,x1}`, not `{x0,y0,x1,y1}`
+  as originally guessed — corrected throughout. The +0x2c placeholder LUT
+  shared_ptr is still allocated by the library's tiny inline allocator
+  (0x408a8) since it's always immediately replaced by `select_waveform_lut`.
+  **Gotcha:** 0x408a8's real signature is
+  `(void* out_sp, int size_kb, int mode_width, int bit_depth, float temperature)`
+  — `temperature` is passed in a VFP register (`s0`) per AAPCS-VFP, not as a
+  5th integer arg. Ghidra's decompiler mis-groups this as `(int, void*, int,
+  int, uint)`, which silently shifts every register by one and writes through
+  a null `out_sp` — SIGSEGV. Always check the disassembly's actual register
+  wiring against Ghidra's guessed C signature when a function mixes float and
+  pointer/int args.
+- **`clamp_update_rect` (0x4fc40 → `native_clamp_update_rect`):** takes the
+  input rect (queue_update reorders `update_data`'s y/x/height/width fields to
+  x0,y0,x1,y1 — the "height"/"width" fields are actually the opposite-corner
+  coordinates, not sizes, confirmed by main.cpp's full-screen requests setting
+  them to `SCREEN_WIDTH`/`SCREEN_HEIGHT` which match the 1403/1871 constants
+  below exactly) and flips it into the panel's 180°-rotated hardware frame: an
+  independent per-axis point reflection through `(SCREEN_HEIGHT-1,
+  SCREEN_WIDTH-1)` = `(1871, 1403)`, with the y-axis min/max rounded to 8-row
+  blocks (down/up) to match the 8-row-aligned render/dispatch kernels.
+- **`get_current_temperature` (0x468a4 → `native_get_current_temperature`):**
+  just a mutex-protected read of the library's own cached temperature global
+  (`DAT_00066e20` @0x66e20, guarded by `DAT_0006d180` @0x6d180). The value is
+  still produced by the library's background poll thread (`FUN_0004681c`:
+  reads a hwmon sysfs path via `fopen`/`strtol`, subtracts a 2.0°C calibration
+  offset) — Phase 5 hasn't reimplemented that thread natively yet, so this
+  reads the library's cache directly rather than re-polling hwmon.
 
 ## Phase 5: Re-implementing the Display Threads [TODO]
 - The threads currently run the *library's* `worker_thread_func` (0x3ae38) and

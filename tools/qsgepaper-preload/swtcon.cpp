@@ -255,12 +255,10 @@ swtcon_init() {
 // These mirror queue_update (0x3ccac), LockSwapMutex (0x3b690),
 // unlock_and_post_swap / UnlockAndPostSwapMutex (0x3dd90) and WaitForUpdate
 // (0x3b644). The native code owns the control flow, work-item field packing and
-// the intrusive std::list / std::shared_ptr book-keeping; the genuinely heavy
-// leaf routines are still called into libqsgepaper by address (to be reversed in
-// later steps):
-//   0x3ffd0 update_item_ctor        - construct the 0x5c-byte work item
-//   0x4fc40 clamp_update_rect       - clamp/normalise the damage rectangle
-//   0x468a4 get_current_temperature - read the panel temperature (float)
+// the intrusive std::list / std::shared_ptr book-keeping. `update_item_ctor`,
+// `clamp_update_rect` and `get_current_temperature` are now reimplemented
+// natively (see below); the remaining leaf routines are still called into
+// libqsgepaper by address (to be reversed in later steps):
 //   0x4fff8 dispatch_update_regions - diff image vs back buffer -> region rows
 //   0x4535c select_waveform_lut     - pick the LUT shared_ptr for temp+mode
 //   0x409e4 update_lut_is_valid     - sanity-check the selected LUT dims
@@ -269,10 +267,14 @@ swtcon_init() {
 //   0x3ea98 build_update_batch      - clone accumulation list into a batch node
 //   0x3e540 free_update_region_list - free the accumulation list contents
 //   0x1ec58 _M_hook                 - std::__detail::_List_node_base::_M_hook
+//   0x408a8 (anonymous)             - allocate an empty LUTEntry + shared_ptr
+//                                     control block (used for the +0x2c
+//                                     placeholder in update_item_ctor, always
+//                                     immediately replaced by select_waveform_lut)
 //
 // Work-item layout (0x5c bytes, lives at node+8 in a 100-byte list node):
 //   +0x00 shared_ptr  (region rows produced by dispatch_update_regions)
-//   +0x0c int rect[4] (x0,y0,x1,y1)   +0x1c seq id
+//   +0x0c int rect[4] (y0,x0,y1,x1)   +0x1c seq id
 //   +0x28/+0x2a shorts (0, LUT width-1)
 //   +0x2c shared_ptr  (selected waveform LUT)   +0x34 short mode
 //   +0x38 float temp  +0x3c shared_ptr
@@ -296,6 +298,82 @@ release_sp(void* ctrl_) {
   }
 }
 
+// Native reimplementation of update_item_ctor (0x3ffd0): zero-initialises the
+// work item to a degenerate/empty rect {y0=0,x0=0,y1=-1,x1=-1}, a 25C default
+// temperature, pixel_mode=5, and an empty self-referencing intrusive list
+// head. Stamps the same global sequence counter the library itself uses at
+// +0x1c (DAT_0006d178) so IDs stay unique. The +0x2c placeholder LUT
+// shared_ptr allocation is left to the library's own tiny allocator
+// (0x408a8) - it's always released and replaced by select_waveform_lut
+// before anything reads it, so there's no benefit to reversing it further.
+static void*
+native_update_item_ctor(void* item_) {
+  unsigned char* I = (unsigned char*)item_;
+  memset(I, 0, 0x5c);
+  *(int32_t*)(I + 0x14) = -1; // rect[2] (y1)
+  *(int32_t*)(I + 0x18) = -1; // rect[3] (x1)
+  *(float*)(I + 0x38) = 25.0f;
+  void** list_head = (void**)(I + 0x48);
+  list_head[0] = list_head;
+  list_head[1] = list_head;
+  *(int32_t*)(I + 0x58) = 5; // default pixel_mode
+
+  // Real signature is (void* out_sp, int size_kb, int mode_width, int
+  // bit_depth, float temperature) - `temperature` is passed in a VFP
+  // register (s0) per AAPCS-VFP, not as a 5th integer arg. size_kb=0 skips
+  // the data-buffer allocation, so the other fields are irrelevant here:
+  // this placeholder is always released and replaced by select_waveform_lut
+  // before anything reads it.
+  auto fn_make_empty_lut = resolve_ptr<void* (*)(void*, int, int, int, float)>(0x408a8);
+  fn_make_empty_lut(I + 0x2c, 0, 0, 0, 0.0f);
+
+  int* seq_counter = resolve_ptr<int*>(0x6d178);
+  int seq = ++(*seq_counter);
+  *(int32_t*)(I + 0x1c) = seq;
+  return item_;
+}
+
+// Native reimplementation of clamp_update_rect (0x4fc40). Input is
+// {x0,y0,x1,y1} (queue_update passes update_data's x/y/width/height reordered
+// this way - "width"/"height" are actually the opposite-corner coordinates,
+// not sizes: main.cpp's full-screen requests set them to SCREEN_WIDTH/
+// SCREEN_HEIGHT, matching the 1403/1871 constants below exactly). The
+// transform is an independent per-axis point reflection through
+// (SCREEN_HEIGHT-1, SCREEN_WIDTH-1) - i.e. it flips the rect into the
+// panel's 180-rotated hardware frame - with the y-axis rounded to 8-row
+// blocks (down for y0, up for y1) to match the 8-row-aligned render/dispatch
+// kernels. Output order is {y0,x0,y1,x1}.
+static void
+native_clamp_update_rect(int* rect_out, const int* rect_in) {
+  constexpr int kMaxY = 0x74f; // SCREEN_HEIGHT - 1 = 1871
+  constexpr int kMaxX = 0x57b; // SCREEN_WIDTH - 1 = 1403
+  int x0 = rect_in[0], y0 = rect_in[1], x1 = rect_in[2], y1 = rect_in[3];
+
+  auto non_neg = [](int v) { return v < 0 ? 0 : v; };
+  auto clamp_hi = [](int v, int hi) { return v > hi ? hi : v; };
+
+  rect_out[0] = non_neg(kMaxY - y1) & ~7;
+  rect_out[1] = non_neg(kMaxX - x1);
+  rect_out[2] = clamp_hi(kMaxY - y0, kMaxY) | 7;
+  rect_out[3] = clamp_hi(kMaxX - x0, kMaxX);
+}
+
+// Native reimplementation of get_current_temperature (0x468a4): mutex-reads
+// the library's own cached temperature global. The value is still produced
+// by the library's background poll thread (FUN_0004681c: reads a hwmon
+// sysfs path via fopen/strtol and subtracts a 2.0C calibration offset) -
+// Phase 5 hasn't reimplemented that thread natively yet, so we read its
+// output directly instead of re-polling hwmon ourselves.
+static float
+native_get_current_temperature() {
+  pthread_mutex_t* mutex = resolve_ptr<pthread_mutex_t*>(0x6d180);
+  float* cached_temp = resolve_ptr<float*>(0x66e20);
+  pthread_mutex_lock(mutex);
+  float temp = *cached_temp;
+  pthread_mutex_unlock(mutex);
+  return temp;
+}
+
 void
 swtcon_lock() {
 #if NATIVE_UPDATE
@@ -310,9 +388,6 @@ void
 swtcon_update(update_data* data) {
 #if NATIVE_UPDATE
   // Library leaf routines (see banner above).
-  auto fn_ctor = resolve_ptr<void* (*)(void*)>(0x3ffd0);
-  auto fn_norm = resolve_ptr<void (*)(void*, void*)>(0x4fc40);
-  auto fn_temp = resolve_ptr<float (*)()>(0x468a4);
   auto fn_dispatch = resolve_ptr<void (*)(void*, void*, void*)>(0x4fff8);
   auto fn_select = resolve_ptr<void* (*)(float, void*, void*, unsigned)>(0x4535c);
   auto fn_valid = resolve_ptr<int (*)(void*)>(0x409e4);
@@ -329,13 +404,13 @@ swtcon_update(update_data* data) {
 
   alignas(16) unsigned char item[0x5c];
   char* I = (char*)item;
-  fn_ctor(item); // sets seq id at +0x1c, empties the shared_ptrs / list
+  native_update_item_ctor(item); // sets seq id at +0x1c, empties the shared_ptrs / list
 
   // The input rect {y,x,height,width} is byte-reversed per 64-bit lane
   // (vrev64.32) to {x,y,width,height} before clamping.
   int rev[4] = { data->x, data->y, data->width, data->height };
   int rect[4];
-  fn_norm(rect, rev);
+  native_clamp_update_rect(rect, rev);
   memcpy(I + 0xc, rect, sizeof(rect));
 
   int seq = *(int*)(I + 0x1c); // return value (unused by callers today)
@@ -349,7 +424,7 @@ swtcon_update(update_data* data) {
     *(short*)(I + 0x34) = (short)data->update_mode;
     *(uint8_t*)(I + 0x54) = (uint8_t)(flags & 1);        // Sync
     *(uint8_t*)(I + 0x55) = (uint8_t)((flags >> 1) & 1); // FullRefresh
-    float temp = fn_temp();
+    float temp = native_get_current_temperature();
     if (flags & 8) // FastDraw: caller supplies an explicit temperature
       temp = (float)data->zero;
     *(float*)(I + 0x38) = temp;
