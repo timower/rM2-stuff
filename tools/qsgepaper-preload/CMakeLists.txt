@@ -12,6 +12,12 @@ target_link_libraries(qsgepaper-test dl)
 # the shared ModeEntry/vector/list layouts.
 target_compile_definitions(qsgepaper-test PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
 
+# A/B verification tool for render_update_kernel (still-library, Phase 6) -
+# see render_kernel_verify.cpp's header comment.
+add_executable(render-kernel-verify render_kernel_verify.cpp native_init.cpp)
+target_link_libraries(render-kernel-verify dl)
+target_compile_definitions(render-kernel-verify PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
+
 install(
   TARGETS qsgepaper-test
   COMPONENT tools

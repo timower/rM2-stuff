@@ -229,7 +229,7 @@ Each piece is a full clone of the old item (preserving LUT/mode/temp/flags) with
 
 `(WorkItem* item, void* dataBuffer, void* backBuffer, int chunkIndex, int chunkCount)`. Zero further callees — fully self-contained. Output goes through `item.gap` (the rebased `RegionRows::dataPtr`), one byte per pixel, column-major.
 
-**Mode dispatch:** `item.pixelMode` selects the case directly, except value `5` ("auto"), which indexes `g_anPixelModeDispatchTable[item.mode - 1]` (7 entries):
+**Mode dispatch:** `item.pixelMode` selects the case directly, except value `5` ("auto"), which indexes `g_anPixelModeDispatchTable[item.mode - 1]` (7 entries) — **`[confirmed]`**, table bytes read directly out of the loaded library at Ghidra address `0x596b8`:
 
 | `item.mode` | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
 |---|---|---|---|---|---|---|---|
@@ -250,7 +250,7 @@ Case 6 is a bare alias of case 8. So under auto mode, waveform modes 2–5 run c
 
 So pixel mode 7 (the `backBuffer`-gated dither) is specifically what the pen and marker tools use; mode 6 (unconditional dither, case 8 alias) is what panning and UI chrome use; mode 9 is full-screen refreshes. This matches the user-visible symptom this section was investigated for: dithering artifacts are seen exactly when drawing gray with the pen and when panning, because those are the two paths that explicitly select a gamma/dither formula instead of falling through waveform-mode auto-dispatch.
 
-**Per-pixel formulas** — `[derived]` except case 0xd. Shared terms: `src` is the 16-bit source pixel from `dataBuffer`, split into `lo5 = src&0x1f`, `mid6 = (src&0x7ff)>>5`, `hi5 = src>>0xb` (bitfield split confirmed; what each field physically represents — old level / target level / dither accumulator — is `[guess]`); `gamma = g_pGammaTable[row&0x7f][col&0x7f]`.
+**Per-pixel formulas — `[confirmed]`, both statically and at runtime (see box below).** Shared terms: `src` is the 16-bit source pixel from `dataBuffer`, split into `lo5 = src&0x1f`, `mid6 = (src&0x7ff)>>5`, `hi5 = src>>0xb` (bitfield split confirmed; what each field physically represents — old level / target level / dither accumulator — is still `[guess]`); `gamma = g_pGammaTable[row&0x7f][col&0x7f]`.
 
 ```
 case 7 (gated):     out = backBuffer[pixel]!=0 ? ((lo5+mid6+hi5+gamma)/125)*30 : 0x20  // 0x20 = skip sentinel
@@ -259,6 +259,8 @@ case 9:              out = (((lo5+mid6+hi5)*15+gamma)/125) << 1                 
 case 0xd:             out = 0x1e   // [confirmed] flat fill, no source read — "clearing" mode
 default (0xa/0xb/0xc): out = ((lo5+mid6+hi5) >> 3) << 1                                  // no gamma lookup
 ```
+
+**Verification methodology (`tools/qsgepaper-preload/render_kernel_verify.cpp`):** these formulas were re-derived a second time directly from ARM disassembly at `0x4e7b8` (not just the Ghidra decompiler's pseudocode — the bitfield extraction, the `gamma` table add, and the div-by-125-then-scale sequences were read off the raw `and`/`ubfx`/`umull`/`lsr` reciprocal-division idiom), then checked at runtime against the real library function. The addressing/180°-rotation logic (still not hand-verified — see the "not closed out" note below) is sidestepped entirely: the tool calls the real `render_update_kernel` directly (same `{item, dataBuffer, backBuffer, chunkIndex=0, chunkCount=1}` convention `dispatch_update_regions` itself uses for a single-shot dispatch) on a `dataBuffer` filled with one uniform 16-bit value across a rect **exactly 128×128 pixels**. Over that rect the kernel's two `&0x7f` loop counters each sweep a full 0–127 residue class exactly once regardless of screen position or rotation phase, so all 16,384 `(row&0x7f, col&0x7f)` gamma-table cells get visited exactly once each, just in an unknown order — turning a "byte-for-byte positional match" (which would need the rotation solved) into a "sorted-multiset match" (which doesn't). Passed on all 16 pixelMode/mode combinations across a diagnostic sweep of the full 16-bit `src` space (261 values/case, `render-kernel-verify 251` on the emulator — pass `1` for an exhaustive but ~40-hour sweep). Also incidentally confirmed the gamma table's base-pointer quirk: `g_pGammaTable` points at the *raw* allocation including its leading `'U'` version-tag byte, so `gamma[0][0]` really is `'U'` (0x55), not the first real dither sample — already baked correctly into `native_init_statebuffer`'s table, just now confirmed load-bearing.
 
 **`gamma`/`g_pGammaTable` is an ordered-dither threshold matrix, not a tone curve — `[derived]`, upgraded this pass.** Three independent facts converge:
 1. It's indexed purely by pixel *position* (`row&0x7f`, `col&0x7f`, a 128×128 tile), not by pixel *value* — a real gamma/tone-response curve would be indexed by intensity, not screen coordinate.
