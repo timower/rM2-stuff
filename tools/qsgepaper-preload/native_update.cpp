@@ -17,9 +17,6 @@ extern void (*qsgepaper_update)(update_data*);
 extern void (*qsgepaper_unlock_post)();
 extern void (*qsgepaper_wait)();
 
-// Remaining library leaf routines swtcon_update still calls into by
-// address (see AGENTS.md Phase 4b for the reversing status of each).
-constexpr uintptr_t kMakeEmptyLutAddr = 0x408a8;
 // The shared_ptr control block's vtable pointer for a RegionRows allocation,
 // exactly matching dispatch_update_regions's own `*puVar1 = &PTR_LAB_000651ec`
 // (see native_dispatch_update_regions below) - kept still-library (a generic
@@ -42,10 +39,6 @@ constexpr uintptr_t kRegionRowsVtableAddr = 0x651ec;
 //                                     comment since other still-library code
 //                                     paths, e.g. worker_thread_func, also
 //                                     call the library's own copy)
-//   0x408a8 (anonymous)             - allocate an empty LUTEntry + shared_ptr
-//                                     control block (used for the +0x2c
-//                                     placeholder in update_item_ctor, always
-//                                     immediately replaced by select_waveform_lut)
 
 // Release a libstdc++ _Sp_counted_base* exactly like the inlined shared_ptr
 // destructor in queue_update: atomically drop the use-count, dispose on 0,
@@ -188,14 +181,63 @@ native_update_item_copy(WorkItem* dest, const WorkItem* src) {
   return dest;
 }
 
+// Native reimplementation of the anonymous LUTEntry+shared_ptr allocator at
+// 0x408a8 (confirmed signature via disassembly: r0=out_sp, r1=size_kb,
+// r2=mode_width, r3=bit_depth, s0=temperature per AAPCS-VFP). Both real call
+// sites (native_update_item_ctor's placeholder, native_select_waveform_lut's
+// out-of-range-mode fallback) always pass all-zero fields - immediately
+// released and replaced before anything reads them - so this only needs to
+// build a valid, empty, ref-counted LUTEntry.
+//
+// Deliberately does NOT reuse the library's own vtable pointer for this
+// block (unlike native_dispatch_update_regions's RegionRows block, which
+// copies `&PTR_LAB_000651ec` directly): 0x408a8's own vtable pointer is
+// computed through a GOT-indirect load-then-+8 sequence, a different and
+// more ambiguous addressing pattern than the RegionRows allocator's simple
+// address-of, and not worth the risk of silently mismatching release_sp's
+// vt[2]/vt[3] convention. Instead this defines its own tiny native vtable
+// with that exact same convention, so release_sp/retain_sp keep working
+// unmodified while dispose/destroy are fully our own code.
+struct LutBlock {
+  void* vtable;
+  int32_t useCount;
+  int32_t weakCount;
+  LUTEntry* entry;
+};
+static_assert(sizeof(LutBlock) == 0x10, "LutBlock layout drift");
+
+static void
+native_lut_dispose(void* ctrl) {
+  delete ((LutBlock*)ctrl)->entry;
+}
+
+static void
+native_lut_destroy(void* ctrl) {
+  ::operator delete(ctrl);
+}
+
+// vt[2]/vt[3] per release_sp's convention; vt[0]/vt[1] unused (no RTTI/
+// offset-to-top slots to fill in for a purely native vtable).
+static void* kNativeLutVtable[4] = { nullptr, nullptr, (void*)native_lut_dispose,
+                                      (void*)native_lut_destroy };
+
+static void
+native_make_empty_lut(SpRef* out) {
+  auto* entry = new LUTEntry{};
+  auto* block = (LutBlock*)::operator new(sizeof(LutBlock));
+  block->vtable = kNativeLutVtable;
+  block->useCount = 1;
+  block->weakCount = 1;
+  block->entry = entry;
+  out->ptr = entry;
+  out->ctrl = block;
+}
+
 // Native reimplementation of update_item_ctor (0x3ffd0): zero-initialises the
 // work item to a degenerate/empty rect {y0=0,x0=0,y1=-1,x1=-1}, a 25C default
 // temperature, pixel_mode=5, and an empty self-referencing intrusive list
 // head. Stamps the same global sequence counter the library itself uses
-// (kSeqCounterAddr) so IDs stay unique. The placeholder LUT shared_ptr
-// allocation is left to the library's own tiny allocator (kMakeEmptyLutAddr)
-// - it's always released and replaced by select_waveform_lut before anything
-// reads it, so there's no benefit to reversing it further.
+// (kSeqCounterAddr) so IDs stay unique.
 static WorkItem*
 native_update_item_ctor(WorkItem* item) {
   memset(item, 0, sizeof(WorkItem));
@@ -205,14 +247,7 @@ native_update_item_ctor(WorkItem* item) {
   item->intList = { &item->intList, &item->intList };
   item->pixelMode = 5;
 
-  // Real signature is (void* out_sp, int size_kb, int mode_width, int
-  // bit_depth, float temperature) - `temperature` is passed in a VFP
-  // register (s0) per AAPCS-VFP, not as a 5th integer arg. size_kb=0 skips
-  // the data-buffer allocation, so the other fields are irrelevant here:
-  // this placeholder is always released and replaced by select_waveform_lut
-  // before anything reads it.
-  auto fn_make_empty_lut = resolve_ptr<void* (*)(void*, int, int, int, float)>(kMakeEmptyLutAddr);
-  fn_make_empty_lut(&item->lut, 0, 0, 0, 0.0f);
+  native_make_empty_lut(&item->lut);
 
   int* seq_counter = resolve_ptr<int*>(kSeqCounterAddr);
   item->seqId = ++(*seq_counter);
@@ -547,9 +582,9 @@ native_build_update_batch(ListHead* incoming, int32_t* incoming_count, void* pos
 // whose threshold `temp` still meets or exceeds, and stops at the first
 // index whose threshold `temp` falls short of (so a single-entry vector
 // trivially resolves to index 0 without a special case). Falls back to an
-// empty placeholder LUT (via the library's own tiny allocator,
-// kMakeEmptyLutAddr - same one update_item_ctor uses) if `mode` is out of
-// range or its ModeEntry has no LUTs at all.
+// empty placeholder LUT (native_make_empty_lut, same one
+// native_update_item_ctor uses) if `mode` is out of range or its ModeEntry
+// has no LUTs at all.
 void
 native_select_waveform_lut(float temp, SpRef* out, std::vector<ModeEntry*>* waveform, unsigned mode) {
   if (mode < waveform->size()) {
@@ -568,8 +603,7 @@ native_select_waveform_lut(float temp, SpRef* out, std::vector<ModeEntry*>* wave
     }
   }
 
-  auto fn_make_empty_lut = resolve_ptr<void* (*)(void*, int, int, int, float)>(kMakeEmptyLutAddr);
-  fn_make_empty_lut(out, 0, 0, 0, 0.0f);
+  native_make_empty_lut(out);
 }
 
 // Native reimplementation of update_lut_is_valid (0x409e4): sanity-checks

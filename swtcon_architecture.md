@@ -199,7 +199,7 @@ Fully native (`native_update.cpp`) — as of Phase 6, zero remaining by-address 
 
 ### 4.1 `select_waveform_lut` — temperature bucket selection
 
-Each `ModeEntry::luts` vector is sorted ascending by `LUTEntry::temperature`. The algorithm scans from index 1, keeping the highest index whose threshold the target temperature still meets or exceeds, stopping at the first index whose threshold it falls short of — "last bucket not exceeding temp," defaulting to the last entry if temp exceeds every threshold. (A single-entry vector trivially resolves to index 0 via the same loop.) Falls back to an empty placeholder LUT (the tiny inline allocator at `0x408a8`) if the mode is out of range or has no LUTs.
+Each `ModeEntry::luts` vector is sorted ascending by `LUTEntry::temperature`. The algorithm scans from index 1, keeping the highest index whose threshold the target temperature still meets or exceeds, stopping at the first index whose threshold it falls short of — "last bucket not exceeding temp," defaulting to the last entry if temp exceeds every threshold. (A single-entry vector trivially resolves to index 0 via the same loop.) Falls back to an empty placeholder LUT (`native_make_empty_lut`, a native reimplementation of the tiny inline allocator at `0x408a8`) if the mode is out of range or has no LUTs.
 
 ### 4.2 `subtract_update_region` — AABB rectangle subtraction
 
