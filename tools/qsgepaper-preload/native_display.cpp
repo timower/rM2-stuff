@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <iostream>
@@ -309,13 +310,25 @@ native_commit_item(WorkItem* item) {
   void* old_ctrl = item->sp3.ctrl;
   item->sp3.ptr = &block->rr;
   item->sp3.ctrl = block;
-  // Cache the sp3 pixel buffer into item.stateDataPtr (+0x44), exactly as the
-  // library does (`node[0x13] = *piVar21`, i.e. item.stateDataPtr =
-  // sp3.ptr->dataPtr, right after allocating sp3). This is NOT optional
-  // bookkeeping: the still-library playback kernels FUN_0004a140/FUN_0004a234
-  // read their per-pixel state through item+0x44 directly, not via
-  // sp3.ptr->dataPtr - so leaving it stale is what made wiring this function in
-  // SIGSEGV downstream (see native_dispatch_processed_regions_* header note).
+  // Cache the sp3 pixel buffer into item.stateDataPtr (+0x44). This is NOT
+  // optional bookkeeping: the still-library playback kernels
+  // FUN_0004a140/FUN_0004a234 read their per-pixel state through item+0x44
+  // directly, not via sp3.ptr->dataPtr - so leaving it stale is what made
+  // wiring this function in SIGSEGV downstream.
+  //
+  // Crucially, +0x44 is NOT the sp3 buffer BASE - it's that base REBASED to the
+  // item's (post-narrowing) rect origin within the buffer, exactly like `gap`
+  // rebases regionRows->dataPtr. The sp3 buffer is allocated for the seed rect
+  // (clamped outward to the 8-row NEON group, so sp3 y0/x0 can sit below the
+  // item's real y0/x0); the incremental path below then narrows item->rect to
+  // the changed-pixel bbox. The playback kernels iterate the NARROWED rect and
+  // index +0x44 with narrowed-relative coords, so +0x44 must skip the
+  // stride*(rectX0-sp3.x0)+(rectY0-sp3.y0) elements between the buffer origin
+  // and the narrowed rect. We seed it to the base here (correct for the force
+  // path, which never narrows, and for unsplit items where rect==sp3 rect); the
+  // incremental path recomputes it after narrowing. Empirically verified: the
+  // real library's +0x44 for a narrowed item was sp3.dataPtr + 0x670, matching
+  // stride*(804-803)+(1072-1064) = 824 u16 = 0x670 (SWTCON_FRAME_LOG A/B).
   item->stateDataPtr = block->rr.dataPtr;
   release_sp(old_ctrl);
 
@@ -410,6 +423,13 @@ native_commit_item(WorkItem* item) {
   item->rectY1 = outY1;
   item->rectX0 = outX0;
   item->rectX1 = outX1;
+  // Rebase +0x44 to the narrowed rect's origin within the (un-narrowed) sp3
+  // buffer - see the seeding comment above. block->rr.{x0,y0} still hold the
+  // seed origin the buffer was laid out with; sp3Buf is indexed with
+  // strideRows*(col-seedX0)+(row-seedY0), so the narrowed rect starts at
+  // strideRows*(outX0-seedX0)+(outY0-seedY0) into it.
+  item->stateDataPtr =
+    sp3Buf + (size_t)strideRows * (outX0 - block->rr.x0) + (size_t)(outY0 - block->rr.y0);
   return true;
 }
 
@@ -843,8 +863,15 @@ native_display_thread_func(void*) {
 
           int32_t gate_target = std::max(max_lifetime, queue->curFrame);
           if (cursor->nFrameCleanupCursor - gate_target > 6) {
-            bool dispatched = native_dispatch_processed_regions_native(&batch->subList);
-            // bool dispatched = native_dispatch_processed_regions(&batch->subList);
+            // A/B toggle: set SWTCON_LIBDISPATCH=1 in the environment to route
+            // this call through the still-library dispatch_processed_regions
+            // instead of the native port, so the two can be diffed on identical
+            // input (how the +0x44 rebasing bug in native_commit_item was
+            // found - see that function). Read once, cached.
+            static const bool use_lib_dispatch = (getenv("SWTCON_LIBDISPATCH") != nullptr);
+            bool dispatched = use_lib_dispatch
+                                ? native_dispatch_processed_regions(&batch->subList)
+                                : native_dispatch_processed_regions_native(&batch->subList);
 
             if (dispatched) {
               int32_t target;
