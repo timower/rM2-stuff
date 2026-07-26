@@ -76,14 +76,15 @@ struct WorkItem {
   int32_t rectY1;                 // +0x14
   int32_t rectX1;                  // +0x18
   int32_t seqId;                    // +0x1c
-  uint8_t _unknown0x20[8];           // +0x20..+0x27 unreversed
-  int16_t _zero0x28;                  // +0x28 always observed 0
+  int32_t frameCursor;               // +0x20 [confirmed] next display-frame index this item's waveform should render into (advance_work_item_frames/FUN_0003ec78)
+  int32_t frameAnchor;                // +0x24 [confirmed] frame this item's playback started on; frameAnchor+lutWidthMinus1 = last active frame
+  int16_t phase;                       // +0x28 [confirmed] frames of this item's waveform already rendered; lutWidthMinus1-phase = frames remaining
   int16_t lutWidthMinus1;               // +0x2a
   SpRef lut;                             // +0x2c shared_ptr<LUTEntry> (selected waveform LUT)
   int16_t mode;                           // +0x34
   int16_t _pad0x36;
   float temperature;                       // +0x38
-  SpRef sp3;                                // +0x3c shared_ptr, purpose unreversed
+  SpRef sp3;                                // +0x3c [confirmed] shared_ptr<RegionRows> - a second per-pixel state buffer distinct from regionRows; advance_work_item_frames reads sp3.ptr's x0/x1 directly (RegionRows' own offsets) to mark the backBuffer dirty-gate array, and the still-library display-commit kernels (FUN_0004f8f0/FUN_0004e680, §6.3) write into it - allocation site and the u16 payload's exact meaning remain unconfirmed
   uint8_t _unknown0x44[4];                   // +0x44 unreversed, adjacent to sp3
   ListHead intList;                           // +0x48 std::list<int> head (IntListNode)
   int32_t intListCount;                        // +0x50
@@ -100,6 +101,9 @@ WI_ASSERT(rectX0, 0x10);
 WI_ASSERT(rectY1, 0x14);
 WI_ASSERT(rectX1, 0x18);
 WI_ASSERT(seqId, 0x1c);
+WI_ASSERT(frameCursor, 0x20);
+WI_ASSERT(frameAnchor, 0x24);
+WI_ASSERT(phase, 0x28);
 WI_ASSERT(lutWidthMinus1, 0x2a);
 WI_ASSERT(lut, 0x2c);
 WI_ASSERT(mode, 0x34);
@@ -148,10 +152,33 @@ BatchNodeClaimed(const BatchNode* b) {
   return *((const uint8_t*)b + 0x15) != 0;
 }
 
-// Shared internal primitives, also used by native_display.cpp's worker
-// thread (flash sequence: temperature/LUT selection + shared_ptr release) -
-// see native_update.cpp for definitions.
+// Shared internal primitives, also used by native_display.cpp (worker
+// thread's flash sequence: temperature/LUT selection + shared_ptr release;
+// display thread: list bookkeeping + work-item cloning/teardown, since
+// display_thread_func manipulates the exact same WorkItemNode/BatchNode
+// lists swtcon_update does) - see native_update.cpp for definitions.
 void release_sp(void* ctrl);
 float native_get_current_temperature();
 void native_select_waveform_lut(float temp, SpRef* out, std::vector<ModeEntry*>* waveform, unsigned mode);
 bool native_update_lut_is_valid(const SpRef& lut);
+
+// Inserts `node` immediately before `pos` in a circular intrusive list (see
+// native_update.cpp's definition for the full comment) - works for any
+// ListHead-shaped sentinel/node (WorkItemNode, BatchNode, IntListNode).
+void list_insert_before(void* pos, void* node);
+
+// Unhooks `node` from whatever circular intrusive list it's currently in.
+void list_unhook(void* node);
+
+// Frees a single work-item list node: its embedded intList, its three
+// shared_ptrs (regionRows/lut/sp3), then the node itself.
+void native_destroy_item_node(WorkItemNode* node);
+
+// Destroys and frees every work-item node in a circular intrusive list
+// (native_destroy_item_node per node).
+void native_free_update_region_list(ListHead* list_head);
+
+// Deep-copies a work item's shared_ptrs/list/scalars, preserving the
+// source's rect and sequence id (see CloneWorkItemFieldsInto for the
+// shared cloning body, also used by the rect-splitting piece-builder).
+WorkItem* native_update_item_copy(WorkItem* dest, const WorkItem* src);

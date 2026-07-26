@@ -23,9 +23,10 @@ Native source lives in `tools/qsgepaper-preload/`. `swtcon.h` is the public
 API (`swtcon_init/update/lock/unlock_post/wait/shutdown`); `swtcon.cpp` owns
 `dlopen`/`dlsym` loading and init/shutdown orchestration; `native_init.cpp`
 owns init-allocated resources; `native_update.cpp` owns the update path;
-`native_display.cpp` owns the worker thread (`native_worker_thread_func`,
-Phase 5); `qsgepaper_globals.h` models the library's own `.bss` layout we
-still read by address.
+`native_display.cpp` owns both persistent display-pipeline threads
+(`native_worker_thread_func` and `native_display_thread_func`, Phase 5);
+`qsgepaper_globals.h` models the library's own `.bss` layout we still read
+by address.
 
 ---
 
@@ -73,7 +74,7 @@ some of the later fields below aren't renamed there yet, noted per-field):
 | `+0x34` | `int16 mode` | Waveform mode (1–8). |
 | `+0x36` | — | padding |
 | `+0x38` | `float temperature` | |
-| `+0x3c` | `SpRef sp3` | **[derived]** A *second* `RegionRows`-shaped buffer, holding this item's per-pixel **state** as `uint16` (distinct from `regionRows`, which holds `render_update_kernel`'s transition-byte *output*). Independently converged on from two unrelated kernel pairs (§6.3, §6.4) — cross-validation is why this is `derived` rather than `guess`, though neither trace reached the allocation site. |
+| `+0x3c` | `SpRef sp3` | **[confirmed]** shape (upgraded from `[derived]` this pass): a *second* `RegionRows`-shaped buffer, holding this item's per-pixel **state** as `uint16` (distinct from `regionRows`, which holds `render_update_kernel`'s transition-byte *output*). `advance_work_item_frames` reads `sp3.ptr`'s `x0`/`x1` directly at `RegionRows`' own offsets (§6.4 step 5) — direct confirmation of the struct-shape claim, on top of the two unrelated kernel pairs (§6.3, §6.4) that independently converged on it earlier. Allocation site and the packed `uint16` payload's exact meaning remain open (§8). |
 | `+0x44` | `void* stateDataPtr` | **[derived]** Cached `sp3.ptr→dataPtr`, same caching pattern as `gap` caches `regionRows.ptr→dataPtr`. |
 | `+0x48` | `ListHead intList` | Embedded `std::list<int>` head. Repurposed by `build_overlap_dependency_list` as an **overlap-dependency link list** — entries reference other in-flight `WorkItemNode`s this item's rendering needs to stay aware of (§6.2). |
 | `+0x50` | `int32 intListCount` | |
@@ -250,12 +251,16 @@ Not closed out: the physical bitfield meanings above, and some base-offset addre
 
 ---
 
-## 6. Display pipeline (Phase 5/6 — worker thread native, display thread still library)
+## 6. Display pipeline (Phase 5 — both persistent threads now native)
 
-Two persistent threads, started from `swtcon_init`. `worker_thread_func` is
-now native (`native_display.cpp`'s `native_worker_thread_func`, started by
-function pointer instead of by address); `display_thread_func` is still
-started by address and remains 100% library.
+Two persistent threads, started from `swtcon_init`. Both are native now
+(`native_display.cpp`): `native_worker_thread_func` (the panel-driving
+frame-pacing loop) and `native_display_thread_func` (the WorkItem/
+dependency-list state machine, GC, and worker-side playback chain), both
+started by function pointer instead of by address. `dispatch_processed_regions`
+(0x50660) and its two playback kernels (0x4a140/0x4a234) remain still-library
+by-address calls (see §6.2 step 4 and §6.4) — the only two calls left in the
+whole display pipeline.
 
 ### 6.1 `worker_thread_func` — one iteration per displayed frame (native)
 
@@ -272,19 +277,25 @@ an off-by-one at first glance but is transcribed verbatim on purpose:
 6. **Flash sequence** (only if `flashRequested`) — the classic full-panel black/white/black flash: `select_waveform_lut(temp, mode=0)` (the fixed flash-waveform mode entry) → if valid: write a checkerboard prime pattern (`0x0000`/`0x5555`/`0xaaaa`) into frame slots 0–2 (`write_flash_prime_pattern`, confirmed identical to `native_init_lut`'s own fill algorithm, just writing into an existing buffer with a caller-supplied pattern instead of allocating with a fixed 0) → `pan_and_unblank` to `read_lut_packed_pixel(lut,0,0,0)`, then `pan_to_frame` through phases `1..lut->size_kb-1` (the LUT's `size_kb` field doubles as this special LUT's phase count) → `pan_to_frame(0)`, `pan_to_frame(16)`, `blank_fb()` → re-upload the real waveform LUT into slots 0–2 and `reset_statebuffer_neutral()` (both confirmed identical in shape to existing init-time code, just applied to an already-allocated buffer) — then unconditionally (valid or not) `release_sp` the selected LUT and clear `flashRequested`.
 7. **Catch-up** — while `curFrame < targetFrame`: `pan_to_frame(curFrame % 16)`, stamp timing under `displayTimingMutex` (same `curFrame - 1`/`curFrame + 1` pattern as step 5), `sem_post(displayThreadSem)`, repeat.
 
-**Confirmed on the emulator**: swapping in the native version and running the full HQ/medium/clearing + overlap-update test suite against the still-library `display_thread_func` produces clean `EXIT=0` throughout (hardware re-confirmation still pending).
+**Confirmed on the emulator**: the full HQ/medium/clearing + overlap-update test suite produces clean `EXIT=0` throughout, now with *both* threads native (hardware re-confirmation still pending).
 
-### 6.2 `display_thread_func` (0x3d2ac) — the deep one (still library)
+### 6.2 `display_thread_func` (0x3d2ac) — native (`native_display_thread_func`)
 
-Runs once per `sem_wait` (posted by §6.1 step 2). Reversed in much greater depth this pass; several points below correct or close out gaps from an earlier, shallower read:
+Runs once per `sem_wait` (posted by §6.1 step 2). Ported natively this pass,
+re-derived directly from disassembly (not just decompiler pseudocode) rather
+than from the earlier prose sketch below, which turned out to have two
+outright errors — the gate-check filter (step 3) and the kernel-selection
+rule in `advance_work_item_frames` (§6.4) — both now closed out exactly
+rather than `[derived]`:
 
-1. **Stale-row cleanup [confirmed, byte-exact]** — loop `for (i = nFrameCleanupCursor - 15; i <= nLastPannedFrame; i++)`, bucket = `i mod 16` (plain C truncating mod — negative buckets only reachable near startup, not fully resolved but the formula itself is exact). Per bucket: scan its 1404-byte (`SCREEN_WIDTH`) dirty-flag array (base `0x670d8 + bucket*0x57c`) byte-by-byte; each nonzero byte at column `c` triggers `copy_init_frame_row(frame_buffer_addr(bucket), c)` — confirmed at address **0x53be4** (not previously named): `memcpy(frame_slot_addr + (row+3)*0x410, g_pLUT + 0xc30, 0x410)`, i.e. it copies a fixed 0x410-byte reference row baked into the LUT blob into frame-slot row `row+3`. After the scan, the whole 1404-byte bucket is zeroed and `nFrameCleanupCursor = i + 16`.
-2. **`g_pListProcessedUpdates` garbage collection [confirmed]** — teardown condition is exactly `curFrame >= frameAnchor + lutWidthMinus1`. Before freeing a doomed node, every *other* processed node's `intList` is scrubbed of any entry whose value (a `WorkItem*`, see `IntListNode`'s comment) equals the doomed node's item pointer — the matching teardown for the dependency links step 3 builds. The doomed node's own `intList`/shared_ptrs (`sp3`/`lut`/`regionRows`) are released and the node freed — this whole step is exactly `native_destroy_item_node`'s existing pattern from `native_update.cpp`, reusable as-is.
-3. **Incoming-batch intake** — non-blocking trylock on `updateQueueMutex`. Empty-sublist batches get unhooked/freed immediately. For non-empty batches:
+1. **Stale-row cleanup [confirmed, byte-exact]** — loop `for (i = nFrameCleanupCursor - 15; i <= nLastPannedFrame; i++)`, bucket = `i mod 16` (plain C truncating mod — negative buckets only reachable near startup, not fully resolved but the formula itself is exact). Per bucket: scan its 1404-byte (`SCREEN_WIDTH`) dirty-flag array (base `0x670d8 + bucket*0x57c`) byte-by-byte; each nonzero byte at column `c` triggers `copy_init_frame_row(frame_buffer_addr(bucket), c)` — confirmed at address **0x53be4** (not previously named): `memcpy(frame_slot_addr + (col+3)*0x410, g_pLUT + 0xc30, 0x410)`, i.e. it copies a fixed 0x410-byte reference row baked into the LUT blob into frame-slot row `col+3`. `copy_init_frame_row`'s own signature is `(void* frame_slot_addr, int col)`. After the scan, the whole 1404-byte bucket is zeroed and `nFrameCleanupCursor = i + 16`. Native (`native_copy_init_frame_row`/`native_stale_row_cleanup`).
+2. **`g_pListProcessedUpdates` garbage collection [confirmed]** — teardown condition is exactly `curFrame >= frameAnchor + lutWidthMinus1`. Before freeing a doomed node, every *other* processed node's `intList` is scrubbed of any entry whose value (a `WorkItem*`, see `IntListNode`'s comment) equals the doomed node's item pointer — the matching teardown for the dependency links step 3 builds. The doomed node's own `intList`/shared_ptrs (`sp3`/`lut`/`regionRows`) are released and the node freed — this whole step decompiles to exactly `native_destroy_item_node`'s existing pattern from `native_update.cpp`, reused as-is by `native_gc_processed_updates`.
+3. **Incoming-batch intake [confirmed]** — non-blocking trylock on `updateQueueMutex`, held for the rest of this tick's *entire* intake+dispatch+commit sequence across every batch in `listIncomingUpdates` — **not dropped before `dispatch_processed_regions`** as an earlier pass of this doc guessed; concurrent `swtcon_update()` calls simply block on the same mutex until this tick finishes. (`BatchNode`'s "claimed" byte at +0x15, per §1/§2, is never written anywhere in `display_thread_func` — it appears to be dead/vestigial given the mutex is held this broadly; still unconfirmed what if anything sets it.) Empty-sublist batches get unhooked/freed immediately. For non-empty batches:
    - `build_overlap_dependency_list(&batch->subList)` is called **twice** on the same batch — once here, once again after commit (step 5) once frame numbers are final. See §6.2a for the algorithm.
-   - A **gate-check "max lifetime" scan** re-walks each item's freshly-built `intList`, applying a filter that skips a dependency entry unless a `sync`/`fullRefresh` flag combination on both items holds — **`[derived, not fully closed]`**: the fields being read are confirmed as `WorkItem::sync`(+0x54)/`fullRefresh`(+0x55), but the exact byte offsets in this specific inlined copy weren't pinned down this pass. Per item this yields `max(lutWidthMinus1 + frameAnchor)` across surviving dependencies (0 if none survive); the batch-wide max of that becomes `maxLifetime`.
-   - **Gate:** `target = max(maxLifetime, curFrame)`; if `nFrameCleanupCursor - target > 6`, dispatch this batch now; else skip it this tick (retry next `sem_wait`).
-4. **`dispatch_processed_regions` (0x50660) — bigger and hairier than first assumed.** Confirmed: a second, fully independent thread pool (own one-time-init flag, thread vector, task queue/mutex/condvar — none shared with `dispatch_update_regions`'s pool). Dispatches to `FUN_0004f8f0` when the batch's *first item's* `sync==0`, else `FUN_0004e680` — picked once for the whole batch, not per item. **Correction from an earlier pass**: the bounding-box computation is *not* a simple union — decompilation shows a genuine interval/rectangle-merge algorithm (heap-allocated rect-merge nodes, dynamic vector growth/reallocation, a byte-cost accumulator, what looks like a full region-merge pass) that has **not** been reversed. The chunk-count gate (1 vs 2) is on the merged result's **X-span** (width) against a threshold of 29, not row-span/height as an earlier pass assumed. **Given this, `dispatch_processed_regions` should stay a still-library by-address call — same treatment as `dispatch_update_regions` — until its merge algorithm is actually understood; don't guess at a native replacement.** Blocks until its own pool finishes; return value is a "did anything actually get dispatched" flag (false = empty rect union).
+   - A **gate-check "max lifetime" scan** re-walks each item's freshly-built `intList`. **Now fully closed (was `[derived, not fully closed]`)**: a dependency entry is skipped — excluded from the max — exactly when `item.sync==0 && other.sync==0 && item.fullRefresh!=0 && other.fullRefresh!=0` (i.e. neither item requested `Sync`, and both are `FullRefresh` — waiting on another `FullRefresh`-only item's completion is pointless since a full refresh redraws the whole area anyway). Surviving dependencies contribute `other.frameAnchor + other.lutWidthMinus1`; the per-item max of that (0 if none survive) folds into a batch-wide `maxLifetime`.
+   - **Gate:** `target = max(maxLifetime, curFrame)`; if `nFrameCleanupCursor - target > 6`, dispatch this batch now; else skip it this tick (retry next `sem_wait`), leaving it untouched in `listIncomingUpdates`.
+   Native (`native_build_overlap_dependency_list`, gate-check inlined into `native_display_thread_func`).
+4. **`dispatch_processed_regions` (0x50660) — bigger and hairier than first assumed, still library.** Confirmed call signature this pass: `bool dispatch_processed_regions(ListHead* subList)` — takes the batch's sub-list head directly, the same "count field aliases the caller's struct" trick `build_overlap_dependency_list` uses (it reads a count at `subList+2 words`, which for every real caller is the containing `BatchNode`'s own `count` field). Confirmed: a second, fully independent thread pool (own one-time-init flag, thread vector, task queue/mutex/condvar — none shared with `dispatch_update_regions`'s pool). Dispatches to `FUN_0004f8f0` when the batch's *first item's* `sync==0`, else `FUN_0004e680` — picked once for the whole batch, not per item. The bounding-box computation is *not* a simple union — decompilation shows a genuine interval/rectangle-merge algorithm (heap-allocated rect-merge nodes, dynamic vector growth/reallocation, a byte-cost accumulator, what looks like a full region-merge pass) that has **not** been reversed. The chunk-count gate (1 vs 2) is on the merged result's **X-span** (width) against a threshold of 29, not row-span/height as an earlier pass assumed. **Given this, `dispatch_processed_regions` stays a still-library by-address call — same treatment as `dispatch_update_regions` — until its merge algorithm is actually understood; don't guess at a native replacement** (`native_dispatch_processed_regions` in `native_display.cpp` is a thin by-address wrapper). Blocks until its own pool finishes; return value is a "did anything actually get dispatched" flag (false = empty rect union).
 5. **Commit / frame-pacing [now fully closed, corrects an earlier `[guess]`]** — on `dispatch_processed_regions` returning true:
    ```
    if (!bWorkerThreadBusy || curFrame != targetFrame) {
@@ -309,13 +320,15 @@ Runs once per `sem_wait` (posted by §6.1 step 2). Reversed in much greater dept
    }
    committed = max(maxLifetime, target)   // maxLifetime from step 3's gate-check scan
    ```
-   Every item in the batch gets `frameCursor = frameAnchor = committed`. (The apparent "separate pacing-cache fields" an earlier pass hypothesized at `UpdateQueueGlobals+0xc`/`+0x80` turned out to just be `curFrame` and `lastPanTimestamp` themselves, read under the mutex for cross-thread visibility — not distinct shadow fields.)
-6. **After commit** — `build_overlap_dependency_list` runs again (dependencies now reflect final frame numbers), then per item: `advance_work_item_frames(item)` (§6.4), deep-copy (`update_item_copy`) onto a fresh node hooked onto `g_pListProcessedUpdates`, `processedUpdatesCount++`. The batch node is unhooked from `listIncomingUpdates`, its now-empty sub-list freed, and the `BatchNode` itself freed.
-7. **Bottom-of-loop sweep [confirmed]** — every node still in `g_pListProcessedUpdates` with `phase < lutWidthMinus1` gets another `advance_work_item_frames` call.
+   Every item in the batch gets `frameCursor = frameAnchor = committed`. (The apparent "separate pacing-cache fields" an earlier pass hypothesized at `UpdateQueueGlobals+0xc`/`+0x80` turned out to just be `curFrame` and `lastPanTimestamp` themselves, read under the mutex for cross-thread visibility — not distinct shadow fields.) Native, inlined into `native_display_thread_func`.
+6. **After commit** — `build_overlap_dependency_list` runs again (dependencies now reflect final frame numbers), then per item: `advance_work_item_frames(item)` (§6.4), deep-copy (`update_item_copy`) onto a fresh node hooked onto `g_pListProcessedUpdates`, `processedUpdatesCount++`. The batch node is unhooked from `listIncomingUpdates`, its now-empty sub-list freed, and the `BatchNode` itself freed. Native.
+7. **Bottom-of-loop sweep [confirmed]** — every node still in `g_pListProcessedUpdates` with `phase < lutWidthMinus1` gets another `advance_work_item_frames` call. Native.
 
 **Exit:** both `g_pListProcessedUpdates` and `g_pListIncomingUpdates` empty *and* `shutdownRequested != 0` → thread exits.
 
-### 6.2a `build_overlap_dependency_list` (0x3a838) — CONFIRMED
+**Confirmed on the emulator**: HQ/medium/clearing + the full overlap-update test suite (including the un-Sync burst-update test, which exercises the gate-check filter's `item.sync==0` path) produce clean `EXIT=0` against the native `display_thread_func`, with continuous `FBIOPAN` traffic throughout and a clean shutdown (hardware re-confirmation still pending).
+
+### 6.2a `build_overlap_dependency_list` (0x3a838) — CONFIRMED, native
 
 `void build_overlap_dependency_list(ListHead* subList)` — takes a batch's `WorkItemNode` sub-list head directly (not the batch struct itself). Per item in the list:
 
@@ -352,20 +365,25 @@ FUN_0004e680 (sync!=0, "force"):
 
 Both write their result into `item.sp3`'s buffer as well as `g_pStateBuffer`. `[guess]`: the `(state<<5)|value` packing is a plausible waveform-LUT index encoding; `sp3`'s downstream consumer wasn't traced.
 
-### 6.4 Worker-side playback chain — deeper than it first looked
+### 6.4 Worker-side playback chain — native, kernel-selection rule corrected
 
-`advance_work_item_frames` (0x3a984) → `FUN_0003f294`/`FUN_0003f1f0` → `FUN_0003ec78` → `FUN_0004a140` or `FUN_0004a234`. Called from `display_thread_func`'s commit step and bottom-of-loop sweep (§6.2 steps 6/7) — not from the worker thread, which is why this chain stayed fully library even after §6.1 went native.
+`advance_work_item_frames` (0x3a984) → `FUN_0003f294`/`FUN_0003f1f0` → `FUN_0003ec78` → `FUN_0004a140` or `FUN_0004a234`. Called from `display_thread_func`'s commit step and bottom-of-loop sweep (§6.2 steps 6/7) — not from the worker thread. Everything down through `FUN_0003ec78` is native now (`native_advance_work_item_frames`/`native_dispatch_plain_kernel`/`native_dispatch_overlap_kernel`/`native_playback_kernel_dispatch` in `native_display.cpp`); only the two leaf kernels (`FUN_0004a140`/`FUN_0004a234`) stay by-address.
+
+**Correction from an earlier pass:** the kernel-selection rule is *not* "`intList` empty → plain, non-empty → overlap-aware" — that was a plausible-looking guess from the high-level shape that turned out wrong once re-derived directly from disassembly. The actual rule, confirmed byte-exact:
+- If `intList` has an **active** dependency (one whose `frameAnchor + lutWidthMinus1` still exceeds this item's own `frameAnchor`): always the **"plain" kernel** (`FUN_0004a140`), regardless of phase alignment.
+- Otherwise (`intList` empty, or every dependency has already expired): the **"overlap-aware" kernel** (`FUN_0004a234`) fires *only* if `phase` is 8-aligned (`phase % 8 == 0`); if not 8-aligned, it's still the plain kernel.
+
+  i.e. the overlap-aware kernel only fires on an 8-aligned phase boundary with no live dependency left to account for — the opposite of what its name suggests at a glance, and the reason the doc's original per-branch mapping was backwards for exactly the "empty `intList`, phase not yet 8-aligned" and "non-empty `intList`, active dependency" cases.
 
 - **`advance_work_item_frames(WorkItem* item)` [confirmed]:**
   1. `frameCount = min(8 - phase%8, lutWidthMinus1 - phase)`.
-  2. Computes 8 words `frame_buffer_addr((frameCursor+i) & 0xf)` for `i=0..7` — ring size is **16** frame slots (matches `FbInitParams.frameCount=0x10`), not 8 as an earlier pass assumed (8 is just how many slot addresses get precomputed per call).
-  3. Branches on `item->intList` empty vs non-empty:
-     - **Empty** (→ `FUN_0003f294`, "plain" kernel path): a backpressure gate against `nFrameCleanupCursor` further bounds `frameCount` if `phase` isn't 8-aligned; aborts (no kernel call) if the resulting budget is insufficient.
-     - **Non-empty** (→ `FUN_0003f1f0`, "overlap-aware" kernel path): walks `intList` transitively (chases into each linked item's own dependencies, not a flat scan) folding a bound from `otherItem->frameCursor - 1` for every "settled" (its own intList empty) still-active linked item, plus a special-cased large bound if any linked item's lifetime exceeds this item's own `frameAnchor`. **[derived, needs A/B]** on the exact edge-case arithmetic — transcribe verbatim rather than simplifying if porting ahead of an A/B pass; only fires for items with overlap dependencies (not the common case).
-  4. After the wrapper call, for every newly-advanced frame slot, marks dirty every byte in `[sp3.x0, sp3.x1]` of that slot's dirty-gate row (base `0x670d8 + slot*0x57c + x`, matching §6.2 step 1's array exactly) — the *producer* side of the stale-row cleanup this array feeds, and of `render_update_kernel` case 7's gate.
-  5. Tail: if `frameCursor < curFrame - 1`, logs a "generator thread has fallen behind" warning (cosmetic). If `frameCursor > targetFrame`: `targetFrame = frameCursor`, then `pthread_cond_broadcast(&workerCond)` under `workerCondMutex` — this is the only place `targetFrame` is written, and how it reaches the (native) worker thread's wait loop.
-- **`FUN_0003f294`** (item's `intList` empty) / **`FUN_0003f1f0`** (non-empty) — **[confirmed]** thin wrappers, signature `(void* frameSlots[8], WorkItem* item, int frameCount, int chunkIndex)` (chunkIndex always `0` from their only caller). Chunk count: default 1; if the rect is non-degenerate and `area = (x1-x0+1)*(y1-y0+1) > 20000`: `chunkCount = (x1-x0 < 10) ? 1 : 2`. Then `FUN_0003ec78(kernelFn, frameSlots, item, frameCount, chunkCount)` — the *only* difference between the two wrappers is which kernel pointer (`FUN_0004a140` vs `FUN_0004a234`) they pass.
-- **`FUN_0003ec78(kernelFn, frameSlots, item, frameCount, chunkCount)` [confirmed]** — the third independent thread pool. `chunkCount < 2`: calls `kernelFn(frameSlots, item, frameCount, /*chunkIndex=*/0, /*chunkCount=*/1)` synchronously (chunkCount forced to 1 even if the caller passed something else). `chunkCount >= 2`: lazily spins up (once, process-lifetime) a `hardware_concurrency()`-sized pool, submits exactly `chunkCount` closures `{kernelFn, frameSlots, item, frameCount, chunkIndex=0..chunkCount-1, chunkCount}`, blocks until idle. This pool's own internal bookkeeping globals are pure implementation detail (nothing else in the binary reads them) — a native port doesn't need to replicate them 1:1, just "spin up N threads once, submit closures, wait," e.g. with `std::thread`/`std::mutex`/`std::condition_variable`. **Commit (runs once per call, after the synchronous call or after all chunks finish):**
+  2. Computes 8 words `frame_buffer_addr((frameCursor+i) % 16)` for `i=0..7` — ring size is **16** frame slots (matches `FbInitParams.frameCount=0x10`), not 8 as an earlier pass assumed (8 is just how many slot addresses get precomputed per call).
+  3. Picks a kernel per the corrected rule above. When the plain kernel is selected *and* `intList` is non-empty, first folds a tighter bound into `frameCount`: walks `intList` transitively (chases into each linked item's own dependencies, not a flat scan) folding a bound from `otherItem->frameCursor - 1` for every "settled" (its own `intList` empty, still `phase < lutWidthMinus1`) linked item, applied only when `phase == 0`. **Now fully closed** (was `[derived, needs A/B]`) — re-derived directly from disassembly this pass, see `native_advance_work_item_frames`'s implementation comment for the exact transcription.
+  4. **Budget clamp:** `budget = nFrameCleanupCursor - frameCursor + 1`. On the plain-kernel path, `frameCount==0 || budget<frameCount` **aborts the whole call** (no kernel call, no tail — an early `return`, not just a skip). On the overlap-kernel path, `budget<frameCount` only skips the kernel call; the tail (step 6) still runs.
+  5. After a kernel call, for every newly-advanced frame slot, marks dirty every byte in `[sp3.x0, sp3.x1]` of that slot's dirty-gate row (base `0x670d8 + slot*0x57c + x`, matching §6.2 step 1's array exactly) — the *producer* side of the stale-row cleanup this array feeds, and of `render_update_kernel` case 7's gate. Only runs if `frameCursor` actually advanced (guards against the LUT-wraparound correction in `FUN_0003ec78`'s commit consuming the whole advance).
+  6. Tail (always reached except the plain-path early-abort in step 4): if `frameCursor < curFrame - 1`, logs a "generator thread has fallen behind" warning (cosmetic). If `frameCursor > targetFrame`: `targetFrame = frameCursor`, then `pthread_cond_broadcast(&workerCond)` under `workerCondMutex` — this is the only place `targetFrame` is written, and how it reaches the (native) worker thread's wait loop.
+- **`FUN_0003f294`** (plain kernel wrapper) / **`FUN_0003f1f0`** (overlap-aware wrapper) — **[confirmed]** thin wrappers, signature `(void* frameSlots[8], WorkItem* item, int frameCount, int chunkIndex)` (chunkIndex always `0` from their only caller). Chunk count: default 1; if the rect is non-degenerate and `area = (x1-x0+1)*(y1-y0+1) > 20000`: `chunkCount = (x1-x0 < 10) ? 1 : 2`. Then `FUN_0003ec78(kernelFn, frameSlots, item, frameCount, chunkCount)` — the *only* difference between the two wrappers is which kernel pointer (`FUN_0004a140` vs `FUN_0004a234`) they pass. Native (`native_dispatch_plain_kernel`/`native_dispatch_overlap_kernel`/`native_playback_chunk_count`).
+- **`FUN_0003ec78(kernelFn, frameSlots, item, frameCount, chunkCount)` [confirmed]** — the third independent thread pool. `chunkCount < 2`: calls `kernelFn(frameSlots, item, frameCount, /*chunkIndex=*/0, /*chunkCount=*/1)` synchronously (chunkCount forced to 1 even if the caller passed something else). `chunkCount >= 2`: lazily spins up (once, process-lifetime) a `hardware_concurrency()`-sized pool, submits exactly `chunkCount` closures `{kernelFn, frameSlots, item, frameCount, chunkIndex=0..chunkCount-1, chunkCount}`, blocks until idle. Native (`native_playback_kernel_dispatch`) — since `chunkCount` is always 1 or 2 here and nothing else in the binary reads this pool's own bookkeeping globals, the port just spins up one `std::thread` per chunk and joins, rather than replicating the library's persistent lazily-initialized pool 1:1. **Commit (runs once per call, after the synchronous call or after all chunks finish):**
   ```
   lutWidth = *(int*)item->lut.ptr          // full packed width, NOT lutWidthMinus1
   newPhase = item->phase + frameCount
@@ -398,12 +416,11 @@ Three independent, lazily-spun-up, `hardware_concurrency()`-sized, process-lifet
 
 Native (`native_close_fb`, `native_unlock_pid_file`, `native_free_LUT`,
 `native_free_statebuffer`, etc.), draining both update-queue lists and
-joining both threads (the native worker thread and the still-library display
-thread - `pthread_join` doesn't care which) before releasing native buffers.
-See `AGENTS.md` Phase 2 for the initial port and the exit-time-destructor
-double-free fix (the library's own `destroy_waveform_struct` exit handler
-means the native waveform struct must be an intentionally-leaked
-`std::vector`, not owned/freed natively).
+joining both threads (both native now - `pthread_join` doesn't care) before
+releasing native buffers. See `AGENTS.md` Phase 2 for the initial port and
+the exit-time-destructor double-free fix (the library's own
+`destroy_waveform_struct` exit handler means the native waveform struct must
+be an intentionally-leaked `std::vector`, not owned/freed natively).
 
 ---
 
@@ -413,12 +430,11 @@ Everything not marked `[confirmed]` above, plus:
 
 - **`render_update_kernel`'s bitfield semantics** (§5.2) and **base-offset arithmetic**.
 - **`FUN_0004a140`'s exact NEON shift constants** (§6.4) — shape confirmed, not term-verified.
-- **The `(state<<5)|value` packing** (§6.3) and `sp3`'s downstream consumer.
-- **`FUN_0004a234` and its three delegates** (`FUN_0004a3f8`/`FUN_0004a9e0`/`FUN_0004b098`) — fully unreversed; overlap-only, deferrable.
-- **`dispatch_processed_regions`'s rectangle-merge algorithm** (§6.2 step 4) — new finding this pass, genuinely unreversed (not the simple bounding-box union an earlier pass assumed). Recommend keeping this call by-address rather than guessing at a native replacement.
-- **The incoming-batch gate-check's `sync`/`fullRefresh` dependency filter** (§6.2 step 3) — fields confirmed, exact byte offsets in this inlined copy not pinned down.
-- **`advance_work_item_frames`'s overlap-aware bound computation** (§6.4, the `FUN_0003f1f0` path) — shape confirmed, exact edge-case arithmetic not closed out; transcribe verbatim rather than simplifying if porting ahead of an A/B pass.
-- **`FUN_00050660`'s completion-tracking globals** — pool shape confirmed, a few exact field semantics aren't (why they're left `DAT_`-named in Ghidra, §2). (`FUN_0003ec78`'s own pool globals, by contrast, are confirmed as pure implementation detail nothing else reads - safe to reimplement with ordinary `std::thread`/mutex/condvar without replicating them.)
+- **The `(state<<5)|value` packing** (§6.3) and `sp3`'s downstream consumer — `sp3`'s own shape (a `RegionRows`-aliased buffer, x0/x1 at the usual offsets) is now `[confirmed]` via `advance_work_item_frames` reading it directly (§6.4 step 5); only the packed-value semantics and allocation site remain open.
+- **`FUN_0004a234` and its three delegates** (`FUN_0004a3f8`/`FUN_0004a9e0`/`FUN_0004b098`) — fully unreversed; only reachable via the "plain kernel" path when `intList` has an active dependency and via the overlap-kernel path otherwise (§6.4's corrected selection rule) - deferrable, not the common case.
+- **`dispatch_processed_regions`'s rectangle-merge algorithm** (§6.2 step 4) — genuinely unreversed (not a simple bounding-box union). Call signature is now `[confirmed]` (`bool(ListHead* subList)`); keep this call by-address rather than guessing at a native replacement.
+- **`BatchNode`'s "claimed" byte** (+0x15, §1/§2) — confirmed this pass that `display_thread_func` never writes it (the mutex is held across the whole intake+dispatch sequence instead, see §6.2 step 3); still unknown what, if anything, ever sets it, or whether it's simply dead.
+- **`FUN_00050660`'s completion-tracking globals** — pool shape confirmed, a few exact field semantics aren't (why they're left `DAT_`-named in Ghidra, §2). (`FUN_0003ec78`'s own pool globals, by contrast, are confirmed as pure implementation detail nothing else reads - the native port uses ordinary `std::thread` per chunk instead.)
 
 The frame-pacing target formula (§6.2 step 5) is now fully closed out (exact
 constants, not just shape) but still worth an A/B pass before depending on it,
@@ -453,23 +469,17 @@ Still library, update path:
 | `dispatch_update_regions` | 0x4fff8 | Control flow + output struct confirmed; drives `render_update_kernel` |
 | `render_update_kernel` | 0x4e7b8 | Formulas derived, bitfield semantics unverified |
 
-Still library, display pipeline (all reversed to control-flow-confirmed detail this pass unless noted):
+Still library, display pipeline - the only two calls left in the whole display pipeline:
 
 | Function | Address | Role |
 |---|---|---|
-| `display_thread_func` | 0x3d2ac | The remaining persistent thread; see §6.2 |
-| `build_overlap_dependency_list` | 0x3a838 | Builds/clears an item's overlap-dependency `intList` against `g_pListProcessedUpdates` - fully confirmed, see §6.2a |
-| `advance_work_item_frames` | 0x3a984 | Advances one item by up to 8 (of 16 ring) frames; marks the backBuffer dirty gate - see §6.4 |
-| `copy_init_frame_row` | 0x53be4 | Restores one stale frame-slot row from the LUT blob's fixed reference row - newly named this pass |
-| `dispatch_processed_regions` | 0x50660 | Second independent dispatcher - hides a genuinely unreversed rectangle-merge algorithm, **not** a simple bounding-box union as an earlier pass assumed; recommend calling by address indefinitely rather than guessing at a port |
-| `FUN_0003f294` / `FUN_0003f1f0` | 0x3f294 / 0x3f1f0 | Thin wrappers into `FUN_0003ec78` - confirmed, see §6.4 |
-| `FUN_0003ec78` | 0x3ec78 | Third thread pool; commits item phase/frameCursor after the kernel runs - confirmed, see §6.4 |
+| `dispatch_processed_regions` | 0x50660 | Second independent dispatcher - hides a genuinely unreversed rectangle-merge algorithm, **not** a simple bounding-box union as an earlier pass assumed; call signature `bool(ListHead* subList)` confirmed; recommend calling by address indefinitely rather than guessing at a port |
 | `FUN_0004a140` | 0x4a140 | "Plain" per-frame OR-accumulated waveform bit-plane kernel - call signature confirmed, body `[derived]` |
 | `FUN_0004a234` | 0x4a234 | "Overlap-aware" kernel variant; delegates to 3 unreversed functions for frameCount 1–3 - call signature confirmed, body `[guess]` |
 | `FUN_0004a3f8` / `FUN_0004a9e0` / `FUN_0004b098` | 0x4a3f8 / 0x4a9e0 / 0x4b098 | Unreversed; `FUN_0004a234`'s delegates |
-| `FUN_0004f8f0` / `FUN_0004e680` | 0x4f8f0 / 0x4e680 | Display-side commit kernels (incremental vs. force) - call signature confirmed (no hidden args), body `[guess]`/`[derived]` |
+| `FUN_0004f8f0` / `FUN_0004e680` | 0x4f8f0 / 0x4e680 | Display-side commit kernels (incremental vs. force), called internally by `dispatch_processed_regions` - call signature confirmed (no hidden args), body `[guess]`/`[derived]` |
 
-Native (Phase 5, this pass) - see `native_display.cpp`:
+Native (Phase 5) - see `native_display.cpp`:
 
 | Function | Address | Role |
 |---|---|---|
@@ -477,6 +487,12 @@ Native (Phase 5, this pass) - see `native_display.cpp`:
 | `write_flash_prime_pattern` | 0x53c04 | Shares `native_init_lut`'s fill body, parameterized by dest+pattern |
 | `read_lut_packed_pixel` | 0x40c58 | Generic bit-unpacking read of one packed pixel from a LUTEntry |
 | `reset_statebuffer_neutral` | 0x4fbe0 | Reapplies the `0x1e001e` statebuffer fill |
+| `display_thread_func` | 0x3d2ac | The WorkItem/dependency-list state machine - see §6.2. Ported natively this pass (`native_display_thread_func`); no longer started by address |
+| `build_overlap_dependency_list` | 0x3a838 | Builds/clears an item's overlap-dependency `intList` against `g_pListProcessedUpdates` - see §6.2a (`native_build_overlap_dependency_list`) |
+| `advance_work_item_frames` | 0x3a984 | Advances one item by up to 8 (of 16 ring) frames; marks the backBuffer dirty gate - see §6.4 (`native_advance_work_item_frames`) |
+| `copy_init_frame_row` | 0x53be4 | Restores one stale frame-slot row from the LUT blob's fixed reference row (`native_copy_init_frame_row`) |
+| `FUN_0003f294` / `FUN_0003f1f0` | 0x3f294 / 0x3f1f0 | Thin wrappers into `FUN_0003ec78` - see §6.4 (`native_dispatch_plain_kernel`/`native_dispatch_overlap_kernel`) |
+| `FUN_0003ec78` | 0x3ec78 | Third thread pool; commits item phase/frameCursor after the kernel runs - see §6.4 (`native_playback_kernel_dispatch`), one `std::thread` per chunk instead of the library's persistent pool |
 
 ## 10. Global reference
 

@@ -173,6 +173,17 @@ constexpr uintptr_t kCachedTemperatureAddr = 0x66e20;   // float, g_flCachedTemp
 constexpr uintptr_t kTemperatureMutexAddr = 0x6d180;    // pthread_mutex_t, g_dwTemperatureMutex
 constexpr uintptr_t kSeqCounterAddr = 0x6d178;          // int, work-item sequence id counter
 
+// backBuffer dirty-gate array (0x670d8, byte-verified via decompilation of
+// both display_thread_func and advance_work_item_frames - see
+// swtcon_architecture.md §6.2 step 1 / §6.4): 16 buckets, one per
+// frame-slot ring position, each SCREEN_WIDTH (0x57c) bytes, one byte per
+// column. advance_work_item_frames marks a newly-rendered frame's
+// [sp3.x0, sp3.x1] columns dirty in its ring-position's bucket;
+// display_thread_func's stale-row cleanup drains + zeroes each bucket once
+// its ring position falls out of the live window.
+constexpr uintptr_t kBackBufferDirtyGateAddr = 0x670d8;
+constexpr int32_t kDirtyGateRowBytes = 0x57c; // SCREEN_WIDTH
+
 // --- Persisted statebuffer + gamma table --------------------------------
 // Fully contiguous, all three pointers/size wired together at init
 // (swtcon_init) and torn down together (native_free_statebuffer).

@@ -85,7 +85,8 @@ retain_sp(void* ctrl_) {
 // every list-head sentinel (ListHead) and every node type in this file
 // (WorkItemNode, BatchNode, IntListNode) - so `pos` may be a real node or
 // the sentinel itself (inserting-before-the-sentinel == append-at-tail).
-static void
+// Non-static: also used by native_display.cpp (see native_update.h).
+void
 list_insert_before(void* pos, void* node) {
   void** p = (void**)pos;
   void** n = (void**)node;
@@ -97,7 +98,8 @@ list_insert_before(void* pos, void* node) {
 }
 
 // Unhooks `node` from whatever circular intrusive list it's currently in.
-static void
+// Non-static: also used by native_display.cpp (see native_update.h).
+void
 list_unhook(void* node) {
   void** n = (void**)node;
   void* next = n[0];
@@ -112,7 +114,11 @@ list_unhook(void* node) {
 // destructor), then frees the node itself. Shared by
 // native_free_update_region_list (whole-list teardown) and
 // native_subtract_update_region (single-node removal when clipping).
-static void
+// Non-static: also used by native_display.cpp's GC of g_pListProcessedUpdates
+// (see native_update.h) - display_thread_func's node-teardown decompiles
+// identically to this function (intList free, then sp3/lut/regionRows
+// release, then operator delete, in that order).
+void
 native_destroy_item_node(WorkItemNode* node) {
   WorkItem& item = node->item;
   for (auto* n = (IntListNode*)item.intList.next; (void*)n != &item.intList;) {
@@ -129,7 +135,8 @@ native_destroy_item_node(WorkItemNode* node) {
 // Native reimplementation of free_update_region_list (0x3e540): destroys and
 // frees every work-item node in a circular intrusive list (used for both the
 // pending-accumulation list and a claimed batch's region list).
-static void
+// Non-static: also used by native_display.cpp (see native_update.h).
+void
 native_free_update_region_list(ListHead* list_head) {
   auto* node = (WorkItemNode*)list_head->next;
   if ((void*)node == (void*)list_head)
@@ -178,7 +185,8 @@ CloneWorkItemFieldsInto(WorkItem* dest, const WorkItem* src) {
 }
 
 // Native reimplementation of update_item_copy (0x3e850).
-static WorkItem*
+// Non-static: also used by native_display.cpp (see native_update.h).
+WorkItem*
 native_update_item_copy(WorkItem* dest, const WorkItem* src) {
   CloneWorkItemFieldsInto(dest, src);
   return dest;
