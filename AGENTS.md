@@ -72,3 +72,38 @@ Execute the test on the emulator using `LD_PRELOAD` to inject the framebuffer mo
 ssh RemEmu 'LD_PRELOAD=/home/root/libioctl-dump.so /home/root/qsgepaper-test'
 ```
 Note that a successful run requires some input, see the `getchar()` calls.
+
+### 4. A/B regression harness (`swtcon-ab-test`)
+
+`swtcon-ab-test` (`ab_harness.cpp` + `ab_capture.cpp`) is the automated
+differential test. It runs a fixed matrix of update sequences (overlap splits,
+non-8-aligned rects, cross-batch overdraw - the cases that make an item's sp3
+rebase offset nonzero) through the *real* pipeline and, when
+`SWTCON_AB_CAPTURE=<path>` is set, records a sorted, pointer-normalized dump of:
+
+- `DISP` - per surviving item after dispatch: narrowed rect, sp3 bounds, sp3
+  content hash, and `stateDataPtr` as a u16 **offset** from `sp3.dataPtr`
+  (`sdpoff`, the field the +0x44 bug got wrong);
+- `PLAY` - each transient waveform frame, captured race-free on the display
+  thread right after the playback kernel writes it (keyed by `seqId`/frame/slot);
+- `STATE` - the settled state-buffer hash per step (the framebuffer ring is
+  deliberately not hashed - the live worker thread races it).
+
+The capture hooks live on the production path (`native_display.cpp`) and are
+no-ops unless the env var is set, so this exercises exactly what ships. Run the
+same input once native and once through the still-library dispatch
+(`SWTCON_LIBDISPATCH=1`, the ground truth), then diff:
+
+```bash
+scp build/dev/tools/qsgepaper-preload/swtcon-ab-test RemEmu:/home/root/
+ssh RemEmu 'cd /home/root && \
+  SWTCON_AB_CAPTURE=/tmp/native.txt                     LD_PRELOAD=./libioctl-dump.so ./swtcon-ab-test && \
+  SWTCON_AB_CAPTURE=/tmp/lib.txt SWTCON_LIBDISPATCH=1    LD_PRELOAD=./libioctl-dump.so ./swtcon-ab-test && \
+  ./swtcon-ab-test --compare /tmp/native.txt /tmp/lib.txt'
+```
+
+`--compare` exits 0 on a full match, 1 on any divergence (printing the
+localizing records), 2 on I/O error - so it drops straight into CI. Native runs
+are deterministic, so two native captures also compare equal; that doubles as a
+race check. Validated by reverting the +0x44 rebase: the harness fails and
+points straight at the mismatched `sdpoff`/`PLAY` records.

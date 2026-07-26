@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 project(qsgepaper-preload)
 
-add_executable(qsgepaper-test main.cpp swtcon.cpp native_init.cpp native_update.cpp native_display.cpp)
+add_executable(qsgepaper-test main.cpp swtcon.cpp native_init.cpp native_update.cpp native_display.cpp ab_capture.cpp)
 target_link_libraries(qsgepaper-test dl)
 
 # libqsgepaper.so was built against the C++11 std::string SSO ABI
@@ -30,6 +30,13 @@ target_compile_definitions(render-kernel-addr-map PRIVATE _GLIBCXX_USE_CXX11_ABI
 add_executable(dispatch-processed-regions-probe dispatch_processed_regions_probe.cpp native_init.cpp native_update.cpp)
 target_link_libraries(dispatch-processed-regions-probe dl)
 target_compile_definitions(dispatch-processed-regions-probe PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
+
+# A/B regression harness: runs a matrix of update sequences and captures the
+# transient drive stream so a native-vs-library (SWTCON_LIBDISPATCH) diff can
+# catch pipeline regressions the settled buffers miss - see ab_harness.cpp.
+add_executable(swtcon-ab-test ab_harness.cpp swtcon.cpp native_init.cpp native_update.cpp native_display.cpp ab_capture.cpp)
+target_link_libraries(swtcon-ab-test dl)
+target_compile_definitions(swtcon-ab-test PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
 
 install(
   TARGETS qsgepaper-test

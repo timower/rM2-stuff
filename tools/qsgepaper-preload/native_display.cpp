@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <vector>
 
+#include "ab_capture.h"
 #include "native_init.h"
 #include "native_update.h"
 #include "qsgepaper_globals.h"
@@ -784,6 +785,12 @@ native_advance_work_item_frames(WorkItem* item) {
     }
   }
 
+  // A/B harness: record the transient frames this advance just wrote (race-free
+  // - display thread only, right after the kernel returned). No-op unless
+  // SWTCON_AB_CAPTURE is set. This is the layer that caught the +0x44 bug.
+  if (dispatched && item->frameCursor != start_frame_cursor)
+    ab_capture_playback(item, start_frame_cursor, item->frameCursor);
+
   // Shared tail: cosmetic "fallen behind" warning, then bump targetFrame and
   // wake the worker thread if this item's cursor moved it forward - the
   // only place targetFrame is written, and how the (native) worker thread's
@@ -872,6 +879,8 @@ native_display_thread_func(void*) {
             bool dispatched = use_lib_dispatch
                                 ? native_dispatch_processed_regions(&batch->subList)
                                 : native_dispatch_processed_regions_native(&batch->subList);
+
+            ab_capture_dispatch(&batch->subList); // no-op unless SWTCON_AB_CAPTURE set
 
             if (dispatched) {
               int32_t target;
