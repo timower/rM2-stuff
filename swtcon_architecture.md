@@ -156,7 +156,7 @@ The backBuffer per-frame-slot dirty-gate array (marked by `advance_work_item_fra
 
 | Name | Address | Role |
 |---|---|---|
-| `g_pGammaTable` | `0x6d1d4` | 128×0x88-byte gamma table, indexed `[row&0x7f][col&0x7f]`. |
+| `g_pGammaTable` | `0x6d1d4` | 128×0x88-byte table, indexed `[row&0x7f][col&0x7f]`. Despite the name, `[derived]` this is an ordered-dither threshold matrix, not a tone curve — see §5.2. |
 | `g_dwTemperatureMutex` | `0x6d180` | Guards `g_flCachedTemperature`. |
 | `g_flCachedTemperature` | `0x66e20` | Background-polled panel temperature (raw − 2.0°C). |
 | `g_nPidFd` | `0x66dec` | |
@@ -237,6 +237,19 @@ Each piece is a full clone of the old item (preserving LUT/mode/temp/flags) with
 
 Case 6 is a bare alias of case 8. So under auto mode, waveform modes 2–5 run case 9's formula and modes 1/6/7 run case 8's; case 7's own formula is only reached via an explicit `pixelMode=7`.
 
+**`pixelMode` is xochitl's `extraMode` — `[derived]`, cross-referenced against `Version3.20.cpp`.** `libs/rm2fb/Versions/Version3.20.cpp`'s `AddressInfo::mapUpdate()` sets an `extraMode` field per input source before calling into the library's update function; that value lands directly in `WorkItem::pixelMode`. Its own table (comment above `mapUpdate`, driven by observed xochitl behavior, predates this reversing project):
+
+| Source | wave | flags | extraMode (`pixelMode`) |
+|---|---|---|---|
+| Refresh | 2 | 1 | 9 |
+| UI (full) | 3 | 0 | 9 |
+| UI (partial) / Progress | 3 or 1 | 0 | 6 |
+| **Pen** | 1 | 2 | **7** |
+| **Marker** | 1 | 2 | **7** |
+| Pan / key-UI / Shape | 6 | 0 | 6 |
+
+So pixel mode 7 (the `backBuffer`-gated dither) is specifically what the pen and marker tools use; mode 6 (unconditional dither, case 8 alias) is what panning and UI chrome use; mode 9 is full-screen refreshes. This matches the user-visible symptom this section was investigated for: dithering artifacts are seen exactly when drawing gray with the pen and when panning, because those are the two paths that explicitly select a gamma/dither formula instead of falling through waveform-mode auto-dispatch.
+
 **Per-pixel formulas** — `[derived]` except case 0xd. Shared terms: `src` is the 16-bit source pixel from `dataBuffer`, split into `lo5 = src&0x1f`, `mid6 = (src&0x7ff)>>5`, `hi5 = src>>0xb` (bitfield split confirmed; what each field physically represents — old level / target level / dither accumulator — is `[guess]`); `gamma = g_pGammaTable[row&0x7f][col&0x7f]`.
 
 ```
@@ -247,7 +260,14 @@ case 0xd:             out = 0x1e   // [confirmed] flat fill, no source read — 
 default (0xa/0xb/0xc): out = ((lo5+mid6+hi5) >> 3) << 1                                  // no gamma lookup
 ```
 
-Not closed out: the physical bitfield meanings above, and some base-offset address arithmetic converting the chunked/180°-rotated iteration order to buffer addresses (internally consistent with `clamp_update_rect`'s rotation, not hand-verified term by term).
+**`gamma`/`g_pGammaTable` is an ordered-dither threshold matrix, not a tone curve — `[derived]`, upgraded this pass.** Three independent facts converge:
+1. It's indexed purely by pixel *position* (`row&0x7f`, `col&0x7f`, a 128×128 tile), not by pixel *value* — a real gamma/tone-response curve would be indexed by intensity, not screen coordinate.
+2. Its source data (`tools/qsgepaper-preload/statebuffer_table.h`, 17,407 `uint16` values) is a static blob copied byte-for-byte from the library's binary (`file offset 0x496da`, per the commit that generated it) — not computed at runtime — and the values themselves are non-monotonic/pseudo-random (range 0–65532, no smooth progression). A tone curve would be smooth; a dither threshold matrix looks exactly like this.
+3. Every formula that reads `gamma` *adds* it into the pre-quantization sum before an integer divide (e.g. case 8: `(lo5+mid6+hi5+gamma)/125`) — textbook ordered dithering, where a spatially-varying threshold shifts the rounding boundary per pixel to fake intermediate gray levels out of a small set of discrete output levels (`*30` → steps of 30). Case 0xa/0xb/0xc's dither-free formula (no gamma lookup, plain bit-shift quantization) is consistent with this too — those are presumably reached by pixel modes xochitl 3.20 doesn't use, and skip dithering entirely.
+
+This also gives the `backBuffer` gate in case 7 a concrete role: `libs/rm2fb/Versions/Version3.20.cpp:38-39` independently calls this same buffer `getGrayBuffer()` with a comment guessing it's used "when extraMode == 7" — written before this reversing project and now confirmed exactly. For the pen/marker path, dithering is applied only where the caller's gray mask is set; elsewhere the kernel emits the `0x20` skip sentinel and leaves the pixel alone.
+
+Not closed out: the individual physical meaning of `lo5`/`mid6`/`hi5` (old level vs. target level vs. some other per-pixel accumulator — the *that* they get dithered together is now clear, the *what each one is* isn't), and some base-offset address arithmetic converting the chunked/180°-rotated iteration order to buffer addresses (internally consistent with `clamp_update_rect`'s rotation, not hand-verified term by term).
 
 ---
 
@@ -428,7 +448,7 @@ be an intentionally-leaked `std::vector`, not owned/freed natively).
 
 Everything not marked `[confirmed]` above, plus:
 
-- **`render_update_kernel`'s bitfield semantics** (§5.2) and **base-offset arithmetic**.
+- **`render_update_kernel`'s bitfield semantics** (§5.2) — narrowed this pass: `gamma`'s *role* (an ordered-dither threshold matrix, added pre-quantization) is now `[derived]` with strong cross-file evidence, but what `lo5`/`mid6`/`hi5` individually represent is still open — and **base-offset arithmetic**.
 - **`FUN_0004a140`'s exact NEON shift constants** (§6.4) — shape confirmed, not term-verified.
 - **The `(state<<5)|value` packing** (§6.3) and `sp3`'s downstream consumer — `sp3`'s own shape (a `RegionRows`-aliased buffer, x0/x1 at the usual offsets) is now `[confirmed]` via `advance_work_item_frames` reading it directly (§6.4 step 5); only the packed-value semantics and allocation site remain open.
 - **`FUN_0004a234` and its three delegates** (`FUN_0004a3f8`/`FUN_0004a9e0`/`FUN_0004b098`) — fully unreversed; only reachable via the "plain kernel" path when `intList` has an active dependency and via the overlap-kernel path otherwise (§6.4's corrected selection rule) - deferrable, not the common case.
