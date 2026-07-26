@@ -11,3 +11,10 @@
 // Started by address today (kWorkerThreadFuncAddr in swtcon.cpp); this is
 // its native replacement, same pthread entry-point signature.
 void* native_worker_thread_func(void* arg);
+
+// Mirrors FUN_0003b4b4 (0x3b4b4): requests the worker thread's flash
+// sequence (native_worker_thread_func step 6) and blocks until it
+// completes. Called by EPFramebufferSwtcon::initialize (0x38e30) right
+// after qsgepaper_init - i.e. right after what's now swtcon_init - to flash
+// the panel once on startup.
+void native_request_flash_and_wait();

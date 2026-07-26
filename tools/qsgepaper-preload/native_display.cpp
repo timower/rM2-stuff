@@ -7,6 +7,7 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <sys/time.h>
+#include <unistd.h>
 #include <vector>
 
 #include "native_init.h"
@@ -187,4 +188,23 @@ native_worker_thread_func(void*) {
   }
 
   return nullptr;
+}
+
+// Mirrors FUN_0003b4b4: sets flashRequested, wakes the worker thread (it
+// polls this flag at step 6 of the loop above), then blocks until the flag
+// clears again. The library's version does this via a futex-backed
+// std::atomic<uint8_t>::wait/notify pair; a plain poll loop is equivalent
+// and avoids replicating threading boilerplate nothing else reads (same
+// call already made for swtcon_wait's own queue-drain spin-loop).
+void
+native_request_flash_and_wait() {
+  auto* queue = update_queue_globals();
+
+  queue->flashRequested = 1;
+  pthread_mutex_lock(&queue->workerCondMutex);
+  pthread_cond_broadcast(&queue->workerCond);
+  pthread_mutex_unlock(&queue->workerCondMutex);
+
+  while (queue->flashRequested != 0)
+    usleep(100);
 }

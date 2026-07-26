@@ -213,6 +213,13 @@ swtcon_init() {
     param.__sched_priority = 98;
     pthread_setschedparam(queue->displayThread, SCHED_FIFO, &param);
 
+    // EPFramebufferSwtcon::initialize (0x38e30) calls qsgepaper_init and then
+    // FUN_0003b4b4 - a startup flash of the panel, blocking until it
+    // completes - before doing anything else. swtcon_init now replaces that
+    // whole call site, so it does the same here.
+    std::cout << "Requesting startup flash..." << std::endl;
+    native_request_flash_and_wait();
+
     std::cout << "swtcon_init: native initialization complete!" << std::endl;
     return (uint16_t*)g_pImageBufferNative;
 
