@@ -85,7 +85,7 @@ struct WorkItem {
   int16_t _pad0x36;
   float temperature;                       // +0x38
   SpRef sp3;                                // +0x3c [confirmed] shared_ptr<RegionRows> - a second per-pixel state buffer distinct from regionRows; advance_work_item_frames reads sp3.ptr's x0/x1 directly (RegionRows' own offsets) to mark the backBuffer dirty-gate array, and the still-library display-commit kernels (FUN_0004f8f0/FUN_0004e680, §6.3) write into it - allocation site and the u16 payload's exact meaning remain unconfirmed
-  uint8_t _unknown0x44[4];                   // +0x44 unreversed, adjacent to sp3
+  void* stateDataPtr;                        // +0x44 [confirmed] cached sp3.ptr->dataPtr (the u16 sp3 pixel buffer). dispatch_processed_regions writes it right after allocating sp3 (`node[0x13] = sp3.ptr->dataPtr`); the still-library playback kernels FUN_0004a140/FUN_0004a234 read their per-pixel state through THIS cached pointer (item+0x44), NOT via sp3.ptr->dataPtr - so it must be set whenever sp3 is (re)allocated or they dereference stale/null and SIGSEGV
   ListHead intList;                           // +0x48 std::list<int> head (IntListNode)
   int32_t intListCount;                        // +0x50
   uint8_t sync;                                 // +0x54
@@ -109,6 +109,7 @@ WI_ASSERT(lut, 0x2c);
 WI_ASSERT(mode, 0x34);
 WI_ASSERT(temperature, 0x38);
 WI_ASSERT(sp3, 0x3c);
+WI_ASSERT(stateDataPtr, 0x44);
 WI_ASSERT(intList, 0x48);
 WI_ASSERT(intListCount, 0x50);
 WI_ASSERT(sync, 0x54);

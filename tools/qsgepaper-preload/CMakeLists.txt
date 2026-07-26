@@ -24,6 +24,13 @@ add_executable(render-kernel-addr-map render_kernel_addr_map.cpp native_init.cpp
 target_link_libraries(render-kernel-addr-map dl)
 target_compile_definitions(render-kernel-addr-map PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
 
+# Empirical probe for dispatch_processed_regions (still-library, the last
+# remaining by-address call in the native port) - see
+# dispatch_processed_regions_probe.cpp's header comment.
+add_executable(dispatch-processed-regions-probe dispatch_processed_regions_probe.cpp native_init.cpp native_update.cpp)
+target_link_libraries(dispatch-processed-regions-probe dl)
+target_compile_definitions(dispatch-processed-regions-probe PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
+
 install(
   TARGETS qsgepaper-test
   COMPONENT tools

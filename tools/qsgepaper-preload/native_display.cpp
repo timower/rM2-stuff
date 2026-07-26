@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <iostream>
@@ -214,29 +215,262 @@ native_request_flash_and_wait() {
 
 // ---------------------------------------------------------------------
 // Native reimplementation of display_thread_func (0x3d2ac) and the chain it
-// calls into - see swtcon_architecture.md §6.2/§6.2a/§6.4 for the
+// calls into - see swtcon_architecture.md §6.2/§6.2a/§6.3/§6.4 for the
 // prose write-up. Every function below was re-derived directly from Ghidra
 // decompilation during this pass (not just the higher-level sketch in the
 // architecture doc, which turned out to have the wrong kernel-selection
 // rule for advance_work_item_frames - see that function's comment).
 //
-// Two pieces stay still-library, called by address exactly like
+// One piece stays still-library, called by address exactly like
 // render_update_kernel is in the update path:
-//   0x50660 dispatch_processed_regions - hides a genuinely unreversed
-//           rectangle-merge algorithm (own thread pool, dynamic vector
-//           growth, node-based rect merging). Confirmed call signature
-//           this pass: bool(ListHead* subList) - it reads a "count" field
-//           at subList+2 words, which for every real caller happens to
-//           alias the containing BatchNode's own `count` field, exactly
-//           the same trick build_overlap_dependency_list's signature uses.
 //   0x4a140/0x4a234 the two worker-side playback kernels ("plain"/
 //           "overlap-aware") - call signature confirmed, bodies
 //           [derived]/[guess] (see architecture doc §8).
-constexpr uintptr_t kDispatchProcessedRegionsAddr = 0x50660;
 constexpr uintptr_t kPlainPlaybackKernelAddr = 0x4a140;
 constexpr uintptr_t kOverlapPlaybackKernelAddr = 0x4a234;
 
+extern void* g_pStateBufferNative;
+
+constexpr int kScreenWidth = 1404;
+constexpr int kScreenHeight = 1872;
+
+// dispatch_processed_regions's sp3 control block: same vtable+refcounts+
+// RegionRows-shaped-body layout as native_dispatch_update_regions's
+// RegionRowsBlock (native_update.cpp), except the payload is uint16_t per
+// pixel (a packed old/new "transition" value, see native_commit_item below)
+// rather than a byte. Deliberately doesn't reuse the library's own vtable
+// for this allocation site: unlike RegionRowsBlock's simple PC-relative
+// `&PTR_LAB_000651ec` load, this one's vtable pointer is loaded through a
+// GOT-indirect double load in the disassembly - the same more-ambiguous
+// pattern AGENTS.md already flagged for native_make_empty_lut's allocator,
+// and not worth risking a silent release_sp mismatch over. Defines its own
+// tiny native vtable instead, same vt[2]/vt[3] dispose/destroy convention.
+struct Sp3Block {
+  void* vtable;
+  int32_t useCount;
+  int32_t weakCount;
+  RegionRows rr; // rr.dataPtr points at a uint16_t[] buffer, not uint8_t[]
+};
+static_assert(offsetof(Sp3Block, rr) == 0xc, "Sp3Block layout drift");
+static_assert(sizeof(Sp3Block) == 0x28, "Sp3Block layout drift");
+
+static void
+native_sp3_dispose(void* ctrl) {
+  delete[](uint16_t*)((Sp3Block*)ctrl)->rr.dataPtr;
+}
+
+static void
+native_sp3_destroy(void* ctrl) {
+  ::operator delete(ctrl);
+}
+
+static void* kNativeSp3Vtable[4] = { nullptr, nullptr, (void*)native_sp3_dispose,
+                                     (void*)native_sp3_destroy };
+
+// Native reimplementation of the display-commit kernels FUN_0004f8f0
+// (item.sync==0, "incremental") / FUN_0004e680 (sync!=0, "force") - see
+// swtcon_architecture.md §6.3 for the confirmed per-pixel formula (derived
+// from FUN_0004e680's disassembly, which has no narrowing logic at all
+// unlike FUN_0004f8f0, then cross-checked byte-for-byte via
+// dispatch_processed_regions_probe.cpp reading back the real library's
+// g_pStateBuffer/item.sp3 contents). Runs over the item's FULL rect in one
+// pass rather than the library's 1-2 column chunks: chunking only splits
+// this same per-pixel computation into disjoint column ranges with no
+// shared mutable state across chunks, so it's provably invisible to the
+// output (same reasoning as native_render_update_kernel's chunking,
+// confirmed empirically here too - probe experiment 7).
+//
+// Also allocates item.sp3 fresh (releasing whatever it held before) - this
+// is that field's actual allocation site (previously unconfirmed).
+//
+// Returns true if the item survives (rect updated in place to the
+// committed/narrowed result); false if it ends up degenerate ("incremental"
+// with literally nothing changed anywhere) and should be destroyed by the
+// caller exactly like an already-degenerate item.
 static bool
+native_commit_item(WorkItem* item) {
+  int rows = item->rectY1 - item->rectY0 + 1;
+  int cols = item->rectX1 - item->rectX0 + 1;
+  int strideRows = (rows + 0xf) & ~0xf; // round_up(rows, 16), same as regionRows/sp3 convention
+
+  auto* block = (Sp3Block*)::operator new(sizeof(Sp3Block));
+  block->vtable = kNativeSp3Vtable;
+  block->useCount = 1;
+  block->weakCount = 1;
+  block->rr.y0 = item->rectY0;
+  block->rr.x0 = item->rectX0;
+  block->rr.y1 = item->rectY1;
+  block->rr.x1 = item->rectX1;
+  block->rr.stride = strideRows;
+  block->rr.size = strideRows * cols * (int)sizeof(uint16_t);
+  auto* sp3Buf = new uint16_t[(size_t)strideRows * cols];
+  block->rr.dataPtr = (uint8_t*)sp3Buf;
+
+  void* old_ctrl = item->sp3.ctrl;
+  item->sp3.ptr = &block->rr;
+  item->sp3.ctrl = block;
+  // Cache the sp3 pixel buffer into item.stateDataPtr (+0x44), exactly as the
+  // library does (`node[0x13] = *piVar21`, i.e. item.stateDataPtr =
+  // sp3.ptr->dataPtr, right after allocating sp3). This is NOT optional
+  // bookkeeping: the still-library playback kernels FUN_0004a140/FUN_0004a234
+  // read their per-pixel state through item+0x44 directly, not via
+  // sp3.ptr->dataPtr - so leaving it stale is what made wiring this function in
+  // SIGSEGV downstream (see native_dispatch_processed_regions_* header note).
+  item->stateDataPtr = block->rr.dataPtr;
+  release_sp(old_ctrl);
+
+  // Read the new pixel through item.gap (the REBASED RegionRows::dataPtr, +0x08),
+  // NOT regionRows->dataPtr. For a split piece (native_piece_builder) the
+  // regionRows shared_ptr still points at the ORIGINAL region's struct (origin =
+  // old rect's x0/y0), and only `gap` is rebased to the piece's own origin - so
+  // indexing regionRows->dataPtr with piece-local coords reads from the wrong
+  // spot and leaves border seams. FUN_0004f8f0 uses param_1[2] (== item.gap) as
+  // the base with stride from regionRows->stride, exactly this. (For a whole,
+  // unsplit item gap == regionRows->dataPtr, which is why full-screen updates
+  // rendered fine before this fix.)
+  auto* regionRows = (RegionRows*)item->regionRows.ptr;
+  const uint8_t* gapBuf = regionRows ? (const uint8_t*)(uintptr_t)(uint32_t)item->gap : nullptr;
+  int gapStride = regionRows ? regionRows->stride : 0;
+  uint16_t* state = (uint16_t*)g_pStateBufferNative;
+  bool force = item->sync != 0;
+
+  if (force) {
+    // "Force" never narrows (confirmed: FUN_0004e680 has no min/max update
+    // code at all - out_rect stays exactly the original seeded rect), so
+    // there's nothing to track here - just run every pixel unconditionally.
+    for (int col = item->rectX0; col <= item->rectX1; col++) {
+      int localCol = col - item->rectX0;
+      for (int row = item->rectY0; row <= item->rectY1; row++) {
+        int localRow = row - item->rectY0;
+        uint16_t new_raw = gapBuf ? gapBuf[(int64_t)localCol * gapStride + localRow] : 0;
+        uint16_t old = state[(size_t)col * kScreenHeight + row];
+        bool is_sentinel = new_raw == 0x20;
+        uint16_t effective_new = is_sentinel ? old : new_raw;
+        uint16_t packed = is_sentinel ? 0x0400 : (uint16_t)((old << 5) | effective_new);
+        sp3Buf[(size_t)strideRows * localCol + localRow] = packed;
+        state[(size_t)col * kScreenHeight + row] = effective_new;
+      }
+    }
+    return true;
+  }
+
+  // "Incremental": bounds seed at the OPPOSITE extremes from the rect
+  // (Y0/X0 seeded high, Y1/X1 seeded low) so they only ever narrow inward as
+  // real changes are found - matches the library's own min/max-from-
+  // opposite-ends seeding (§6.3). A fully-unchanged item leaves them
+  // crossed (outY0>outY1), which the degenerate check below then catches.
+  int32_t outY0 = item->rectY1, outY1 = item->rectY0;
+  int32_t outX0 = item->rectX1, outX1 = item->rectX0;
+
+  for (int col = item->rectX0; col <= item->rectX1; col++) {
+    int localCol = col - item->rectX0;
+    // Process 8 rows (one NEON lane group) at a time, matching the
+    // library's own grouping - required to reproduce its group-granular
+    // g_pStateBuffer/out_rect update gating exactly (a lone changed pixel
+    // still widens Y to its whole enclosing group of 8, confirmed via
+    // dispatch_processed_regions_probe.cpp's single-pixel test).
+    for (int groupStart = item->rectY0; groupStart <= item->rectY1; groupStart += 8) {
+      int groupEnd = std::min(groupStart + 7, item->rectY1);
+      bool groupChanged = false;
+      uint16_t newState[8], packedVal[8];
+
+      for (int row = groupStart; row <= groupEnd; row++) {
+        int localRow = row - item->rectY0;
+        int lane = row - groupStart;
+        uint16_t new_raw = gapBuf ? gapBuf[(int64_t)localCol * gapStride + localRow] : 0;
+        uint16_t old = state[(size_t)col * kScreenHeight + row];
+        bool is_sentinel = new_raw == 0x20;
+        bool unchanged = new_raw == old;
+        bool skip = is_sentinel || unchanged;
+        uint16_t effective_new = skip ? old : new_raw;
+
+        newState[lane] = effective_new;
+        packedVal[lane] = skip ? 0x0400 : (uint16_t)((old << 5) | effective_new);
+        sp3Buf[(size_t)strideRows * localCol + localRow] = packedVal[lane];
+        if (!skip)
+          groupChanged = true;
+      }
+
+      if (groupChanged) {
+        // Group-granular: write back every row in the group (a no-op value
+        // for its own unchanged lanes) and widen Y to the WHOLE group.
+        for (int row = groupStart; row <= groupEnd; row++)
+          state[(size_t)col * kScreenHeight + row] = newState[row - groupStart];
+        outY0 = std::min(outY0, groupStart);
+        outY1 = std::max(outY1, groupEnd);
+        outX0 = std::min(outX0, col);
+        outX1 = std::max(outX1, col);
+      }
+    }
+  }
+
+  if (outY0 > outY1 || outX0 > outX1)
+    return false;
+  item->rectY0 = outY0;
+  item->rectY1 = outY1;
+  item->rectX0 = outX0;
+  item->rectX1 = outX1;
+  return true;
+}
+
+// Native reimplementation of dispatch_processed_regions (0x50660) - see
+// swtcon_architecture.md §6.2 step 4 for the reversing history (an earlier
+// pass mistook the per-item chunk bookkeeping for a genuine cross-item
+// rectangle merge; empirically disproved via
+// tools/qsgepaper-preload/dispatch_processed_regions_probe.cpp - items in a
+// batch are processed completely independently). Runs each item through
+// native_commit_item in a single full-rect pass (no thread pool - see that
+// function's comment for why chunking is provably invisible here), destroys
+// items that come back degenerate (either already-degenerate on entry, or
+// "incremental" with literally nothing changed) exactly like
+// native_destroy_item_node, and returns true iff the sub-list is non-empty
+// afterward.
+//
+// WIRED IN (this pass). The per-item algorithm is independently verified
+// byte-exact against the real library (dispatch_processed_regions_probe.cpp,
+// 7 passing experiments incl. sp3's exact (old<<5)|new packing and 0x0400
+// marker).
+//
+// The "integration hazard" that previously kept this by-address - a
+// deterministic SIGSEGV inside the still-library playback kernel
+// FUN_0004a234 a few calls downstream - was a stale WorkItem.stateDataPtr
+// (+0x44), NOT anything about FUN_0004a234 itself: the real
+// dispatch_processed_regions caches sp3.ptr->dataPtr into item+0x44 right
+// after allocating sp3 (`node[0x13] = *piVar21`), and BOTH playback kernels
+// (FUN_0004a140/FUN_0004a234) read their per-pixel state through that cached
+// +0x44 pointer, not via sp3.ptr->dataPtr. native_commit_item now sets it
+// (see there); without it the kernels dereferenced a stale/null pointer.
+// That also explains why the earlier elimination log missed it: the
+// "downstream state identical" check enumerated frameCursor/frameAnchor/
+// phase/rect/sync/lutWidthMinus1 but not +0x44, and zero-filling sp3's
+// PAYLOAD couldn't help since the kernels never read sp3.ptr->dataPtr.
+static bool
+native_dispatch_processed_regions_native(ListHead* sub_list) {
+  bool any_survived = false;
+  auto* node = (WorkItemNode*)sub_list->next;
+  while ((void*)node != (void*)sub_list) {
+    auto* next = node->next;
+    WorkItem* item = &node->item;
+
+    bool degenerate_on_entry = item->rectY1 < item->rectY0 || item->rectX1 < item->rectX0;
+    bool survives = !degenerate_on_entry && native_commit_item(item);
+
+    if (!survives) {
+      list_unhook(node);
+      native_destroy_item_node(node);
+    } else {
+      any_survived = true;
+    }
+    node = next;
+  }
+  return any_survived;
+}
+
+constexpr uintptr_t kDispatchProcessedRegionsAddr = 0x50660;
+
+// Original still-library by-address call, kept as an A/B fallback (flip the
+// call site back to this to compare against the real library).
+[[maybe_unused]] static bool
 native_dispatch_processed_regions(ListHead* sub_list) {
   auto fn = resolve_ptr<bool (*)(ListHead*)>(kDispatchProcessedRegionsAddr);
   return fn(sub_list);
@@ -609,7 +843,9 @@ native_display_thread_func(void*) {
 
           int32_t gate_target = std::max(max_lifetime, queue->curFrame);
           if (cursor->nFrameCleanupCursor - gate_target > 6) {
-            bool dispatched = native_dispatch_processed_regions(&batch->subList);
+            bool dispatched = native_dispatch_processed_regions_native(&batch->subList);
+            // bool dispatched = native_dispatch_processed_regions(&batch->subList);
+
             if (dispatched) {
               int32_t target;
               if (!cursor->bWorkerThreadBusy || queue->curFrame != queue->targetFrame) {

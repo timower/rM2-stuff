@@ -157,7 +157,7 @@ CloneWorkItemFieldsInto(WorkItem* dest, const WorkItem* src) {
   dest->sp3 = src->sp3;
   retain_sp(dest->sp3.ctrl);
 
-  memcpy(dest->_unknown0x44, src->_unknown0x44, sizeof(dest->_unknown0x44));
+  dest->stateDataPtr = src->stateDataPtr; // +0x44 cached sp3 buffer ptr (see WorkItem def)
 
   dest->intList = { &dest->intList, &dest->intList };
   int count = 0;

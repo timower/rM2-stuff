@@ -75,7 +75,7 @@ some of the later fields below aren't renamed there yet, noted per-field):
 | `+0x36` | — | padding |
 | `+0x38` | `float temperature` | |
 | `+0x3c` | `SpRef sp3` | **[confirmed]** shape (upgraded from `[derived]` this pass): a *second* `RegionRows`-shaped buffer, holding this item's per-pixel **state** as `uint16` (distinct from `regionRows`, which holds `render_update_kernel`'s transition-byte *output*). `advance_work_item_frames` reads `sp3.ptr`'s `x0`/`x1` directly at `RegionRows`' own offsets (§6.4 step 5) — direct confirmation of the struct-shape claim, on top of the two unrelated kernel pairs (§6.3, §6.4) that independently converged on it earlier. Allocation site and the packed `uint16` payload's exact meaning remain open (§8). |
-| `+0x44` | `void* stateDataPtr` | **[derived]** Cached `sp3.ptr→dataPtr`, same caching pattern as `gap` caches `regionRows.ptr→dataPtr`. |
+| `+0x44` | `void* stateDataPtr` | **[confirmed]** Cached `sp3.ptr→dataPtr`, same caching pattern as `gap` caches `regionRows.ptr→dataPtr`. Written by `dispatch_processed_regions` right after it allocates `sp3` (§6.2 step 4); the still-library playback kernels `FUN_0004a140`/`FUN_0004a234` read their per-pixel state through **this** pointer, not via `sp3.ptr→dataPtr` — leaving it stale was the sole cause of the `FUN_0004a234` "integration hazard" crash (§6.2 step 4). |
 | `+0x48` | `ListHead intList` | Embedded `std::list<int>` head. Repurposed by `build_overlap_dependency_list` as an **overlap-dependency link list** — entries reference other in-flight `WorkItemNode`s this item's rendering needs to stay aware of (§6.2). |
 | `+0x50` | `int32 intListCount` | |
 | `+0x54` | `uint8 sync` | The `Sync` update flag. Selects `FUN_0004f8f0` (unset) vs `FUN_0004e680` (set) in the display-commit kernel (§6.3). |
@@ -296,9 +296,15 @@ Two persistent threads, started from `swtcon_init`. Both are native now
 frame-pacing loop) and `native_display_thread_func` (the WorkItem/
 dependency-list state machine, GC, and worker-side playback chain), both
 started by function pointer instead of by address. `dispatch_processed_regions`
-(0x50660) and its two playback kernels (0x4a140/0x4a234) remain still-library
-by-address calls (see §6.2 step 4 and §6.4) — the only two calls left in the
-whole display pipeline.
+(0x50660) is now native too (§6.2 step 4) and wired in at the real call site,
+along with its two display-commit kernels (`FUN_0004f8f0`/`FUN_0004e680`, §6.3)
+— all confirmed both by decompilation/probe and now by a full clean emulator
+run with the native path live. The previous "integration hazard" (a
+deterministic crash in the still-library `FUN_0004a234`) turned out to be a
+stale `WorkItem.stateDataPtr` (+0x44), not anything about `FUN_0004a234`
+itself — see §6.2 step 4. The two worker-side playback kernels
+(`FUN_0004a140`/`FUN_0004a234`, §6.4) are now the only remaining by-address
+calls in the whole display pipeline.
 
 ### 6.1 `worker_thread_func` — one iteration per displayed frame (native)
 
@@ -333,7 +339,25 @@ rather than `[derived]`:
    - A **gate-check "max lifetime" scan** re-walks each item's freshly-built `intList`. **Now fully closed (was `[derived, not fully closed]`)**: a dependency entry is skipped — excluded from the max — exactly when `item.sync==0 && other.sync==0 && item.fullRefresh!=0 && other.fullRefresh!=0` (i.e. neither item requested `Sync`, and both are `FullRefresh` — waiting on another `FullRefresh`-only item's completion is pointless since a full refresh redraws the whole area anyway). Surviving dependencies contribute `other.frameAnchor + other.lutWidthMinus1`; the per-item max of that (0 if none survive) folds into a batch-wide `maxLifetime`.
    - **Gate:** `target = max(maxLifetime, curFrame)`; if `nFrameCleanupCursor - target > 6`, dispatch this batch now; else skip it this tick (retry next `sem_wait`), leaving it untouched in `listIncomingUpdates`.
    Native (`native_build_overlap_dependency_list`, gate-check inlined into `native_display_thread_func`).
-4. **`dispatch_processed_regions` (0x50660) — bigger and hairier than first assumed, still library.** Confirmed call signature this pass: `bool dispatch_processed_regions(ListHead* subList)` — takes the batch's sub-list head directly, the same "count field aliases the caller's struct" trick `build_overlap_dependency_list` uses (it reads a count at `subList+2 words`, which for every real caller is the containing `BatchNode`'s own `count` field). Confirmed: a second, fully independent thread pool (own one-time-init flag, thread vector, task queue/mutex/condvar — none shared with `dispatch_update_regions`'s pool). Dispatches to `FUN_0004f8f0` when the batch's *first item's* `sync==0`, else `FUN_0004e680` — picked once for the whole batch, not per item. The bounding-box computation is *not* a simple union — decompilation shows a genuine interval/rectangle-merge algorithm (heap-allocated rect-merge nodes, dynamic vector growth/reallocation, a byte-cost accumulator, what looks like a full region-merge pass) that has **not** been reversed. The chunk-count gate (1 vs 2) is on the merged result's **X-span** (width) against a threshold of 29, not row-span/height as an earlier pass assumed. **Given this, `dispatch_processed_regions` stays a still-library by-address call until its merge algorithm is actually understood; don't guess at a native replacement** (`native_dispatch_processed_regions` in `native_display.cpp` is a thin by-address wrapper). Blocks until its own pool finishes; return value is a "did anything actually get dispatched" flag (false = empty rect union).
+4. **`dispatch_processed_regions` (0x50660) — fully reversed, natively reimplemented, and WIRED IN (`native_dispatch_processed_regions_native`/`native_commit_item`; confirmed on the emulator with the native path live — see "integration hazard, resolved" below).** Confirmed call signature: `bool dispatch_processed_regions(ListHead* subList)` — takes the batch's sub-list head directly, the same "count field aliases the caller's struct" trick `build_overlap_dependency_list` uses (it reads a count at `subList+2 words`, which for every real caller is the containing `BatchNode`'s own `count` field). Confirmed: a second, fully independent thread pool (own one-time-init flag, thread vector, task queue/mutex/condvar — none shared with `dispatch_update_regions`'s pool) — irrelevant to a native port for the same reason as `dispatch_update_regions`'s own pool (§5.1): it only splits the *same* per-item computation into disjoint column ranges, so a single-pass native port is byte-identical without replicating any threading.
+
+   **Correction from an earlier pass:** decompilation of the batch-level bookkeeping (heap-allocated per-item "merge node" objects, dynamic vector growth, a byte-cost accumulator) looked at first glance like a genuine cross-item rectangle-merge algorithm, and was left by-address on that assumption. It is **not** — empirically verified this pass via `tools/qsgepaper-preload/dispatch_processed_regions_probe.cpp` (same "call the real function with controlled synthetic input, inspect what changed" technique as `render_kernel_addr_map.cpp`, since the vector-of-vectors bookkeeping is easy to mis-read by hand and a plain seed/narrow-direction slip would silently produce a wrong port). **Every item in the sub-list is processed completely independently — confirmed directly (probe experiment 6: two non-overlapping items in one batch, one all-unchanged one all-changed, dispatched together — item B's surviving rect came back as exactly its own original rect, entirely unaffected by item A).** The "merge node" per item is really just fresh backing storage for `item.sp3` (see below) plus scratch space to hold each of the item's own 1–2 *column-chunk* results before folding them together — not a merge across different `WorkItem`s. The chunk-count gate (1 vs 2) is on the item's own rect **X-span** (width) against a threshold of 29, not row-span/height as an earlier pass assumed, and since chunking only splits one item's own column range, it's provably invisible to a single-pass port exactly like `dispatch_update_regions`'s chunking (§5.1) — confirmed empirically too (probe experiment 7: same all-unchanged test with a 40-column rect forcing the 2-chunk path, identical destroyed-item outcome as the 1-chunk case).
+
+   **Per-item algorithm (confirmed, both by decompilation and by the probe's empirical read-back of `g_pStateBuffer`/`sp3` afterward):**
+   - If the item's rect is already degenerate (`rectY1<rectY0` or `rectX1<rectX0`): destroy the item outright (same node-teardown as `native_destroy_item_node`) — it is not dispatched and does not count toward the return value.
+   - Otherwise: allocate a fresh `item.sp3` (releasing whatever it held before) — a `RegionRows`-shaped control block, but the payload is `uint16_t` per pixel (not a byte, unlike `item.regionRows`), sized `round_up(rows,16) * cols * 2` bytes, `stride` in the same "16-row-rounded" units. This resolves the "allocation site unconfirmed" note in `WorkItem::sp3`'s comment — it's allocated **here**, every dispatch, not at update time.
+   - Run the commit kernel (`FUN_0004f8f0` if `item.sync==0` "incremental", `FUN_0004e680` if `sync!=0` "force" — picked once per item, not per batch as an earlier pass assumed) over the item's full original rect (a native port doesn't need to sub-chunk at all — see above). See §6.3 for the exact per-pixel formula this pass confirmed/corrected.
+   - "Incremental" mode may **narrow** the item's rect to the tight bounding box of pixels that actually changed (Y rounds outward to the enclosing 8-row NEON lane group; X is exact, no rounding — confirmed via the probe's single-changed-pixel test: a lone change at rect-relative row 20 came back as Y range \[16,23\] rect-relative, X exact at the single changed column). If literally nothing in the whole item changed, the narrowed rect is degenerate and the item gets destroyed exactly like the upfront-degenerate case (confirmed via the probe's all-unchanged test, both 1-chunk and 2-chunk).
+   - "Force" mode **never narrows** — confirmed both by decompilation (`FUN_0004e680` seeds `out_rect` once at the top and never touches it again in its pixel loop, unlike `FUN_0004f8f0` which conditionally updates it) and empirically (probe experiment 4). A force item's rect always survives unchanged.
+   - Return value: `true` iff the sub-list ends up non-empty after processing every item (i.e. at least one item survived).
+
+   **Integration hazard — RESOLVED; it was `WorkItem.stateDataPtr` (+0x44), not `FUN_0004a234`.** Wiring the native port in used to produce a **deterministic, 100%-reproducible SIGSEGV** inside `FUN_0004a234` (the still-library "overlap-aware" playback kernel, §6.4) on the very first HQ full-screen update — a few calls downstream of `dispatch_processed_regions` itself, not inside it. The cause: the real `dispatch_processed_regions` caches the freshly-allocated `sp3` buffer pointer into `WorkItem+0x44` (`stateDataPtr`) immediately after allocating `sp3` (disassembly: `node[0x13] = *piVar21`, i.e. `item.stateDataPtr = sp3.ptr->dataPtr`). **Both** playback kernels (`FUN_0004a140` *and* `FUN_0004a234`) read their per-pixel state through that cached +0x44 pointer (`*(item+0x44) + offset`), **not** through `sp3.ptr->dataPtr` — with the stride taken separately from `sp3.ptr->stride` (`*(item+0x3c)+0x14`). The native `native_commit_item` allocated `sp3` and set `sp3.ptr`/`sp3.ctrl` but left +0x44 stale, so the kernels dereferenced a stale/null pointer. Fixed by having `native_commit_item` set `item->stateDataPtr = block->rr.dataPtr` (matching the library). This also explains why the earlier elimination log below all came back negative — none of them touched +0x44:
+   - **Not a downstream-state difference**: the field list checked (`frameCursor`/`frameAnchor`/`phase`/`rect`/`sync`/`lutWidthMinus1`) was byte-identical either way — but it did *not* include +0x44, which is exactly the field that differed.
+   - **Not `sp3` buffer content**: zero-filling `sp3`'s payload couldn't help — the kernels never dereference `sp3.ptr->dataPtr`, only the cached `item.stateDataPtr`.
+   - **Not timing**: an artificial 10ms/300ms delay didn't change the crash (correct — it's a pointer bug, not a race).
+   - **Not a missed one-time global side effect**: priming with a real library call first didn't change it (correct — the missing write is per-item, per-dispatch, not a one-time global init).
+
+   Verified on the emulator with the native path live: HQ/medium/clearing plus all five overlap tests run to completion with clean `EXIT=0`, continuous `FBIOPAN` traffic, and clean shutdown (hardware re-confirmation still pending). `FUN_0004a234` itself remains unreversed and still-library — it was never the culprit, just the innocent consumer of a pointer the native producer forgot to set.
 5. **Commit / frame-pacing [now fully closed, corrects an earlier `[guess]`]** — on `dispatch_processed_regions` returning true:
    ```
    if (!bWorkerThreadBusy || curFrame != targetFrame) {
@@ -385,23 +409,44 @@ for other in g_pListProcessedUpdates:
 
 Called twice per batch by `display_thread_func` (before dispatch and again after commit, on the same batch's sub-list).
 
-### 6.3 Display-side commit kernels — `FUN_0004f8f0` / `FUN_0004e680`
+### 6.3 Display-side commit kernels — `FUN_0004f8f0` / `FUN_0004e680` — **confirmed, both by decompilation and empirically**
 
-`(WorkItem* item, int32_t out_rect[4], int chunkIndex, int chunkCount)`, called from §6.2 step 4. **[confirmed]** chunking is by column, not row, despite the row-span gate above — `out_rect` is written `{rectY1, endCol, rectY0, startCol}`.
+`(WorkItem* item, int32_t out_rect[4], int chunkIndex, int chunkCount)`, called from §6.2 step 4. **[confirmed]** chunking is by column, not row, despite the row-span gate above — `out_rect` is written `{rectY1, endCol, rectY0, startCol}`, seeded once at the top of the function to the chunk's full extent and only ever narrowed (never widened) from there.
 
-Per pixel (8-lane NEON): `new` = the byte from `item.gap`'s buffer (the same output `render_update_kernel` produces, widened to u16); `state` = `g_pStateBuffer[col][row]`; `is_sentinel = (new == 0x20)` (the same skip sentinel case 7 uses).
+Per pixel (8-lane NEON, processed 8 rows of one column at a time): `new_raw` = the byte from `item.gap`'s buffer (the same output `render_update_kernel` produces, widened to u16, zero-extended); `old` = `g_pStateBuffer[col][row]` (u16); `is_sentinel = (new_raw == 0x20)` (the same skip sentinel `render_update_kernel` case 7 uses).
+
+**Corrected this pass** (re-derived from `FUN_0004e680`'s disassembly, then cross-checked via `dispatch_processed_regions_probe.cpp` reading back the real `g_pStateBuffer`/`item.sp3` contents after a real library call — an earlier pass's `(state<<5)|value` guess had the wrong operand: it's the *old* state shifted, not the post-update one, and the "unchanged" marker is `0x0400`, not `0x0004` as an earlier nibble-swapped reading of the NEON fill constant `0x0400040004000400` claimed):
 
 ```
-FUN_0004f8f0 (sync==0, "incremental"):
-  if (is_sentinel || new==state) → unchanged, emit 0x0004, state/out_rect untouched
-  else → state=new, emit (state<<5)|new, write state back, narrow out_rect to include this pixel
+effective_new =
+  FUN_0004f8f0 (sync==0, "incremental"): (is_sentinel || new_raw==old) ? old : new_raw
+  FUN_0004e680 (sync!=0, "force"):        is_sentinel                  ? old : new_raw
 
-FUN_0004e680 (sync!=0, "force"):
-  state = is_sentinel ? state : new
-  unconditionally emit (state<<5)|state and write back — every pixel, out_rect always full
+skip (per-lane, decides the sp3 packed value only) =
+  FUN_0004f8f0: is_sentinel || new_raw==old
+  FUN_0004e680: is_sentinel   // NOTE: force does NOT skip on new_raw==old - it still
+                              // recomputes the real (old<<5)|new_raw transition index
+                              // even when new_raw happens to already equal old.
+
+item.sp3[col][row] (u16, every pixel, unconditional) =
+  skip ? 0x0400 : (old << 5) | effective_new
+  // a transition-lookup index: old grayscale level packed with the new one,
+  // not just the new state - matches a waveform-LUT lookup needing both endpoints.
+
+g_pStateBuffer[col][row] and out_rect narrowing:
+  FUN_0004f8f0 (incremental): only applied per 8-row NEON group, and only if AT
+    LEAST ONE lane in that group of 8 has an actual (non-skip) change - if so, the
+    WHOLE group's g_pStateBuffer cells get overwritten with their own effective_new
+    (a no-op for the group's other unchanged lanes), AND out_rect's Y bound widens
+    to cover the WHOLE 8-row group (not just the individual changed row) while the
+    X bound narrows to the exact current column (no rounding). A group with zero
+    real changes updates neither g_pStateBuffer nor out_rect at all.
+  FUN_0004e680 (force): g_pStateBuffer[col][row] = effective_new, unconditionally,
+    every pixel - out_rect is NEVER touched after its initial seed (confirmed: no
+    min/max update code anywhere in FUN_0004e680's loop, unlike FUN_0004f8f0's).
 ```
 
-Both write their result into `item.sp3`'s buffer as well as `g_pStateBuffer`. `[guess]`: the `(state<<5)|value` packing is a plausible waveform-LUT index encoding; `sp3`'s downstream consumer wasn't traced.
+Empirical confirmation (`dispatch_processed_regions_probe.cpp`, run against the real library on-target): a single differing pixel at rect-relative (row=20,col=5) within a 40×10 rect based at rectY0=100 narrowed the surviving item's rect to Y=\[116,123\] (exactly the enclosing 8-row group, `100 + 8*floor(20/8)` through `+7`) and X=\[205,205\] (exact). Reading back that pixel's `sp3` cell with old-state=9/new=5 gave `0x0125` = `(9<<5)|5` exactly; an unchanged neighbor in the *same* 8-row group (row=21) read back `0x0400`. A "force" pass with old=9/new=5 gave the identical `0x0125` sp3 packing and `g_pStateBuffer`=5 (=new), confirming both kernels share the same `(old<<5)|effective_new` packing formula.
 
 ### 6.4 Worker-side playback chain — native, kernel-selection rule corrected
 
@@ -468,11 +513,9 @@ Everything not marked `[confirmed]` above, plus:
 
 - **`render_update_kernel`'s bitfield semantics** (§5.2) — formulas and addressing are both `[confirmed]` now (statically and at runtime); `gamma`'s *role* (an ordered-dither threshold matrix, added pre-quantization) is `[derived]` with strong cross-file evidence, but what `lo5`/`mid6`/`hi5` individually represent physically is still open (doesn't block the native port, which just needs the formula, not the semantics).
 - **`FUN_0004a140`'s exact NEON shift constants** (§6.4) — shape confirmed, not term-verified.
-- **The `(state<<5)|value` packing** (§6.3) and `sp3`'s downstream consumer — `sp3`'s own shape (a `RegionRows`-aliased buffer, x0/x1 at the usual offsets) is now `[confirmed]` via `advance_work_item_frames` reading it directly (§6.4 step 5); only the packed-value semantics and allocation site remain open.
-- **`FUN_0004a234` and its three delegates** (`FUN_0004a3f8`/`FUN_0004a9e0`/`FUN_0004b098`) — fully unreversed; only reachable via the "plain kernel" path when `intList` has an active dependency and via the overlap-kernel path otherwise (§6.4's corrected selection rule) - deferrable, not the common case.
-- **`dispatch_processed_regions`'s rectangle-merge algorithm** (§6.2 step 4) — genuinely unreversed (not a simple bounding-box union). Call signature is now `[confirmed]` (`bool(ListHead* subList)`); keep this call by-address rather than guessing at a native replacement.
+- **`FUN_0004a234` and its three delegates** (`FUN_0004a3f8`/`FUN_0004a9e0`/`FUN_0004b098`) — fully unreversed, still by-address. It's reached on the very first HQ full-screen update in the standard emulator test suite (phase=0 is always 8-aligned, and a brand-new item never has an active dependency, so the overlap-kernel path fires immediately). It was *previously* blamed for the `dispatch_processed_regions` native-port crash, but that was a stale `WorkItem.stateDataPtr` (+0x44) in the native producer, now fixed (§6.2 step 4) — `FUN_0004a234` itself was never at fault. Still the next big reversing target (a many-KB, 9-way jump-table-dispatched NEON kernel), but no longer a blocker.
 - **`BatchNode`'s "claimed" byte** (+0x15, §1/§2) — confirmed this pass that `display_thread_func` never writes it (the mutex is held across the whole intake+dispatch sequence instead, see §6.2 step 3); still unknown what, if anything, ever sets it, or whether it's simply dead.
-- **`FUN_00050660`'s completion-tracking globals** — pool shape confirmed, a few exact field semantics aren't (why they're left `DAT_`-named in Ghidra, §2). (`FUN_0003ec78`'s own pool globals, by contrast, are confirmed as pure implementation detail nothing else reads - the native port uses ordinary `std::thread` per chunk instead.)
+- **`FUN_00050660`'s completion-tracking globals** — pool shape confirmed, a few exact field semantics aren't (why they're left `DAT_`-named in Ghidra, §2); moot for the native port, which doesn't replicate the pool at all (§6.2 step 4).
 
 The frame-pacing target formula (§6.2 step 5) is now fully closed out (exact
 constants, not just shape) but still worth an A/B pass before depending on it,
@@ -503,15 +546,13 @@ Native reimplementations (see `native_init.cpp`/`native_update.cpp`/`swtcon.cpp`
 
 The update path (`swtcon_update`) has zero remaining still-library calls as of Phase 6.
 
-Still library, display pipeline - the only two calls left in the whole native port:
+Still library, display pipeline:
 
 | Function | Address | Role |
 |---|---|---|
-| `dispatch_processed_regions` | 0x50660 | Second independent dispatcher - hides a genuinely unreversed rectangle-merge algorithm, **not** a simple bounding-box union as an earlier pass assumed; call signature `bool(ListHead* subList)` confirmed; recommend calling by address indefinitely rather than guessing at a port |
 | `FUN_0004a140` | 0x4a140 | "Plain" per-frame OR-accumulated waveform bit-plane kernel - call signature confirmed, body `[derived]` |
-| `FUN_0004a234` | 0x4a234 | "Overlap-aware" kernel variant; delegates to 3 unreversed functions for frameCount 1–3 - call signature confirmed, body `[guess]` |
+| `FUN_0004a234` | 0x4a234 | "Overlap-aware" kernel variant; delegates to 3 unreversed functions for frameCount 1–3 - call signature confirmed, body `[guess]`. (Previously blamed for the `dispatch_processed_regions` native-port crash; that was a stale `WorkItem.stateDataPtr` in the native producer, now fixed — §6.2 step 4.) |
 | `FUN_0004a3f8` / `FUN_0004a9e0` / `FUN_0004b098` | 0x4a3f8 / 0x4a9e0 / 0x4b098 | Unreversed; `FUN_0004a234`'s delegates |
-| `FUN_0004f8f0` / `FUN_0004e680` | 0x4f8f0 / 0x4e680 | Display-side commit kernels (incremental vs. force), called internally by `dispatch_processed_regions` - call signature confirmed (no hidden args), body `[guess]`/`[derived]` |
 
 Native (Phase 5) - see `native_display.cpp`:
 
@@ -527,6 +568,8 @@ Native (Phase 5) - see `native_display.cpp`:
 | `copy_init_frame_row` | 0x53be4 | Restores one stale frame-slot row from the LUT blob's fixed reference row (`native_copy_init_frame_row`) |
 | `FUN_0003f294` / `FUN_0003f1f0` | 0x3f294 / 0x3f1f0 | Thin wrappers into `FUN_0003ec78` - see §6.4 (`native_dispatch_plain_kernel`/`native_dispatch_overlap_kernel`) |
 | `FUN_0003ec78` | 0x3ec78 | Third thread pool; commits item phase/frameCursor after the kernel runs - see §6.4 (`native_playback_kernel_dispatch`), one `std::thread` per chunk instead of the library's persistent pool |
+| `dispatch_processed_regions` | 0x50660 | Per-item degenerate check, `sp3` allocation (incl. the `stateDataPtr`/+0x44 cache), commit-kernel dispatch, rect narrow/destroy - see §6.2 step 4 (`native_dispatch_processed_regions_native`), single full-rect pass instead of the library's own thread pool + column-chunking. Wired in this pass; the by-address version is kept as `native_dispatch_processed_regions` for A/B. |
+| `FUN_0004f8f0` / `FUN_0004e680` | 0x4f8f0 / 0x4e680 | Display-side commit kernels (incremental vs. force) - see §6.3 for the confirmed per-pixel formula (`native_commit_item`) |
 
 ## 10. Global reference
 
