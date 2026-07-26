@@ -79,9 +79,28 @@ void* native_frame_buffer_addr(int frame_idx);
 // table into one hardware-visible frame slot.
 void native_upload_lut_to_frame_slot(void* dest);
 
+// Mirrors write_flash_prime_pattern (0x53c04): same dither-fill algorithm as
+// native_init_lut, but into an arbitrary (already-allocated, frame-slot-sized)
+// buffer with a caller-supplied 16-bit pattern instead of the real waveform
+// LUT's fixed 0.
+void native_write_lut_pattern(void* dest, int pattern);
+
+// Mirrors reset_statebuffer_neutral (0x4fbe0): reapplies the neutral
+// 0x001e001e per-pixel fill over the already-allocated statebuffer.
+void native_reset_statebuffer_neutral();
+
+// Mirrors read_lut_packed_pixel (0x40c58): unpacks one bit_depth-wide pixel
+// value from a LUTEntry's packed data at (row, col, phase).
+unsigned native_read_lut_packed_pixel(const LUTEntry* lut, int row, int col, int phase);
+
 // Mirrors pan_and_unblank (0x53ebc): pans to `frame_idx` and retries an
 // FBIOBLANK unblank up to 5 times.
 int native_pan_and_unblank(int frame_idx);
+
+// Mirrors pan_to_frame (unconditional pan, no unblank/retry - see
+// native_pan_and_unblank for the version worker_thread_func uses when the
+// panel might still be blanked).
+void native_pan_to_frame(int frame_idx);
 
 // Mirrors prime_display (0x468f0). Called once from swtcon_init right after
 // g_nIsFbBlanked is forced to 1: briefly unblanks frame slot 16 so the panel

@@ -55,7 +55,7 @@ constexpr uintptr_t kMakeEmptyLutAddr = 0x408a8;
 // destructor in queue_update: atomically drop the use-count, dispose on 0,
 // then drop the weak-count and destroy on 0. vtable[2]=_M_dispose,
 // vtable[3]=_M_destroy.
-static void
+void
 release_sp(void* ctrl_) {
   if (!ctrl_)
     return;
@@ -247,7 +247,7 @@ native_clamp_update_rect(const XYRect& in) {
 // sysfs path via fopen/strtol and subtracts a 2.0C calibration offset) -
 // Phase 5 hasn't reimplemented that thread natively yet, so we read its
 // output directly instead of re-polling hwmon ourselves.
-static float
+float
 native_get_current_temperature() {
   pthread_mutex_t* mutex = resolve_ptr<pthread_mutex_t*>(kTemperatureMutexAddr);
   float* cached_temp = resolve_ptr<float*>(kCachedTemperatureAddr);
@@ -412,7 +412,7 @@ native_build_update_batch(ListHead* incoming, int32_t* incoming_count, void* pos
 // empty placeholder LUT (via the library's own tiny allocator,
 // kMakeEmptyLutAddr - same one update_item_ctor uses) if `mode` is out of
 // range or its ModeEntry has no LUTs at all.
-static void
+void
 native_select_waveform_lut(float temp, SpRef* out, std::vector<ModeEntry*>* waveform, unsigned mode) {
   if (mode < waveform->size()) {
     ModeEntry* m = (*waveform)[mode];
@@ -437,7 +437,7 @@ native_select_waveform_lut(float temp, SpRef* out, std::vector<ModeEntry*>* wave
 // Native reimplementation of update_lut_is_valid (0x409e4): sanity-checks
 // the LUT select_waveform_lut just picked - non-null pixel data, and
 // positive size_kb/bit_depth/mode_width.
-static bool
+bool
 native_update_lut_is_valid(const SpRef& lut) {
   auto* entry = (const LUTEntry*)lut.ptr;
   if (!entry->data)

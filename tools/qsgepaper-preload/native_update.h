@@ -14,7 +14,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
+#include "native_init.h" // ModeEntry
 #include "qsgepaper_globals.h"
 #include "swtcon.h"
 
@@ -50,12 +52,17 @@ struct RegionRows {
 };
 static_assert(sizeof(RegionRows) == 0x1c, "RegionRows layout drift");
 
-// A node of the work item's embedded std::list<int> at +0x48 (used for
-// per-row/whatever bookkeeping we've never needed to interpret further).
+// A node of the work item's embedded std::list<int> at +0x48. Despite the
+// "int" in std::list<int>, `value` (confirmed via disassembly of
+// build_overlap_dependency_list, 0x3a838) actually holds a raw `WorkItem*`
+// pointing at another in-flight item this one's rendering depends on - not
+// a scalar id/count. Kept as int32_t here (same size on this 32-bit target)
+// rather than WorkItem* to avoid a circular type dependency; cast at each
+// use site instead.
 struct IntListNode {
   IntListNode* next;
   IntListNode* prev;
-  int32_t value;
+  int32_t value; // actually a WorkItem* - see comment above
 };
 static_assert(sizeof(IntListNode) == 0xc, "IntListNode layout drift");
 
@@ -140,3 +147,11 @@ inline bool
 BatchNodeClaimed(const BatchNode* b) {
   return *((const uint8_t*)b + 0x15) != 0;
 }
+
+// Shared internal primitives, also used by native_display.cpp's worker
+// thread (flash sequence: temperature/LUT selection + shared_ptr release) -
+// see native_update.cpp for definitions.
+void release_sp(void* ctrl);
+float native_get_current_temperature();
+void native_select_waveform_lut(float temp, SpRef* out, std::vector<ModeEntry*>* waveform, unsigned mode);
+bool native_update_lut_is_valid(const SpRef& lut);

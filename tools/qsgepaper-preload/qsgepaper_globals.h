@@ -49,6 +49,19 @@ struct ListHead {
 };
 static_assert(sizeof(ListHead) == 8, "ListHead must be two pointers");
 
+// The library's own timestamp ABI (__clock_gettime64 - a Y2038-safe kernel
+// timespec: two 64-bit fields), confirmed via disassembly of
+// worker_thread_func (see AGENTS.md Phase 5) - NOT necessarily the same as
+// this toolchain's own `struct timespec`, which may still be the legacy
+// 32-bit-tv_sec layout. Fill by widening an ordinary clock_gettime() result
+// field-by-field rather than reinterpreting/memcpy-ing a native timespec
+// onto this struct.
+struct Timespec64 {
+  int64_t tv_sec;
+  int64_t tv_nsec;
+};
+static_assert(sizeof(Timespec64) == 16, "Timespec64 must be two 64-bit fields");
+
 // --- Update queue / worker+display thread state -----------------------
 // Fully contiguous from g_list_processed_updates (0x66fd8) through the
 // accumulation list's flag (0x670d0). Written by swtcon_init (thread
@@ -56,13 +69,18 @@ static_assert(sizeof(ListHead) == 8, "ListHead must be two pointers");
 // by swtcon_shutdown (drain + join).
 struct UpdateQueueGlobals {
   ListHead listProcessedUpdates;             // 0x66fd8
-  uint8_t _reserved_0x66fe0[0x66fec - 0x66fe0];
+  int32_t processedUpdatesCount;             // 0x66fe0 g_nProcessedUpdatesCount
+  int32_t curFrame;                          // 0x66fe4 g_nCurFrame
+  int32_t targetFrame;                       // 0x66fe8 g_nTargetFrame
   pthread_mutex_t workerCondMutex;           // 0x66fec
   uint8_t _reserved_0x67004[0x67008 - 0x67004];
   pthread_cond_t workerCond;                  // 0x67008
-  uint8_t _reserved_0x67038[0x6703c - 0x67038];
+  uint8_t flashRequested;                      // 0x67038 g_bFlashRequested (byte flag, not int32)
+  uint8_t _reserved_0x67039[3];
   pthread_mutex_t displayTimingMutex;         // 0x6703c
-  uint8_t _reserved_0x67054[0x67068 - 0x67054];
+  uint8_t _reserved_0x67054[0x67058 - 0x67054];
+  Timespec64 lastPanTimestamp;                 // 0x67058 g_lastPanTimestamp - stamped alongside
+                                                // every nLastPannedFrame write, under displayTimingMutex
   sem_t displayThreadSem;                      // 0x67068
   int32_t timeVar;                              // 0x67078
   int32_t workerThreadShutdown;                  // 0x6707c
@@ -88,9 +106,14 @@ constexpr uintptr_t kUpdateQueueGlobalsAddr = 0x66fd8;
   static_assert(QQ_OFFSETOF(field) == (addr) - kUpdateQueueGlobalsAddr, \
                 #field " must land at " #addr)
 QQ_ASSERT(listProcessedUpdates, 0x66fd8);
+QQ_ASSERT(processedUpdatesCount, 0x66fe0);
+QQ_ASSERT(curFrame, 0x66fe4);
+QQ_ASSERT(targetFrame, 0x66fe8);
 QQ_ASSERT(workerCondMutex, 0x66fec);
 QQ_ASSERT(workerCond, 0x67008);
+QQ_ASSERT(flashRequested, 0x67038);
 QQ_ASSERT(displayTimingMutex, 0x6703c);
+QQ_ASSERT(lastPanTimestamp, 0x67058);
 QQ_ASSERT(displayThreadSem, 0x67068);
 QQ_ASSERT(timeVar, 0x67078);
 QQ_ASSERT(workerThreadShutdown, 0x6707c);
@@ -118,6 +141,29 @@ static_assert(sizeof(UpdateQueueGlobals) >= 0x670d2 - kUpdateQueueGlobalsAddr,
 inline UpdateQueueGlobals*
 update_queue_globals() {
   return resolve_ptr<UpdateQueueGlobals*>(kUpdateQueueGlobalsAddr);
+}
+
+// --- Frame-pacing cursor cluster ----------------------------------------
+// Contiguous, byte-verified via disassembly of worker_thread_func /
+// display_thread_func (see AGENTS.md Phase 5). g_nFrameCleanupCursor is
+// display_thread_func's own housekeeping cursor (untouched by the worker
+// thread); bWorkerThreadBusy/nLastPannedFrame are written by the worker
+// thread and read cross-thread by the display thread's frame-pacing logic.
+struct FrameCursorGlobals {
+  int32_t nFrameCleanupCursor;  // 0x66dd4
+  uint8_t bWorkerThreadBusy;    // 0x66dd8 (byte flag, not int32)
+  uint8_t _pad[3];
+  int32_t nLastPannedFrame;     // 0x66ddc
+};
+constexpr uintptr_t kFrameCursorGlobalsAddr = 0x66dd4;
+static_assert(offsetof(FrameCursorGlobals, bWorkerThreadBusy) == 0x66dd8 - kFrameCursorGlobalsAddr, "");
+static_assert(offsetof(FrameCursorGlobals, nLastPannedFrame) == 0x66ddc - kFrameCursorGlobalsAddr, "");
+static_assert(sizeof(FrameCursorGlobals) >= 0x66de0 - kFrameCursorGlobalsAddr,
+              "FrameCursorGlobals layout drift");
+
+inline FrameCursorGlobals*
+frame_cursor_globals() {
+  return resolve_ptr<FrameCursorGlobals*>(kFrameCursorGlobalsAddr);
 }
 
 // --- Standalone globals (isolated - no neighbor close enough to bridge

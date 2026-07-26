@@ -14,6 +14,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+#include "native_display.h"
 #include "native_init.h"
 #include "qsgepaper_globals.h"
 
@@ -90,9 +91,10 @@ extern void* g_pLUTAddrNative;
 extern struct fb_var_screeninfo g_fbVarScreeninfoNative;
 extern struct fb_fix_screeninfo g_fbFixScreeninfoNative;
 
-// Thread entry points not yet reversed (Phase 5 - see AGENTS.md); started by
-// address from swtcon_init and joined by address from swtcon_shutdown.
-constexpr uintptr_t kWorkerThreadFuncAddr = 0x3ae38;
+// display_thread_func is not yet reversed (Phase 5 - see AGENTS.md); started
+// by address from swtcon_init and joined by address from swtcon_shutdown.
+// worker_thread_func is native now (native_display.cpp) - see
+// native_worker_thread_func.
 constexpr uintptr_t kDisplayThreadFuncAddr = 0x3d2ac;
 
 uint16_t*
@@ -200,10 +202,9 @@ swtcon_init() {
     pthread_mutex_init(&queue->workerCondMutex, nullptr);
     pthread_cond_init(&queue->workerCond, nullptr);
 
-    auto worker_thread_func = resolve_ptr<void*(*)(void*)>(kWorkerThreadFuncAddr);
     auto display_thread_func = resolve_ptr<void*(*)(void*)>(kDisplayThreadFuncAddr);
 
-    pthread_create(&queue->workerThread, nullptr, worker_thread_func, nullptr);
+    pthread_create(&queue->workerThread, nullptr, native_worker_thread_func, nullptr);
     pthread_create(&queue->displayThread, nullptr, display_thread_func, nullptr);
 
     sched_param param;

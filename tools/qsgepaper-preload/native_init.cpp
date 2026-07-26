@@ -219,12 +219,14 @@ void native_init_lut_sub(uint32_t* param_1, int param_2) {
     }
 }
 
-int native_init_lut() {
-    size_t sz = 0x165800;
-    g_pLUTAddrNative = malloc(sz);
-    if (!g_pLUTAddrNative) return -1;
-    
-    uint32_t* buf = (uint32_t*)g_pLUTAddrNative;
+// Mirrors FUN_00053ac4 exactly: fills a 0x165800-byte LUT-shaped blob (one
+// full frame slot's worth) with the fixed dither pattern, parameterized only
+// by the third native_init_lut_sub call's pattern argument - `native_init_lut`
+// passes 0 there (the real waveform LUT); the worker thread's flash sequence
+// (write_flash_prime_pattern @0x53c04, wrapping this same function) passes a
+// dynamic 16-bit pattern instead. Shared so both callers can't drift apart.
+static void native_fill_lut_pattern(void* dest, int pattern) {
+    uint32_t* buf = (uint32_t*)dest;
 
     // vmov.i32 #0x430000 == 0x00430000 (byte-position immediate, not 0x43000000).
     for (int i = 0; i < 0x104; i++) {
@@ -241,18 +243,33 @@ int native_init_lut() {
 
     // The middle call passes -1: in FUN_00053ac4 r1 is set to 0xffffffff before
     // the first call and NOT reloaded before the second; only the third uses the
-    // real param (0).
+    // real param.
     native_init_lut_sub(buf + 0x104, -1);
     native_init_lut_sub(buf + 0x208, -1);
-    native_init_lut_sub(buf + 0x30c, 0);
-    
+    native_init_lut_sub(buf + 0x30c, pattern);
+
     uint32_t* puVar2 = buf + 0x410;
     while (puVar2 != buf + 0x59600) {
-        memcpy(puVar2, buf + 0x30c, 0x410); // Wait, 0x410 bytes = 0x104 words
+        memcpy(puVar2, buf + 0x30c, 0x410); // 0x410 bytes = 0x104 words
         puVar2 += 0x104;
     }
-    
+}
+
+int native_init_lut() {
+    size_t sz = 0x165800;
+    g_pLUTAddrNative = malloc(sz);
+    if (!g_pLUTAddrNative) return -1;
+    native_fill_lut_pattern(g_pLUTAddrNative, 0);
     return 0;
+}
+
+// Mirrors write_flash_prime_pattern (0x53c04, wraps FUN_00053ac4): writes the
+// same dither-fill algorithm as native_init_lut, but into an already-existing
+// frame-slot-sized buffer and with a caller-supplied pattern rather than the
+// real waveform LUT's fixed 0. Used by the worker thread's flash sequence to
+// prime frame slots 0-2 with a checkerboard pattern.
+void native_write_lut_pattern(void* dest, int pattern) {
+    native_fill_lut_pattern(dest, pattern);
 }
 
 bool native_load_waveform(std::vector<ModeEntry*>* waveform_struct, const char* path) {
@@ -529,6 +546,32 @@ void native_upload_lut_to_frame_slot(void* dest) {
     memcpy(dest, g_pLUTAddrNative, 0x165800);
 }
 
+// Mirrors reset_statebuffer_neutral (0x4fbe0): reapplies the same
+// 0x001e001e-per-pixel fill native_init_statebuffer used at allocation time,
+// over the already-allocated statebuffer. Called by the worker thread after
+// its flash sequence to reset per-pixel state to neutral.
+void native_reset_statebuffer_neutral() {
+    auto* sb = statebuffer_globals();
+    size_t sz = 0x503580;
+    uint32_t* sp = (uint32_t*)sb->pStatebuffer;
+    for (size_t i = 0; i < sz / 4; i++)
+        sp[i] = 0x001e001e;
+}
+
+// Mirrors read_lut_packed_pixel (0x40c58): generic bit-unpacking read of one
+// packed pixel from a LUTEntry - the read-side inverse of native_load_waveform's
+// packing loop above (which hardcodes bit_depth=2; this generalizes to any
+// bit_depth). `phase` selects which of the LUT's packed planes to read from.
+unsigned native_read_lut_packed_pixel(const LUTEntry* lut, int row, int col, int phase) {
+    int pixels_per_word = 16 / lut->bit_depth;
+    int word_idx = phase / pixels_per_word;
+    int bit_off = phase - pixels_per_word * word_idx;
+    int mw = lut->mode_width;
+    int data_idx = mw * row + col + mw * mw * word_idx + word_idx;
+    uint16_t raw = ((const uint16_t*)lut->data)[data_idx];
+    return (raw >> (lut->bit_depth * bit_off)) & ((1u << lut->bit_depth) - 1);
+}
+
 int native_pan_and_unblank(int frame_idx) {
     auto* fb = framebuffer_globals();
     auto* vinfo = &fb->fbVar;
@@ -556,6 +599,19 @@ int native_pan_and_unblank(int frame_idx) {
         std::cout << "Pan failed" << std::endl;
     }
     return -1;
+}
+
+// Mirrors pan_to_frame (unconditional pan, no unblank/retry - unlike
+// native_pan_and_unblank, which also flips the panel on and retries FBIOBLANK
+// up to 5 times): sets fbVar.yoffset and issues FBIOPAN_DISPLAY once, logging
+// "Pan failed" on error and otherwise doing nothing else.
+void native_pan_to_frame(int frame_idx) {
+    auto* fb = framebuffer_globals();
+    auto* vinfo = &fb->fbVar;
+    vinfo->yoffset = frame_idx * vinfo->yres;
+    if (ioctl(fb->nFbFd, FBIOPAN_DISPLAY, vinfo) == -1) {
+        std::cout << "Pan failed" << std::endl;
+    }
 }
 
 void native_prime_display() {
