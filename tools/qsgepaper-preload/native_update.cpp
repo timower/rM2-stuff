@@ -19,8 +19,13 @@ extern void (*qsgepaper_wait)();
 
 // Remaining library leaf routines swtcon_update still calls into by
 // address (see AGENTS.md Phase 4b for the reversing status of each).
-constexpr uintptr_t kDispatchUpdateRegionsAddr = 0x4fff8;
 constexpr uintptr_t kMakeEmptyLutAddr = 0x408a8;
+// The shared_ptr control block's vtable pointer for a RegionRows allocation,
+// exactly matching dispatch_update_regions's own `*puVar1 = &PTR_LAB_000651ec`
+// (see native_dispatch_update_regions below) - kept still-library (a generic
+// libstdc++ dispose/destroy pair for an array-new'd byte buffer) so the
+// existing release_sp/shared_ptr machinery keeps working on it unmodified.
+constexpr uintptr_t kRegionRowsVtableAddr = 0x651ec;
 
 // --- Native swtcon_update / lock / unlock_post / wait ---
 //
@@ -31,15 +36,6 @@ constexpr uintptr_t kMakeEmptyLutAddr = 0x408a8;
 // WorkItemNode, BatchNode and RegionRows in native_update.h for the wire
 // formats). Remaining library leaf routines (to be reversed in later
 // steps):
-//   0x4fff8 dispatch_update_regions - diffs image vs back buffer into a
-//                                     RegionRows buffer (own control-flow
-//                                     reversed - see RegionRows's comment -
-//                                     but the actual per-pixel diff/
-//                                     threading kernel, render_update_kernel
-//                                     @0x4e7b8, is still library code and
-//                                     unlikely to be worth porting:
-//                                     dispatch_update_regions itself is a
-//                                     full custom thread-pool dispatcher)
 //   0x1ec58 _M_hook                 - std::__detail::_List_node_base::_M_hook
 //                                     (superseded here by list_insert_before,
 //                                     a native reimplementation - kept as a
@@ -295,6 +291,140 @@ native_piece_builder(WorkItem* dest, const WorkItem* src, const Rect& piece_rect
   return dest;
 }
 
+// --- Native render_update_kernel / dispatch_update_regions (Phase 6) ---
+//
+// Both formulas and addressing are empirically confirmed against the real
+// library function - see swtcon_architecture.md §5.1/§5.2 and
+// tools/qsgepaper-preload/render_kernel_verify.cpp /
+// render_kernel_addr_map.cpp for the verification methodology. The upshot:
+// every output byte is a pure function of exactly one dataBuffer/backBuffer
+// pixel and one gamma-table cell, read through a 180-degree rotation of the
+// whole framebuffer relative to the update rect's own coordinate space (the
+// same reflection native_clamp_update_rect already documents on the rect
+// itself). dispatch_update_regions's two-way thread-pool chunking (for rects
+// wider than 98 columns) only ever splits this same computation into two
+// disjoint column ranges - it changes nothing about which output byte reads
+// which input byte, so this single-pass native port doesn't replicate it.
+constexpr int kScreenWidth = 1404;
+constexpr int kScreenHeight = 1872;
+
+extern void* g_pGammaTableNative;
+
+// Mirrors render_update_kernel's pixelMode==5 ("auto") indirection through
+// g_anPixelModeDispatchTable - confirmed by reading the table's bytes
+// directly out of the loaded library (Ghidra address 0x596b8).
+static int
+native_render_kernel_case(int pixel_mode, int mode) {
+  if (pixel_mode == 5) {
+    static const int kTable[7] = { 6, 9, 9, 9, 9, 6, 8 };
+    unsigned idx = (unsigned)(mode - 1);
+    if (idx > 6)
+      return -1; // out-of-range mode falls through to the default formula
+    return kTable[idx];
+  }
+  return pixel_mode;
+}
+
+// Per-pixel formulas, transcribed from the ARM disassembly at 0x4e7b8 (the
+// bitfield extraction, gamma-table add, and div-by-125-then-scale sequences
+// were read directly off the umull/lsr reciprocal-division idiom).
+static uint8_t
+native_render_kernel_formula(int case_, uint16_t src, bool back_active, uint8_t gamma) {
+  unsigned lo5 = src & 0x1f;
+  unsigned mid6 = (src >> 5) & 0x3f;
+  unsigned hi5 = src >> 11;
+  switch (case_) {
+    case 6:
+    case 8:
+      return (uint8_t)(((lo5 + mid6 + hi5 + gamma) / 125) * 30);
+    case 7:
+      if (!back_active)
+        return 0x20;
+      return (uint8_t)(((lo5 + mid6 + hi5 + gamma) / 125) * 30);
+    case 9:
+      return (uint8_t)((((lo5 + mid6 + hi5) * 15 + gamma) / 125) << 1);
+    case 0xd:
+      return 0x1e;
+    default:
+      return (uint8_t)(((lo5 + mid6 + hi5) >> 3) << 1);
+  }
+}
+
+// Native reimplementation of render_update_kernel (0x4e7b8). `dataBuffer`
+// and `backBuffer` are the full-screen working buffers (queue->dataBuffer /
+// queue->backBuffer); item->regionRows.ptr must already point at a RegionRows
+// sized for item's own rect (native_dispatch_update_regions's job).
+static void
+native_render_update_kernel(WorkItem* item, const uint16_t* dataBuffer, const uint8_t* backBuffer) {
+  auto* rr = (RegionRows*)item->regionRows.ptr;
+  if (!rr->dataPtr)
+    return;
+  const uint8_t* gammaTable = (const uint8_t*)g_pGammaTableNative;
+  int case_ = native_render_kernel_case(item->pixelMode, item->mode);
+
+  for (int32_t y_screen = item->rectY0; y_screen <= item->rectY1; y_screen++) {
+    int row = y_screen - item->rectY0;
+    int src_y = (kScreenHeight - 1) - y_screen;
+    for (int32_t x_screen = item->rectX0; x_screen <= item->rectX1; x_screen++) {
+      int col = x_screen - item->rectX0;
+      int src_x = (kScreenWidth - 1) - x_screen;
+      int srcIdx = src_y * kScreenWidth + src_x;
+      uint8_t gamma = gammaTable[(src_x & 0x7f) + (src_y & 0x7f) * 0x88];
+      uint8_t out =
+        native_render_kernel_formula(case_, dataBuffer[srcIdx], backBuffer[srcIdx] != 0, gamma);
+      rr->dataPtr[(int64_t)col * rr->stride + row] = out;
+    }
+  }
+}
+
+// Native reimplementation of dispatch_update_regions (0x4fff8): allocates the
+// item's RegionRows blob (releasing whatever it had before) and fills it via
+// native_render_update_kernel. Byte layout of the allocation exactly matches
+// the library's own (vtable ptr + refcounts + RegionRows, 0x28 bytes total,
+// RegionRows starting at +0xc - see swtcon_architecture.md §5.1) so the
+// existing generic release_sp keeps working on it unmodified.
+void
+native_dispatch_update_regions(WorkItem* item, void* dataBuffer, void* backBuffer) {
+  struct RegionRowsBlock {
+    void* vtable;
+    int32_t useCount;
+    int32_t weakCount;
+    RegionRows rr;
+  };
+  static_assert(offsetof(RegionRowsBlock, rr) == 0xc, "RegionRowsBlock layout drift");
+  static_assert(sizeof(RegionRowsBlock) == 0x28, "RegionRowsBlock layout drift");
+
+  auto* block = (RegionRowsBlock*)::operator new(sizeof(RegionRowsBlock));
+  block->vtable = resolve_ptr<void*>(kRegionRowsVtableAddr);
+  block->useCount = 1;
+  block->weakCount = 1;
+  block->rr.y0 = item->rectY0;
+  block->rr.x0 = item->rectX0;
+  block->rr.y1 = item->rectY1;
+  block->rr.x1 = item->rectX1;
+  block->rr.dataPtr = nullptr;
+  block->rr.stride = 0;
+  block->rr.size = 0;
+
+  if (item->rectY0 <= item->rectY1 && item->rectX0 <= item->rectX1) {
+    int32_t stride = ((item->rectY1 - item->rectY0) + 0x10) & ~0xf; // round_up(height, 16)
+    int32_t size = stride * (item->rectX1 - item->rectX0 + 1);
+    block->rr.stride = stride;
+    block->rr.size = size;
+    if (size != 0)
+      block->rr.dataPtr = (uint8_t*)::operator new[](size);
+  }
+
+  void* old_ctrl = item->regionRows.ctrl;
+  item->regionRows.ptr = &block->rr;
+  item->regionRows.ctrl = block;
+  release_sp(old_ctrl);
+  item->gap = (int32_t)(intptr_t)block->rr.dataPtr;
+
+  if (item->rectY0 <= item->rectY1 && item->rectX0 <= item->rectX1)
+    native_render_update_kernel(item, (const uint16_t*)dataBuffer, (const uint8_t*)backBuffer);
+}
+
 // Native reimplementation of subtract_update_region (0x3be10): clips the
 // newly-queued item's rect out of every overlapping region in `list` (either
 // the pending accumulation list, or an unclaimed batch's region list).
@@ -468,9 +598,6 @@ swtcon_lock() {
 void
 swtcon_update(update_data* data) {
 #if NATIVE_UPDATE
-  // Remaining still-library leaf routine (see banner above).
-  auto fn_dispatch = resolve_ptr<void (*)(void*, void*, void*)>(kDispatchUpdateRegionsAddr);
-
   auto* queue = update_queue_globals();
 
   alignas(16) WorkItem item;
@@ -501,7 +628,7 @@ swtcon_update(update_data* data) {
       temp = (float)data->zero;
     item.temperature = temp;
 
-    fn_dispatch(&item, queue->dataBuffer, queue->backBuffer);
+    native_dispatch_update_regions(&item, queue->dataBuffer, queue->backBuffer);
 
     // Select the LUT and move the returned shared_ptr into the item,
     // releasing whatever was there (empty after the ctor).

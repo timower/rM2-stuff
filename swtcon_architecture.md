@@ -185,11 +185,11 @@ Key facts that took real reversing effort (see `AGENTS.md` Phase 3 for the full 
 
 ## 4. Update flow (`swtcon_update` / `queue_update`)
 
-Fully native control flow (`native_update.cpp`), calling into two still-library leaves for the actual pixel work (§5).
+Fully native (`native_update.cpp`) — as of Phase 6, zero remaining by-address library calls anywhere in this path.
 
 1. **`swtcon_lock`** — `pthread_mutex_lock(&updateQueueMutex)`.
 2. **`swtcon_update`** — builds a fresh `WorkItem` (`native_update_item_ctor`: degenerate rect, 25°C default, `pixelMode=5`, empty list/shared_ptrs), reorders the caller's `x/y/width/height` into the clamp function's expected axis order and runs **`native_clamp_update_rect`**: an independent per-axis point-reflection through `(SCREEN_HEIGHT-1, SCREEN_WIDTH-1) = (1871, 1403)` — i.e. flips into the panel's 180°-rotated hardware frame — with the y-axis rounded to 8-row blocks (down for y0, up for y1). Rejects degenerate results. Then:
-   - `dispatch_update_regions(item, dataBuffer, backBuffer)` — still library, §5.1.
+   - `native_dispatch_update_regions(item, dataBuffer, backBuffer)` — native, §5.1.
    - `native_select_waveform_lut(temperature, mode)` picks the LUT (§4.1 below), retains it into `item.lut`.
    - `native_update_lut_is_valid` sanity-checks it (non-null data, positive `size_kb`/`bit_depth`/`mode_width`).
    - `native_subtract_update_region` clips the new rect out of the pending accumulation list *and* every unlocked queued batch (§4.2 below).
@@ -214,7 +214,9 @@ Each piece is a full clone of the old item (preserving LUT/mode/temp/flags) with
 
 ---
 
-## 5. The two remaining update-path leaves (still library)
+## 5. `render_update_kernel` / `dispatch_update_regions` — Phase 6, now native
+
+Both fully ported (`native_dispatch_update_regions`/`native_render_update_kernel` in `native_update.cpp`). The subsections below describe the *library's own* algorithm (allocation logic, formulas, addressing) as reversed and confirmed — the native port implements the same formulas/addressing (§5.2) as a single straightforward pass, deliberately **not** replicating the library's own thread-pool chunking (§5.1 point 4), since that chunking is provably invisible in the output (see §5.2's addressing box).
 
 ### 5.1 `dispatch_update_regions` (0x4fff8)
 
@@ -223,7 +225,7 @@ Each piece is a full clone of the old item (preserving LUT/mode/temp/flags) with
 1. Allocates the item's `RegionRows` blob (§1), releasing whatever `regionRows` shared_ptr the item had before.
 2. **[confirmed]** If the rect is degenerate or narrower than 99 columns, skips threading — one synchronous call, `render_update_kernel(item, dataBuffer, backBuffer, chunkIndex=0, chunkCount=1)`.
 3. **[confirmed]** Otherwise, lazily spins up (once, process-lifetime) a `hardware_concurrency()`-sized persistent worker pool — shared across every `dispatch_update_regions` call, **not** shared with the other two pools (§7).
-4. **[confirmed]** Submits **exactly two** tasks (chunk count is a literal `2` baked into the task object, not `hardware_concurrency()`) — top-half/bottom-half by row — and blocks until both finish. The pool's extra depth is headroom for *concurrent* dispatches, not finer splitting of one.
+4. **[confirmed]** Submits **exactly two** tasks (chunk count is a literal `2` baked into the task object, not `hardware_concurrency()`) — left-half/right-half by column (the chunk split is computed from `rectX0`/`rectX1`, not the row bounds) — and blocks until both finish. The pool's extra depth is headroom for *concurrent* dispatches, not finer splitting of one.
 
 ### 5.2 `render_update_kernel` (0x4e7b8) — the per-pixel diff kernel
 
@@ -260,7 +262,7 @@ case 0xd:             out = 0x1e   // [confirmed] flat fill, no source read — 
 default (0xa/0xb/0xc): out = ((lo5+mid6+hi5) >> 3) << 1                                  // no gamma lookup
 ```
 
-**Verification methodology (`tools/qsgepaper-preload/render_kernel_verify.cpp`):** these formulas were re-derived a second time directly from ARM disassembly at `0x4e7b8` (not just the Ghidra decompiler's pseudocode — the bitfield extraction, the `gamma` table add, and the div-by-125-then-scale sequences were read off the raw `and`/`ubfx`/`umull`/`lsr` reciprocal-division idiom), then checked at runtime against the real library function. The addressing/180°-rotation logic (still not hand-verified — see the "not closed out" note below) is sidestepped entirely: the tool calls the real `render_update_kernel` directly (same `{item, dataBuffer, backBuffer, chunkIndex=0, chunkCount=1}` convention `dispatch_update_regions` itself uses for a single-shot dispatch) on a `dataBuffer` filled with one uniform 16-bit value across a rect **exactly 128×128 pixels**. Over that rect the kernel's two `&0x7f` loop counters each sweep a full 0–127 residue class exactly once regardless of screen position or rotation phase, so all 16,384 `(row&0x7f, col&0x7f)` gamma-table cells get visited exactly once each, just in an unknown order — turning a "byte-for-byte positional match" (which would need the rotation solved) into a "sorted-multiset match" (which doesn't). Passed on all 16 pixelMode/mode combinations across a diagnostic sweep of the full 16-bit `src` space (261 values/case, `render-kernel-verify 251` on the emulator — pass `1` for an exhaustive but ~40-hour sweep). Also incidentally confirmed the gamma table's base-pointer quirk: `g_pGammaTable` points at the *raw* allocation including its leading `'U'` version-tag byte, so `gamma[0][0]` really is `'U'` (0x55), not the first real dither sample — already baked correctly into `native_init_statebuffer`'s table, just now confirmed load-bearing.
+**Verification methodology (`tools/qsgepaper-preload/render_kernel_verify.cpp`):** these formulas were re-derived a second time directly from ARM disassembly at `0x4e7b8` (not just the Ghidra decompiler's pseudocode — the bitfield extraction, the `gamma` table add, and the div-by-125-then-scale sequences were read off the raw `and`/`ubfx`/`umull`/`lsr` reciprocal-division idiom), then checked at runtime against the real library function. This first pass deliberately sidestepped the addressing/180°-rotation logic (solved separately, see the box below): the tool calls the real `render_update_kernel` directly (same `{item, dataBuffer, backBuffer, chunkIndex=0, chunkCount=1}` convention `dispatch_update_regions` itself uses for a single-shot dispatch) on a `dataBuffer` filled with one uniform 16-bit value across a rect **exactly 128×128 pixels**. Over that rect the kernel's two `&0x7f` loop counters each sweep a full 0–127 residue class exactly once regardless of screen position or rotation phase, so all 16,384 `(row&0x7f, col&0x7f)` gamma-table cells get visited exactly once each, just in an unknown order — turning a "byte-for-byte positional match" (which would need the rotation solved) into a "sorted-multiset match" (which doesn't). Passed on all 16 pixelMode/mode combinations across a diagnostic sweep of the full 16-bit `src` space (261 values/case, `render-kernel-verify 251` on the emulator — pass `1` for an exhaustive but ~40-hour sweep). Also incidentally confirmed the gamma table's base-pointer quirk: `g_pGammaTable` points at the *raw* allocation including its leading `'U'` version-tag byte, so `gamma[0][0]` really is `'U'` (0x55), not the first real dither sample — already baked correctly into `native_init_statebuffer`'s table, just now confirmed load-bearing.
 
 **`gamma`/`g_pGammaTable` is an ordered-dither threshold matrix, not a tone curve — `[derived]`, upgraded this pass.** Three independent facts converge:
 1. It's indexed purely by pixel *position* (`row&0x7f`, `col&0x7f`, a 128×128 tile), not by pixel *value* — a real gamma/tone-response curve would be indexed by intensity, not screen coordinate.
@@ -269,7 +271,21 @@ default (0xa/0xb/0xc): out = ((lo5+mid6+hi5) >> 3) << 1                         
 
 This also gives the `backBuffer` gate in case 7 a concrete role: `libs/rm2fb/Versions/Version3.20.cpp:38-39` independently calls this same buffer `getGrayBuffer()` with a comment guessing it's used "when extraMode == 7" — written before this reversing project and now confirmed exactly. For the pen/marker path, dithering is applied only where the caller's gray mask is set; elsewhere the kernel emits the `0x20` skip sentinel and leaves the pixel alone.
 
-Not closed out: the individual physical meaning of `lo5`/`mid6`/`hi5` (old level vs. target level vs. some other per-pixel accumulator — the *that* they get dithered together is now clear, the *what each one is* isn't), and some base-offset address arithmetic converting the chunked/180°-rotated iteration order to buffer addresses (internally consistent with `clamp_update_rect`'s rotation, not hand-verified term by term).
+Not closed out: the individual physical meaning of `lo5`/`mid6`/`hi5` (old level vs. target level vs. some other per-pixel accumulator — the *that* they get dithered together is now clear, the *what each one is* isn't).
+
+**Addressing/rotation — `[confirmed]`, solved empirically (`tools/qsgepaper-preload/render_kernel_addr_map.cpp`).** Rather than hand-decoding the chunked/NEON/rotated ARM pointer arithmetic, this tool finds, for a chosen output byte, exactly which single `dataBuffer`/`backBuffer`/gamma-table byte feeds it — by binary-searching over each buffer (setting a contiguous half to a distinct marker value and checking whether the output flips), which needs zero assumptions about locality or rotation direction since each output byte is a pure function of exactly one input byte per buffer. Confirmed at 10 output positions across 2 different rects (dataBuffer/backBuffer) and 5 positions (gamma), all matching exactly with no exceptions:
+
+```
+y_screen = rectY0 + row          // row = 0..(rectY1-rectY0), the RegionRows-local row index
+x_screen = rectX0 + col          // col = 0..(rectX1-rectX0), the RegionRows-local col index
+src_y    = (SCREEN_HEIGHT-1) - y_screen   // 1871 - y_screen
+src_x    = (SCREEN_WIDTH-1)  - x_screen   // 1403 - x_screen
+srcIdx   = src_y * SCREEN_WIDTH + src_x   // same row-major index into BOTH dataBuffer and backBuffer
+gamma    = g_pGammaTable[(src_x & 0x7f) + (src_y & 0x7f) * 0x88]
+output[col * stride + row] = formula(case, dataBuffer[srcIdx], backBuffer[srcIdx] != 0, gamma)
+```
+
+In other words: the whole framebuffer is read through a 180° rotation (`(y,x) -> (H-1-y, W-1-x)`) relative to the update rect's own coordinate space, and the gamma table is indexed by the *rotated* (source-space) position, not the destination position. `dispatch_update_regions`'s two-way thread-pool chunking (§5.1) only ever splits the column range into disjoint pieces of this same computation — chunking changes nothing about which output byte reads which input byte, so a single-pass native port doesn't need to replicate the threading at all to be byte-identical, only the formula/addressing above.
 
 ---
 
@@ -317,7 +333,7 @@ rather than `[derived]`:
    - A **gate-check "max lifetime" scan** re-walks each item's freshly-built `intList`. **Now fully closed (was `[derived, not fully closed]`)**: a dependency entry is skipped — excluded from the max — exactly when `item.sync==0 && other.sync==0 && item.fullRefresh!=0 && other.fullRefresh!=0` (i.e. neither item requested `Sync`, and both are `FullRefresh` — waiting on another `FullRefresh`-only item's completion is pointless since a full refresh redraws the whole area anyway). Surviving dependencies contribute `other.frameAnchor + other.lutWidthMinus1`; the per-item max of that (0 if none survive) folds into a batch-wide `maxLifetime`.
    - **Gate:** `target = max(maxLifetime, curFrame)`; if `nFrameCleanupCursor - target > 6`, dispatch this batch now; else skip it this tick (retry next `sem_wait`), leaving it untouched in `listIncomingUpdates`.
    Native (`native_build_overlap_dependency_list`, gate-check inlined into `native_display_thread_func`).
-4. **`dispatch_processed_regions` (0x50660) — bigger and hairier than first assumed, still library.** Confirmed call signature this pass: `bool dispatch_processed_regions(ListHead* subList)` — takes the batch's sub-list head directly, the same "count field aliases the caller's struct" trick `build_overlap_dependency_list` uses (it reads a count at `subList+2 words`, which for every real caller is the containing `BatchNode`'s own `count` field). Confirmed: a second, fully independent thread pool (own one-time-init flag, thread vector, task queue/mutex/condvar — none shared with `dispatch_update_regions`'s pool). Dispatches to `FUN_0004f8f0` when the batch's *first item's* `sync==0`, else `FUN_0004e680` — picked once for the whole batch, not per item. The bounding-box computation is *not* a simple union — decompilation shows a genuine interval/rectangle-merge algorithm (heap-allocated rect-merge nodes, dynamic vector growth/reallocation, a byte-cost accumulator, what looks like a full region-merge pass) that has **not** been reversed. The chunk-count gate (1 vs 2) is on the merged result's **X-span** (width) against a threshold of 29, not row-span/height as an earlier pass assumed. **Given this, `dispatch_processed_regions` stays a still-library by-address call — same treatment as `dispatch_update_regions` — until its merge algorithm is actually understood; don't guess at a native replacement** (`native_dispatch_processed_regions` in `native_display.cpp` is a thin by-address wrapper). Blocks until its own pool finishes; return value is a "did anything actually get dispatched" flag (false = empty rect union).
+4. **`dispatch_processed_regions` (0x50660) — bigger and hairier than first assumed, still library.** Confirmed call signature this pass: `bool dispatch_processed_regions(ListHead* subList)` — takes the batch's sub-list head directly, the same "count field aliases the caller's struct" trick `build_overlap_dependency_list` uses (it reads a count at `subList+2 words`, which for every real caller is the containing `BatchNode`'s own `count` field). Confirmed: a second, fully independent thread pool (own one-time-init flag, thread vector, task queue/mutex/condvar — none shared with `dispatch_update_regions`'s pool). Dispatches to `FUN_0004f8f0` when the batch's *first item's* `sync==0`, else `FUN_0004e680` — picked once for the whole batch, not per item. The bounding-box computation is *not* a simple union — decompilation shows a genuine interval/rectangle-merge algorithm (heap-allocated rect-merge nodes, dynamic vector growth/reallocation, a byte-cost accumulator, what looks like a full region-merge pass) that has **not** been reversed. The chunk-count gate (1 vs 2) is on the merged result's **X-span** (width) against a threshold of 29, not row-span/height as an earlier pass assumed. **Given this, `dispatch_processed_regions` stays a still-library by-address call until its merge algorithm is actually understood; don't guess at a native replacement** (`native_dispatch_processed_regions` in `native_display.cpp` is a thin by-address wrapper). Blocks until its own pool finishes; return value is a "did anything actually get dispatched" flag (false = empty rect union).
 5. **Commit / frame-pacing [now fully closed, corrects an earlier `[guess]`]** — on `dispatch_processed_regions` returning true:
    ```
    if (!bWorkerThreadBusy || curFrame != targetFrame) {
@@ -428,7 +444,7 @@ Three independent, lazily-spun-up, `hardware_concurrency()`-sized, process-lifet
 
 | Pool owner | Spun up from | Chunking rule | Serves |
 |---|---|---|---|
-| `dispatch_update_regions` | `swtcon_update`'s call into it | exactly 2, by row | `render_update_kernel` |
+| `dispatch_update_regions` | `swtcon_update`'s call into it | exactly 2, by column | `render_update_kernel` |
 | `dispatch_processed_regions` (0x50660) | `display_thread_func` step 4 | 1 or 2 (merged-rect X-span<29 gate — corrected from an earlier "row-span" assumption), by column | `FUN_0004f8f0`/`FUN_0004e680` |
 | `FUN_0003ec78` | `FUN_0003f294`/`FUN_0003f1f0` | area>20000px && width<10 → 1, else 2 | `FUN_0004a140`/`FUN_0004a234` |
 
@@ -450,7 +466,7 @@ be an intentionally-leaked `std::vector`, not owned/freed natively).
 
 Everything not marked `[confirmed]` above, plus:
 
-- **`render_update_kernel`'s bitfield semantics** (§5.2) — narrowed this pass: `gamma`'s *role* (an ordered-dither threshold matrix, added pre-quantization) is now `[derived]` with strong cross-file evidence, but what `lo5`/`mid6`/`hi5` individually represent is still open — and **base-offset arithmetic**.
+- **`render_update_kernel`'s bitfield semantics** (§5.2) — formulas and addressing are both `[confirmed]` now (statically and at runtime); `gamma`'s *role* (an ordered-dither threshold matrix, added pre-quantization) is `[derived]` with strong cross-file evidence, but what `lo5`/`mid6`/`hi5` individually represent physically is still open (doesn't block the native port, which just needs the formula, not the semantics).
 - **`FUN_0004a140`'s exact NEON shift constants** (§6.4) — shape confirmed, not term-verified.
 - **The `(state<<5)|value` packing** (§6.3) and `sp3`'s downstream consumer — `sp3`'s own shape (a `RegionRows`-aliased buffer, x0/x1 at the usual offsets) is now `[confirmed]` via `advance_work_item_frames` reading it directly (§6.4 step 5); only the packed-value semantics and allocation site remain open.
 - **`FUN_0004a234` and its three delegates** (`FUN_0004a3f8`/`FUN_0004a9e0`/`FUN_0004b098`) — fully unreversed; only reachable via the "plain kernel" path when `intList` has an active dependency and via the overlap-kernel path otherwise (§6.4's corrected selection rule) - deferrable, not the common case.
@@ -478,20 +494,16 @@ Native reimplementations (see `native_init.cpp`/`native_update.cpp`/`swtcon.cpp`
 | `update_item_ctor`, `update_item_copy`, `clamp_update_rect`, `get_current_temperature`, `free_update_region_list` | Phase 4b | Native |
 | `subtract_update_region` (0x3be10), `build_update_batch` (0x3ea98), `FUN_000400a8`/piece-builder | Phase 4b | Native |
 | `select_waveform_lut` (0x4535c), `update_lut_is_valid` (0x409e4) | Phase 4b | Native |
+| `dispatch_update_regions` (0x4fff8), `render_update_kernel` (0x4e7b8) | Phase 6 | Native (`native_dispatch_update_regions`/`native_render_update_kernel`) |
 | `worker_thread_func` (0x3ae38) | Phase 5 | Native (`native_display.cpp`) |
 | `pan_to_frame` (0x53fxx, unconditional pan variant) | Phase 5 | Native (`native_pan_to_frame`) |
 | `write_flash_prime_pattern` (0x53c04) | Phase 5 | Native (`native_write_lut_pattern`, shares `native_init_lut`'s fill body) |
 | `reset_statebuffer_neutral` (0x4fbe0) | Phase 5 | Native (`native_reset_statebuffer_neutral`) |
 | `read_lut_packed_pixel` (0x40c58) | Phase 5 | Native (`native_read_lut_packed_pixel`) |
 
-Still library, update path:
+The update path (`swtcon_update`) has zero remaining still-library calls as of Phase 6.
 
-| Function | Address | Status |
-|---|---|---|
-| `dispatch_update_regions` | 0x4fff8 | Control flow + output struct confirmed; drives `render_update_kernel` |
-| `render_update_kernel` | 0x4e7b8 | Formulas derived, bitfield semantics unverified |
-
-Still library, display pipeline - the only two calls left in the whole display pipeline:
+Still library, display pipeline - the only two calls left in the whole native port:
 
 | Function | Address | Role |
 |---|---|---|

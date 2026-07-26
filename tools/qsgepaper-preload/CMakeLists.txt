@@ -18,6 +18,12 @@ add_executable(render-kernel-verify render_kernel_verify.cpp native_init.cpp)
 target_link_libraries(render-kernel-verify dl)
 target_compile_definitions(render-kernel-verify PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
 
+# Empirical input->output addressing mapper for render_update_kernel (Phase 6
+# porting work) - see render_kernel_addr_map.cpp's header comment.
+add_executable(render-kernel-addr-map render_kernel_addr_map.cpp native_init.cpp)
+target_link_libraries(render-kernel-addr-map dl)
+target_compile_definitions(render-kernel-addr-map PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
+
 install(
   TARGETS qsgepaper-test
   COMPONENT tools

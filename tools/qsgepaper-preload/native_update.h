@@ -182,3 +182,10 @@ void native_free_update_region_list(ListHead* list_head);
 // source's rect and sequence id (see CloneWorkItemFieldsInto for the
 // shared cloning body, also used by the rect-splitting piece-builder).
 WorkItem* native_update_item_copy(WorkItem* dest, const WorkItem* src);
+
+// Native reimplementation of dispatch_update_regions (0x4fff8) and its
+// per-pixel kernel render_update_kernel (0x4e7b8) - see native_update.cpp
+// for the full comment and swtcon_architecture.md §5.1/§5.2 for the
+// confirmed formulas/addressing. Allocates item's RegionRows blob and fills
+// it from dataBuffer/backBuffer (the full-screen working buffers).
+void native_dispatch_update_regions(WorkItem* item, void* dataBuffer, void* backBuffer);
