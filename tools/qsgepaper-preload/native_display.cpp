@@ -223,13 +223,14 @@ native_request_flash_and_wait() {
 // architecture doc, which turned out to have the wrong kernel-selection
 // rule for advance_work_item_frames - see that function's comment).
 //
-// One piece stays still-library, called by address exactly like
-// render_update_kernel used to be in the update path:
-//   0x4a234 the "overlap-aware" worker-side playback kernel - call signature
-//           confirmed, body still [guess] (see architecture doc §8). Its
-//           sibling, the "plain" kernel at 0x4a140, is native now
-//           (native_playback_kernel_plain below).
-constexpr uintptr_t kOverlapPlaybackKernelAddr = 0x4a234;
+// Both worker-side playback kernels (0x4a140 "plain" and 0x4a234
+// "overlap-aware") are native now, sharing one implementation
+// (native_playback_kernel_plain below) - see native_dispatch_overlap_kernel's
+// comment for why a single native function covers both by-address
+// originals. This was the last remaining by-address call anywhere in the
+// production pipeline (display_thread_func's own by-address call at
+// dispatch_processed_regions, further up this file, is kept only as a
+// SWTCON_LIBDISPATCH-gated A/B testing fallback - see its comment).
 
 extern void* g_pStateBufferNative;
 
@@ -773,13 +774,38 @@ native_dispatch_plain_kernel(void** frame_slots, WorkItem* item, int frame_count
 }
 
 // Mirrors FUN_0003f1f0 (0x3f1f0, "overlap-aware" kernel wrapper -
-// CONFIRMED): same as above but with the overlap-aware kernel (0x4a234).
+// CONFIRMED): same as above, dispatching to what used to be the separate
+// by-address "overlap-aware" kernel (0x4a234).
+//
+// FUN_0004a234 turned out NOT to be a distinct algorithm: a decisive probe
+// test (tools/qsgepaper-preload/playback_kernel_probe.cpp Experiment 7) calls
+// both FUN_0004a140 and the real FUN_0004a234 on an IDENTICAL WorkItem/state/
+// LUT (a rich, pseudo-random, non-uniform fill spanning 4 columns x 16 rows)
+// for every frameCount 1-8 (including the three cases - 1,2,3 - that
+// FUN_0004a234 itself tail-calls out to separate, still fully unreversed
+// delegates FUN_0004a3f8/FUN_0004a9e0/FUN_0004b098 for) and diffs every byte
+// of the output: all eight cases came back byte-for-byte IDENTICAL. A Ghidra
+// decompile of FUN_0004a234's case 8 (the most common in practice - see
+// below) independently corroborates this: it touches the exact same
+// WorkItem fields as FUN_0004a140 (0xc/0x10/0x14/0x18/0x28/0x2c/0x3c/0x44),
+// the same LUT-index formula, the same destination address formula, and the
+// same row->bit packing order - no new field, no global, no `intList`
+// access, no allocation, no threads. The only difference is NEON unrolling
+// strategy: FUN_0004a234's cases 4-8 extract all 8 sub-phases from one
+// lane-shifted vector at once (valid only because the overlap-kernel
+// selection rule - see advance_work_item_frames's kernel-selection comment -
+// guarantees `phase&7==0` whenever this path is taken, i.e. there's no
+// `(phase&7)+k` offset to compute), where FUN_0004a140 does the general
+// `(phase&7)+k` slice; cases 1-3's delegates presumably do the analogous
+// thing for a phase-aligned start with a short remaining run. Different
+// code, provably same output - so no separate native implementation is
+// needed, and the delegates never need reversing at all.
 static void
 native_dispatch_overlap_kernel(void** frame_slots, WorkItem* item, int frame_count) {
-  auto kernel_fn = resolve_ptr<PlaybackKernelFn>(kOverlapPlaybackKernelAddr);
   int chunk_count = native_playback_chunk_count(item);
   ab_capture_kernel(item, "overlap", frame_count, chunk_count);
-  native_playback_kernel_dispatch(kernel_fn, frame_slots, item, frame_count, chunk_count);
+  native_playback_kernel_dispatch(native_playback_kernel_plain, frame_slots, item, frame_count,
+                                   chunk_count);
 }
 
 // Mirrors advance_work_item_frames (0x3a984) byte-exactly, re-derived

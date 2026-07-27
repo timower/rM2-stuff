@@ -316,6 +316,7 @@ main() {
   printf("native_init_statebuffer done, bridged pStatebuffer/pGammaTable\n");
 
   auto plain_kernel = (PlaybackKernelFn)(g_runtime_offset + PLAIN_PLAYBACK_KERNEL_ADDR);
+  auto overlap_kernel = (PlaybackKernelFn)(g_runtime_offset + OVERLAP_PLAYBACK_KERNEL_ADDR);
 
   // The frameSlots[8] pointer array itself is guard-paged too, not just the
   // buffers it points to - if the kernel ever indexes past slot 7 (a wrong
@@ -546,6 +547,89 @@ main() {
         printf("  slot%d: %zu nonzero bytes\n", i, n);
     }
     printf("  predicted: slot0 byte@0x7fbd9=0x40 (value 1<<6), slot1 byte@0x7fbd9=0x80 (value 2<<6)\n");
+    free_item(&ti);
+  }
+
+  // --- Experiment 7: are FUN_0004a234's cases 4-8 computationally
+  // IDENTICAL to FUN_0004a140, not just similarly-shaped? A Ghidra decompile
+  // pass on case 8 (94/117 real overlap-kernel calls in one ab-test run,
+  // vs. 23 for case 5 and 0 for cases 1-4/6-7 - see AGENTS.md) found it
+  // touches the exact same WorkItem fields (0xc/0x10/0x14/0x18/0x28/0x2c/
+  // 0x3c/0x44), the exact same LUT-index formula, the exact same
+  // destination address formula, and the exact same row->bit packing order
+  // as FUN_0004a140 - no new field, no global, no intList access, just a
+  // different NEON unrolling strategy (justified by phase&7==0 always
+  // holding when the overlap kernel is selected, letting it extract all 8
+  // sub-phases from one lane-shifted vector instead of doing the (phase&7)+k
+  // slice FUN_0004a140 does). If true, native_playback_kernel_plain should
+  // already produce byte-identical output to the real FUN_0004a234 - this
+  // decisive test calls BOTH kernels on the IDENTICAL WorkItem/state/LUT
+  // (into separate frame-slot buffers) and diffs every byte, rather than
+  // trusting the decompile reading alone. Uses phase=0 (8-aligned, required
+  // for the overlap-kernel path to ever be selected in real usage) and
+  // frameCount=8 so every one of the 8 packed sub-phases gets exercised in
+  // one call - the richest single-call test available. A varied
+  // pseudo-random transition/LUT fill (not a uniform value) avoids a
+  // trivial coincidental match.
+  {
+    printf("\n=== Experiment 7: FUN_0004a234 vs FUN_0004a140 identical-input diff ===\n");
+    const int Y0 = 0, Y1 = 15, X0 = 500, X1 = 503;
+    TestItem ti;
+    build_item(&ti, Y0, X0, Y1, X1, /*fill_transition=*/0, /*phase=*/0, /*mode_width=*/32,
+               /*bit_depth=*/2, /*lut_width=*/8);
+    auto cell = [&](int col, int row) -> uint16_t& {
+      return ti.stateBuf[(size_t)ti.sp3rr.stride * (col - ti.sp3rr.x0) + (row - ti.sp3rr.y0)];
+    };
+    // Deterministic pseudo-random transition per pixel (mw=32, so oldState/
+    // newState each 0-31 - keep both in range so the transition value stays
+    // a valid mw*row+col index).
+    unsigned seed = 12345;
+    auto next_rand = [&]() {
+      seed = seed * 1103515245u + 12345u;
+      return (seed >> 16) & 0x7fff;
+    };
+    for (int col = X0; col <= X1; col++)
+      for (int row = Y0; row <= Y1; row++)
+        cell(col, row) = (uint16_t)((next_rand() % 32) * 32 + (next_rand() % 32));
+    // Fill every (oldState,newState) LUT cell for phase 0-7 (word_idx=0,
+    // exactly matching frameCount=8's full sub-phase range) with a varied
+    // pseudo-random 2-bit value.
+    for (int r = 0; r < 32; r++)
+      for (int c = 0; c < 32; c++)
+        for (int p = 0; p < 8; p++)
+          write_lut_packed_pixel(&ti.lut, r, c, p, next_rand() & 3);
+
+    void** frame_slots_b = (void**)alloc_guarded(8 * sizeof(void*));
+    for (int i = 0; i < 8; i++)
+      frame_slots_b[i] = alloc_guarded(kFrameSlotBytes);
+    auto clear_slots_b = [&] {
+      for (int i = 0; i < 8; i++)
+        memset(frame_slots_b[i], 0, kFrameSlotBytes);
+    };
+
+    for (int frame_count : { 8, 5, 4, 6, 7, 1, 2, 3 }) {
+      clear_slots();
+      plain_kernel(frame_slots, &ti.node->item, frame_count, /*chunkIndex=*/0, /*chunkCount=*/1);
+      clear_slots_b();
+      overlap_kernel(frame_slots_b, &ti.node->item, frame_count, /*chunkIndex=*/0, /*chunkCount=*/1);
+
+      size_t mismatches = 0;
+      for (int i = 0; i < 8 && mismatches < 20; i++) {
+        const uint8_t* a = (const uint8_t*)frame_slots[i];
+        const uint8_t* b = (const uint8_t*)frame_slots_b[i];
+        for (size_t off = 0; off < kFrameSlotBytes && mismatches < 20; off++) {
+          if (a[off] != b[off]) {
+            printf("  frameCount=%d MISMATCH slot%d @0x%zx: plain=0x%02x overlap=0x%02x\n",
+                   frame_count, i, off, a[off], b[off]);
+            mismatches++;
+          }
+        }
+      }
+      if (mismatches == 0)
+        printf("  frameCount=%d: IDENTICAL byte-for-byte\n", frame_count);
+      else
+        printf("  frameCount=%d: %zu+ mismatches found - NOT identical\n", frame_count, mismatches);
+    }
     free_item(&ti);
   }
 
