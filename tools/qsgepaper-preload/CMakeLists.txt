@@ -38,6 +38,13 @@ add_executable(swtcon-ab-test ab_harness.cpp swtcon.cpp native_init.cpp native_u
 target_link_libraries(swtcon-ab-test dl)
 target_compile_definitions(swtcon-ab-test PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
 
+# Empirical probe for the two worker-side playback kernels (still-library,
+# the last remaining by-address calls in the pipeline) - see
+# playback_kernel_probe.cpp's header comment.
+add_executable(playback-kernel-probe playback_kernel_probe.cpp native_init.cpp native_update.cpp)
+target_link_libraries(playback-kernel-probe dl)
+target_compile_definitions(playback-kernel-probe PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
+
 install(
   TARGETS qsgepaper-test
   COMPONENT tools

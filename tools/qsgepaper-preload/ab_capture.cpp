@@ -112,6 +112,15 @@ ab_capture_playback(const WorkItem* item, int start_frame, int end_frame) {
 }
 
 void
+ab_capture_kernel(const WorkItem* item, const char* kernel, int frame_count, int chunk_count) {
+  if (!ab_capture_enabled())
+    return;
+  emit(fmt("KERN seq=%d kernel=%s frames=%d chunks=%d phase=%d lw=%d rect=%d,%d,%d,%d",
+           item->seqId, kernel, frame_count, chunk_count, (int)item->phase,
+           (int)item->lutWidthMinus1, item->rectY0, item->rectY1, item->rectX0, item->rectX1));
+}
+
+void
 ab_capture_settled(const char* tag) {
   if (!ab_capture_enabled())
     return;

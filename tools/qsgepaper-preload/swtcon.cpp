@@ -199,6 +199,9 @@ swtcon_init() {
     pthread_create(&queue->workerThread, nullptr, native_worker_thread_func, nullptr);
     pthread_create(&queue->displayThread, nullptr, native_display_thread_func, nullptr);
 
+    // auto display_thread_func = resolve_ptr<void*(*)(void*)>(0x3d2ac);
+    // pthread_create(&queue->displayThread, nullptr, display_thread_func, nullptr);
+
     sched_param param;
     param.__sched_priority = 99;
     pthread_setschedparam(queue->workerThread, SCHED_FIFO, &param);

@@ -681,8 +681,9 @@ native_playback_chunk_count(const WorkItem* item) {
 static void
 native_dispatch_plain_kernel(void** frame_slots, WorkItem* item, int frame_count) {
   auto kernel_fn = resolve_ptr<PlaybackKernelFn>(kPlainPlaybackKernelAddr);
-  native_playback_kernel_dispatch(kernel_fn, frame_slots, item, frame_count,
-                                   native_playback_chunk_count(item));
+  int chunk_count = native_playback_chunk_count(item);
+  ab_capture_kernel(item, "plain", frame_count, chunk_count);
+  native_playback_kernel_dispatch(kernel_fn, frame_slots, item, frame_count, chunk_count);
 }
 
 // Mirrors FUN_0003f1f0 (0x3f1f0, "overlap-aware" kernel wrapper -
@@ -690,8 +691,9 @@ native_dispatch_plain_kernel(void** frame_slots, WorkItem* item, int frame_count
 static void
 native_dispatch_overlap_kernel(void** frame_slots, WorkItem* item, int frame_count) {
   auto kernel_fn = resolve_ptr<PlaybackKernelFn>(kOverlapPlaybackKernelAddr);
-  native_playback_kernel_dispatch(kernel_fn, frame_slots, item, frame_count,
-                                   native_playback_chunk_count(item));
+  int chunk_count = native_playback_chunk_count(item);
+  ab_capture_kernel(item, "overlap", frame_count, chunk_count);
+  native_playback_kernel_dispatch(kernel_fn, frame_slots, item, frame_count, chunk_count);
 }
 
 // Mirrors advance_work_item_frames (0x3a984) byte-exactly, re-derived

@@ -35,6 +35,16 @@ void ab_capture_dispatch(ListHead* sub_list);
 // thread right after the kernel returns, so no worker-pan race.
 void ab_capture_playback(const WorkItem* item, int start_frame, int end_frame);
 
+// Per still-library playback-kernel call (0x4a140 "plain" / 0x4a234
+// "overlap"), logged right before the call so `phase`/`lutWidthMinus1`
+// reflect pre-advance state. Purpose: find out which (kernel, frame_count)
+// combinations the real test matrix actually exercises, to prioritize the
+// piecewise reversal of FUN_0004a234's frameCount jump table (AGENTS.md next
+// steps) instead of guessing from the disassembly alone. Not used for A/B
+// comparison (kernel selection is native on both sides of SWTCON_LIBDISPATCH,
+// so these lines are identical either way) - just a coverage log.
+void ab_capture_kernel(const WorkItem* item, const char* kernel, int frame_count, int chunk_count);
+
 // Once per test step (after the batch settles): a hash of the whole state
 // buffer and of all 17 frame slots - cheap regression sentinels.
 void ab_capture_settled(const char* tag);

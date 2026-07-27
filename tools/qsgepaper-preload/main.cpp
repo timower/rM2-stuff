@@ -20,6 +20,18 @@ segv_handler(int sig, siginfo_t* si, void* ucv) {
           si->si_addr, pc, lr);
   fprintf(stderr, "*** ghidra: pc=0x%lx lr=0x%lx (runtime_offset=0x%lx)\n",
           pc - off, lr - off, (unsigned long)off);
+  fprintf(stderr,
+          "*** regs: r0=0x%08lx r1=0x%08lx r2=0x%08lx r3=0x%08lx r4=0x%08lx r5=0x%08lx "
+          "r6=0x%08lx r7=0x%08lx r8=0x%08lx r9=0x%08lx r10=0x%08lx fp=0x%08lx ip=0x%08lx "
+          "sp=0x%08lx\n",
+          (unsigned long)uc->uc_mcontext.arm_r0, (unsigned long)uc->uc_mcontext.arm_r1,
+          (unsigned long)uc->uc_mcontext.arm_r2, (unsigned long)uc->uc_mcontext.arm_r3,
+          (unsigned long)uc->uc_mcontext.arm_r4, (unsigned long)uc->uc_mcontext.arm_r5,
+          (unsigned long)uc->uc_mcontext.arm_r6, (unsigned long)uc->uc_mcontext.arm_r7,
+          (unsigned long)uc->uc_mcontext.arm_r8, (unsigned long)uc->uc_mcontext.arm_r9,
+          (unsigned long)uc->uc_mcontext.arm_r10, (unsigned long)uc->uc_mcontext.arm_fp,
+          (unsigned long)uc->uc_mcontext.arm_ip, (unsigned long)uc->uc_mcontext.arm_sp);
+  fflush(stderr);
   signal(sig, SIG_DFL);
   raise(sig);
 }
@@ -65,7 +77,7 @@ int main(int argc, char** argv) {
     if (!image) {
         return 1;
     }
-    
+
     std::cout << "Buffer: " << (void*)image << std::endl;
 
     if (getenv("SWTCON_DUMP")) {
@@ -94,7 +106,7 @@ int main(int argc, char** argv) {
             }
           }
         }
-        
+
         update_data req1 = { 0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, FullRefresh | Sync, HQ, 0, 9 };
         TIME(do_update(req1));
         std::cout << "Done" << std::endl;
@@ -120,7 +132,7 @@ int main(int argc, char** argv) {
         for (int y = 0; y < SCREEN_HEIGHT; y++)
           for (int x = 0; x < SCREEN_WIDTH; x++)
             image[SCREEN_WIDTH * y + x] = 0xFFFF;
-        
+
         update_data req3 = { 0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, FullRefresh | Sync, HQ, 0, 9 };
         TIME(do_update(req3));
         std::cout << "Done" << std::endl;
@@ -139,8 +151,8 @@ int main(int argc, char** argv) {
         //
         // update_data's "height"/"width" fields are actually the
         // opposite-corner (y1/x1) coordinates, not sizes - see AGENTS.md.
-        auto rect_req = [](int y0, int x0, int y1, int x1, int mode, int pixel_mode) {
-            return update_data{ y0, x0, y1, x1, 0, mode, 0, pixel_mode };
+        auto rect_req = [](int y0, int x0, int y1, int x1, int mode, int pixel_mode, int flags = 0) {
+            return update_data{ y0, x0, y1, x1, flags, mode, 0, pixel_mode };
         };
         auto fill_rect = [&](int y0, int x0, int y1, int x1, uint16_t value) {
             for (int y = y0; y < y1 && y < SCREEN_HEIGHT; y++)
@@ -154,6 +166,16 @@ int main(int argc, char** argv) {
             }
             swtcon_unlock_post();
             swtcon_wait();
+        };
+        // Same as do_batch but deliberately skips swtcon_wait() - lets the
+        // caller queue a second, overlapping batch while the first is still
+        // actively playing back frames (see the active-dependency test below).
+        auto submit_nowait = [&](std::initializer_list<update_data> reqs) {
+            swtcon_lock();
+            for (update_data req : reqs) {
+                swtcon_update(&req);
+            }
+            swtcon_unlock_post();
         };
 
         std::cout << "Overlap: two non-overlapping regions in one batch" << std::endl;
@@ -224,6 +246,48 @@ int main(int argc, char** argv) {
         swtcon_update(&drain);
         swtcon_unlock_post();
         swtcon_wait();
+        std::cout << "Done" << std::endl;
+        getchar();
+
+        // --- Playback-kernel coverage (see AGENTS.md's FUN_0004a140/
+        // FUN_0004a234 next-step and swtcon-ab-test's KERN capture, which
+        // found the tests above never exercise the "plain" kernel or
+        // chunk_count=1) ---
+
+        std::cout << "Overlap: in-flight active dependency (both items "
+                     "FullRefresh, neither Sync) forcing the second item "
+                     "onto the 'plain' playback kernel (0x4a140) instead of "
+                     "'overlap' (0x4a234) for as long as the dependency is "
+                     "active - the branch never hit by any test above. "
+                     "Needs the first item to actually clear its own "
+                     "dispatch gate (native_display_thread_func's "
+                     "nFrameCleanupCursor pacing check) before the second "
+                     "is submitted, which takes several real frame ticks -"
+                     " a short sleep is not enough (confirmed empirically "
+                     "in swtcon-ab-test)." << std::endl;
+        fill_rect(0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, 0xFFFF);
+        fill_rect(300, 300, 1600, 1300, 0x0);
+        submit_nowait({ rect_req(300, 300, 1600, 1300, HQ, 9, FullRefresh) });
+        usleep(300000);
+        fill_rect(700, 700, 1200, 1000, 0x8410);
+        submit_nowait({ rect_req(700, 700, 1200, 1000, HQ, 9, FullRefresh) });
+        swtcon_wait();
+        std::cout << "Done" << std::endl;
+        getchar();
+
+        std::cout << "Overlap: small isolated rect (area well under 20000px) "
+                     "-> forces native_playback_chunk_count's synchronous "
+                     "chunk_count=1 dispatch path, never exercised by the "
+                     "large rects above (which always split into 2 chunks). "
+                     "Flips white then black so the second update is "
+                     "guaranteed to be a real change regardless of what an "
+                     "earlier test left committed here - an all-unchanged "
+                     "item is silently discarded before dispatch." << std::endl;
+        fill_rect(0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, 0xFFFF);
+        fill_rect(100, 100, 180, 180, 0xFFFF);
+        TIME(do_batch({ rect_req(100, 100, 180, 180, HQ, 9) }));
+        fill_rect(100, 100, 180, 180, 0x0);
+        TIME(do_batch({ rect_req(100, 100, 180, 180, HQ, 9) }));
         std::cout << "Done" << std::endl;
         getchar();
     }
