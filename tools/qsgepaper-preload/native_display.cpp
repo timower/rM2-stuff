@@ -523,7 +523,7 @@ native_copy_init_frame_row(void* frame_slot_addr, int col) {
 static void
 native_stale_row_cleanup() {
   auto* cursor = frame_cursor_globals();
-  uint8_t* dirty_gate = resolve_ptr<uint8_t*>(kBackBufferDirtyGateAddr);
+  uint8_t* dirty_gate = backbuffer_dirty_gate();
   int32_t last_panned = cursor->nLastPannedFrame;
 
   for (int32_t i = cursor->nFrameCleanupCursor - 15; i <= last_panned; i++) {
@@ -684,8 +684,8 @@ native_playback_kernel_plain(void** frame_slots, WorkItem* item, int frame_count
   int word_idx = item->phase / 8;
   int phase_bit0 = item->phase & 7;
 
-  const auto* sp3 = (const RegionRows*)item->sp3.ptr;
   const uint16_t* state = (const uint16_t*)item->stateDataPtr;
+  int stride = ((const RegionRows*)item->sp3.ptr)->stride;
 
   for (int c = col_lo; c <= col_hi; c++) {
     int col = item->rectX0 + c;
@@ -694,7 +694,16 @@ native_playback_kernel_plain(void** frame_slots, WorkItem* item, int frame_count
       uint16_t shared[8] = {};
       for (int r = 0; r < 8; r++) {
         int row = row_base + r;
-        uint16_t transition = state[(size_t)sp3->stride * (col - sp3->x0) + (row - sp3->y0)];
+        // stateDataPtr (state) is already rebased to THIS item's own rect
+        // origin (see WorkItem::stateDataPtr's comment / native_commit_item),
+        // so the index here must be item-rect-relative, not sp3-relative -
+        // indexing with (col-sp3->x0)/(row-sp3->y0) here would double-apply
+        // the rebase and run off the end of the sp3 buffer for any narrowed
+        // item (item rect always a subset of sp3's own, outward-8-aligned
+        // rect) - confirmed via AddressSanitizer, which caught a
+        // heap-buffer-overflow read here on the very first narrowed item.
+        size_t idx = (size_t)stride * (col - item->rectX0) + (row - item->rectY0);
+        uint16_t transition = state[idx];
         uint16_t lut_word = lut_data[(size_t)mw * mw * word_idx + word_idx + transition];
         int shift = (7 - r) * 2;
         for (int b = 0; b < 8; b++) {
@@ -890,7 +899,7 @@ native_advance_work_item_frames(WorkItem* item) {
   // end up <= where it started if the LUT-wraparound correction above
   // consumed the whole advance).
   if (dispatched && item->frameCursor - 1 >= start_frame_cursor) {
-    uint8_t* dirty_gate = resolve_ptr<uint8_t*>(kBackBufferDirtyGateAddr);
+    uint8_t* dirty_gate = backbuffer_dirty_gate();
     auto* sp3 = (const RegionRows*)item->sp3.ptr;
     for (int32_t f = start_frame_cursor; f != item->frameCursor; f++) {
       uint8_t* row = dirty_gate + (int64_t)(f % 16) * kDirtyGateRowBytes;

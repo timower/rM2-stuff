@@ -32,6 +32,10 @@ typedef int (*init_func_t)(void* state_out, int zero);
 static void* libqsgepaper_handle = nullptr;
 static uintptr_t runtime_offset = 0;
 
+// Owns the waveform vector's backing allocation so swtcon_shutdown can free
+// it (Phase 7) - see the comment at its allocation site in swtcon_init.
+static std::vector<ModeEntry*>* g_nativeWaveformStruct = nullptr;
+
 static init_func_t qsgepaper_init = nullptr;
 
 // Library exports for A/B comparison against the native update
@@ -106,6 +110,17 @@ swtcon_init() {
     auto* sb = statebuffer_globals();
     auto* fb = framebuffer_globals();
 
+    // Phase 7: these three intrusive std::list sentinels used to come from
+    // the library's own .bss, already self-referencing by the time our code
+    // ran because the library's C++ static constructors initialized them at
+    // dlopen() time. Now that UpdateQueueGlobals is natively-owned storage
+    // (zero-initialized), nothing constructs them - so every empty-list
+    // check ("next == &head") and every list walk needs this explicit
+    // self-reference set up before anything else touches the queue.
+    queue->listProcessedUpdates = { &queue->listProcessedUpdates, &queue->listProcessedUpdates };
+    queue->listIncomingUpdates = { &queue->listIncomingUpdates, &queue->listIncomingUpdates };
+    queue->accumList = { &queue->accumList, &queue->accumList };
+
     queue->dataBuffer = g_pImageBufferNative;
     queue->backBuffer = g_pScreenBufferNative;
     sb->pStatebuffer = g_pStateBufferNative;
@@ -114,22 +129,22 @@ swtcon_init() {
 
     char* path1 = (char*)"/usr/share/remarkable/320_R467_AF4731_ED103TC2C6_VB3300-KCD_TC.wbf";
 
-    // Heap-allocated and intentionally leaked: the library registers an exit-time
-    // destructor for the waveform vector (FUN_000451b0 via _INIT_3) that frees every
-    // ModeEntry and the backing array. This handle shares that same array after
-    // the memcpy below, so it must NOT also free it - hence the deliberate leak
-    // (of the 12-byte vector object only; the contents are owned by the library's
-    // own copy).
-    auto* native_waveform_struct = new std::vector<ModeEntry*>();
+    // Heap-allocated; torn down by swtcon_shutdown (Phase 7 - see
+    // g_nativeWaveformStruct's declaration). queue->waveformStructRaw below
+    // gets a byte-copy of this vector's {begin,end,cap} pointers so it aliases
+    // the exact same backing array - only the 12-byte vector object itself is
+    // a separate allocation, kept alive here so shutdown has something to
+    // free it through.
+    g_nativeWaveformStruct = new std::vector<ModeEntry*>();
     std::cout << "Calling native_load_waveform with path=" << path1 << std::endl;
-    if (!native_load_waveform(native_waveform_struct, path1)) {
+    if (!native_load_waveform(g_nativeWaveformStruct, path1)) {
         std::cerr << "swtcon_init: failed to load waveform natively" << std::endl;
         return nullptr;
     }
 
     // Sync vector structure to library memory layout
     static_assert(sizeof(queue->waveformStructRaw) == sizeof(std::vector<ModeEntry*>), "");
-    memcpy(queue->waveformStructRaw, native_waveform_struct, sizeof(std::vector<ModeEntry*>));
+    memcpy(queue->waveformStructRaw, g_nativeWaveformStruct, sizeof(std::vector<ModeEntry*>));
 
     std::cout << "Initializing framebuffer..." << std::endl;
     FbInitParams fb_info = {};
@@ -171,6 +186,12 @@ swtcon_init() {
         native_upload_lut_to_frame_slot(native_frame_buffer_addr(i));
     }
 
+    // Phase 7: temperature_mutex() is natively-owned zero-initialized storage
+    // now (previously the library's own .bss, already valid as an
+    // all-zero glibc fast mutex without an explicit init) - init it
+    // explicitly like every other mutex here, before the temperature-polling
+    // thread or native_get_current_temperature can touch it.
+    pthread_mutex_init(temperature_mutex(), nullptr);
     native_init_temperature_sensor();
 
     // Prime the display exactly as qsgepaper_init does. init_framebuffer leaves
@@ -354,6 +375,19 @@ swtcon_shutdown(int state_ptr_or_zero) {
   // dummy uninit
   native_free_LUT();
   native_unlock_pid_file();
+
+  // Phase 7: the library's own exit-time destructor for the waveform vector
+  // (FUN_000451b0 via _INIT_3) used to free every ModeEntry and the backing
+  // array for us; nothing runs that once the library is never dlopen'd for
+  // the production path. ModeEntry/LUTEntry already have correct native
+  // destructors (see native_init.h), so freeing it here is just walking the
+  // vector - not new reversing.
+  if (g_nativeWaveformStruct) {
+    for (auto* mode : *g_nativeWaveformStruct)
+      delete mode;
+    delete g_nativeWaveformStruct;
+    g_nativeWaveformStruct = nullptr;
+  }
 
   std::cout << "swtcon_shutdown: complete." << std::endl;
 }

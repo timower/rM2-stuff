@@ -521,8 +521,8 @@ void native_refresh_temperature_cache() {
     if (!native_read_temperature_raw(g_hwmonTempPathNative.c_str(), &raw_value))
         return;
 
-    pthread_mutex_t* mutex = resolve_ptr<pthread_mutex_t*>(kTemperatureMutexAddr);
-    float* cached_temp = resolve_ptr<float*>(kCachedTemperatureAddr);
+    pthread_mutex_t* mutex = temperature_mutex();
+    float* cached_temp = cached_temperature_ptr();
     pthread_mutex_lock(mutex);
     *cached_temp = (float)raw_value - 2.0f;
     pthread_mutex_unlock(mutex);
@@ -672,12 +672,11 @@ void native_free_LUT() {
 }
 
 void native_unlock_pid_file() {
-    int* g_nPidFd = resolve_ptr<int*>(kPidFdAddr);
-    if (*g_nPidFd > -1) {
+    if (g_nPidFdNative > -1) {
         // LOCK_UN = 8
-        if (flock(*g_nPidFd, 8) == -1) {
+        if (flock(g_nPidFdNative, 8) == -1) {
             std::cerr << "unable to unlock exclusive lock" << std::endl;
         }
-        close(*g_nPidFd);
+        close(g_nPidFdNative);
     }
 }

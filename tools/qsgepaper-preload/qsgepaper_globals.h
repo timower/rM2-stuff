@@ -140,7 +140,8 @@ static_assert(sizeof(UpdateQueueGlobals) >= 0x670d2 - kUpdateQueueGlobalsAddr,
 
 inline UpdateQueueGlobals*
 update_queue_globals() {
-  return resolve_ptr<UpdateQueueGlobals*>(kUpdateQueueGlobalsAddr);
+  static UpdateQueueGlobals g{};
+  return &g;
 }
 
 // --- Frame-pacing cursor cluster ----------------------------------------
@@ -163,26 +164,70 @@ static_assert(sizeof(FrameCursorGlobals) >= 0x66de0 - kFrameCursorGlobalsAddr,
 
 inline FrameCursorGlobals*
 frame_cursor_globals() {
-  return resolve_ptr<FrameCursorGlobals*>(kFrameCursorGlobalsAddr);
+  static FrameCursorGlobals g{};
+  return &g;
 }
 
 // --- Standalone globals (isolated - no neighbor close enough to bridge
 // with a confidently-sized gap) ------------------------------------------
-constexpr uintptr_t kPidFdAddr = 0x66dec;               // int, g_nPidFd
-constexpr uintptr_t kCachedTemperatureAddr = 0x66e20;   // float, g_flCachedTemperature
-constexpr uintptr_t kTemperatureMutexAddr = 0x6d180;    // pthread_mutex_t, g_dwTemperatureMutex
-constexpr uintptr_t kSeqCounterAddr = 0x6d178;          // int, work-item sequence id counter
+// Formerly resolve_ptr<T*>(fixed_addr) into the library's own .bss/.data
+// (g_nPidFd 0x66dec, g_flCachedTemperature 0x66e20, g_dwTemperatureMutex
+// 0x6d180, the work-item sequence id counter 0x6d178) - now natively-owned
+// storage (Phase 7). g_nPidFd's slot is unused: native_create_pid_file
+// (native_init.cpp) already writes the real fd into its own native
+// g_nPidFdNative global instead, so native_unlock_pid_file reads that
+// directly rather than through here.
 
-// backBuffer dirty-gate array (0x670d8, byte-verified via decompilation of
-// both display_thread_func and advance_work_item_frames - see
+inline float*
+cached_temperature_ptr() {
+  static float t = 0.0f;
+  return &t;
+}
+
+// Zero-initialized, matching the library's own .bss state before
+// swtcon_init explicitly pthread_mutex_init's it (see swtcon.cpp).
+inline pthread_mutex_t*
+temperature_mutex() {
+  static pthread_mutex_t m{};
+  return &m;
+}
+
+inline int*
+seq_counter_ptr() {
+  static int c = 0;
+  return &c;
+}
+
+// backBuffer dirty-gate array (formerly resolve_ptr<uint8_t*>(0x670d8) into
+// the library's .bss, byte-verified via decompilation of both
+// display_thread_func and advance_work_item_frames - see
 // swtcon_architecture.md §6.2 step 1 / §6.4): 16 buckets, one per
 // frame-slot ring position, each SCREEN_WIDTH (0x57c) bytes, one byte per
 // column. advance_work_item_frames marks a newly-rendered frame's
 // [sp3.x0, sp3.x1] columns dirty in its ring-position's bucket;
 // display_thread_func's stale-row cleanup drains + zeroes each bucket once
 // its ring position falls out of the live window.
-constexpr uintptr_t kBackBufferDirtyGateAddr = 0x670d8;
 constexpr int32_t kDirtyGateRowBytes = 0x57c; // SCREEN_WIDTH
+constexpr int32_t kDirtyGateBucketCount = 16;
+
+// native_stale_row_cleanup (native_display.cpp) computes `bucket = i % 16`
+// for `i` as low as nFrameCleanupCursor-15, which is negative during the
+// first ~15 display-thread ticks after startup (C++ `%` keeps the sign of
+// the dividend) - a real quirk in the original library, transcribed
+// verbatim rather than "fixed" (see swtcon_architecture.md §8). Against the
+// library's own .bss this backward reach landed harmlessly on whatever
+// else was there (effectively zero this early); a bare native array has no
+// such margin behind it, so pad kDirtyGateBucketCount always-zero buckets
+// before the real array and hand out a pointer into the middle - the
+// padding is never legitimately written (every write-side index is a
+// non-negative frame number mod 16), so it stays zero forever, exactly
+// reproducing the observed-harmless behavior instead of segfaulting on an
+// unmapped page.
+inline uint8_t*
+backbuffer_dirty_gate() {
+  static uint8_t g[2 * kDirtyGateBucketCount * kDirtyGateRowBytes]{};
+  return g + (size_t)kDirtyGateBucketCount * kDirtyGateRowBytes;
+}
 
 // --- Persisted statebuffer + gamma table --------------------------------
 // Fully contiguous, all three pointers/size wired together at init
@@ -199,7 +244,8 @@ static_assert(sizeof(StatebufferGlobals) == 0xc, "StatebufferGlobals layout drif
 
 inline StatebufferGlobals*
 statebuffer_globals() {
-  return resolve_ptr<StatebufferGlobals*>(kStatebufferGlobalsAddr);
+  static StatebufferGlobals g{};
+  return &g;
 }
 
 // --- Framebuffer + LUT state ---------------------------------------------
@@ -236,5 +282,6 @@ static_assert(sizeof(FramebufferGlobals) == 0x6d450 - kFramebufferGlobalsAddr,
 
 inline FramebufferGlobals*
 framebuffer_globals() {
-  return resolve_ptr<FramebufferGlobals*>(kFramebufferGlobalsAddr);
+  static FramebufferGlobals g{};
+  return &g;
 }

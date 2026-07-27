@@ -17,12 +17,43 @@ extern void (*qsgepaper_update)(update_data*);
 extern void (*qsgepaper_unlock_post)();
 extern void (*qsgepaper_wait)();
 
-// The shared_ptr control block's vtable pointer for a RegionRows allocation,
-// exactly matching dispatch_update_regions's own `*puVar1 = &PTR_LAB_000651ec`
-// (see native_dispatch_update_regions below) - kept still-library (a generic
-// libstdc++ dispose/destroy pair for an array-new'd byte buffer) so the
-// existing release_sp/shared_ptr machinery keeps working on it unmodified.
-constexpr uintptr_t kRegionRowsVtableAddr = 0x651ec;
+// Layout of a RegionRows shared_ptr control block: vtable ptr + refcounts +
+// the RegionRows payload itself (0x28 bytes total, RegionRows starting at
+// +0xc - see swtcon_architecture.md §5.1), matching the library's own
+// allocation exactly so the generic release_sp keeps working on it
+// unmodified. Shared by native_dispatch_update_regions (the allocator) and
+// the native vtable's dispose/destroy pair below.
+struct RegionRowsBlock {
+  void* vtable;
+  int32_t useCount;
+  int32_t weakCount;
+  RegionRows rr;
+};
+static_assert(offsetof(RegionRowsBlock, rr) == 0xc, "RegionRowsBlock layout drift");
+static_assert(sizeof(RegionRowsBlock) == 0x28, "RegionRowsBlock layout drift");
+
+// The shared_ptr control block's vtable for a RegionRows allocation
+// (native_dispatch_update_regions below). Formerly borrowed the library's own
+// `&PTR_LAB_000651ec` (a generic libstdc++ dispose/destroy pair for an
+// array-new'd byte buffer); now a tiny native vtable with that same
+// dispose=array-delete/destroy=delete convention (Phase 7 - same fix
+// native_make_empty_lut's kNativeLutVtable and native_display.cpp's
+// kNativeSp3Vtable already applied to their own allocation sites), so
+// release_sp/retain_sp keep working unmodified.
+static void
+native_region_rows_dispose(void* ctrl) {
+  ::operator delete[](((RegionRowsBlock*)ctrl)->rr.dataPtr);
+}
+
+static void
+native_region_rows_destroy(void* ctrl) {
+  ::operator delete(ctrl);
+}
+
+// vt[2]/vt[3] per release_sp's convention; vt[0]/vt[1] unused.
+static void* kNativeRegionRowsVtable[4] = { nullptr, nullptr,
+                                             (void*)native_region_rows_dispose,
+                                             (void*)native_region_rows_destroy };
 
 // --- Native swtcon_update / lock / unlock_post / wait ---
 //
@@ -249,7 +280,7 @@ native_update_item_ctor(WorkItem* item) {
 
   native_make_empty_lut(&item->lut);
 
-  int* seq_counter = resolve_ptr<int*>(kSeqCounterAddr);
+  int* seq_counter = seq_counter_ptr();
   item->seqId = ++(*seq_counter);
   return item;
 }
@@ -288,8 +319,8 @@ native_clamp_update_rect(const XYRect& in) {
 // output directly instead of re-polling hwmon ourselves.
 float
 native_get_current_temperature() {
-  pthread_mutex_t* mutex = resolve_ptr<pthread_mutex_t*>(kTemperatureMutexAddr);
-  float* cached_temp = resolve_ptr<float*>(kCachedTemperatureAddr);
+  pthread_mutex_t* mutex = temperature_mutex();
+  float* cached_temp = cached_temperature_ptr();
   pthread_mutex_lock(mutex);
   float temp = *cached_temp;
   pthread_mutex_unlock(mutex);
@@ -311,7 +342,7 @@ native_piece_builder(WorkItem* dest, const WorkItem* src, const Rect& piece_rect
   int32_t src_y0 = src->rectY0;
   int32_t src_x0 = src->rectX0;
 
-  int* seq_counter = resolve_ptr<int*>(kSeqCounterAddr);
+  int* seq_counter = seq_counter_ptr();
   dest->rectY0 = piece_rect.y0;
   dest->rectX0 = piece_rect.x0;
   dest->rectY1 = piece_rect.y1;
@@ -420,17 +451,8 @@ native_render_update_kernel(WorkItem* item, const uint16_t* dataBuffer, const ui
 // existing generic release_sp keeps working on it unmodified.
 void
 native_dispatch_update_regions(WorkItem* item, void* dataBuffer, void* backBuffer) {
-  struct RegionRowsBlock {
-    void* vtable;
-    int32_t useCount;
-    int32_t weakCount;
-    RegionRows rr;
-  };
-  static_assert(offsetof(RegionRowsBlock, rr) == 0xc, "RegionRowsBlock layout drift");
-  static_assert(sizeof(RegionRowsBlock) == 0x28, "RegionRowsBlock layout drift");
-
   auto* block = (RegionRowsBlock*)::operator new(sizeof(RegionRowsBlock));
-  block->vtable = resolve_ptr<void*>(kRegionRowsVtableAddr);
+  block->vtable = kNativeRegionRowsVtable;
   block->useCount = 1;
   block->weakCount = 1;
   block->rr.y0 = item->rectY0;
