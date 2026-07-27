@@ -573,7 +573,14 @@ main() {
   // trivial coincidental match.
   {
     printf("\n=== Experiment 7: FUN_0004a234 vs FUN_0004a140 identical-input diff ===\n");
-    const int Y0 = 0, Y1 = 15, X0 = 500, X1 = 503;
+    // X0..X1 spans 128 columns (not just 4) - a Ghidra decompile of
+    // FUN_0004a3f8 (case 1's delegate) showed it does alignment-based
+    // column-chunking and an 8x4 transpose/prefetch bulk loop, structurally
+    // very different from FUN_0004a140's simple one-column-at-a-time loop -
+    // a narrow rect risks only ever exercising the "remainder" tail path,
+    // never the bulk vectorized one, which would make an "identical output"
+    // finding much weaker evidence than it looks.
+    const int Y0 = 0, Y1 = 15, X0 = 500, X1 = 627;
     TestItem ti;
     build_item(&ti, Y0, X0, Y1, X1, /*fill_transition=*/0, /*phase=*/0, /*mode_width=*/32,
                /*bit_depth=*/2, /*lut_width=*/8);
@@ -629,6 +636,39 @@ main() {
         printf("  frameCount=%d: IDENTICAL byte-for-byte\n", frame_count);
       else
         printf("  frameCount=%d: %zu+ mismatches found - NOT identical\n", frame_count, mismatches);
+    }
+
+    // Same check again but chunkCount=2 (chunkIndex 0 then 1, sequentially -
+    // ranges are disjoint so accumulating into the same buffers is fine):
+    // FUN_0004a3f8 computes its own chunk-boundary split independently from
+    // FUN_0004a140/FUN_0004a234's shared boundary formula, so this exercises
+    // a genuinely different code path in the delegate, not just a wider
+    // single-chunk call.
+    for (int frame_count : { 8, 5, 1, 2, 3 }) {
+      clear_slots();
+      plain_kernel(frame_slots, &ti.node->item, frame_count, 0, 2);
+      plain_kernel(frame_slots, &ti.node->item, frame_count, 1, 2);
+      clear_slots_b();
+      overlap_kernel(frame_slots_b, &ti.node->item, frame_count, 0, 2);
+      overlap_kernel(frame_slots_b, &ti.node->item, frame_count, 1, 2);
+
+      size_t mismatches = 0;
+      for (int i = 0; i < 8 && mismatches < 20; i++) {
+        const uint8_t* a = (const uint8_t*)frame_slots[i];
+        const uint8_t* b = (const uint8_t*)frame_slots_b[i];
+        for (size_t off = 0; off < kFrameSlotBytes && mismatches < 20; off++) {
+          if (a[off] != b[off]) {
+            printf("  chunkCount=2 frameCount=%d MISMATCH slot%d @0x%zx: plain=0x%02x overlap=0x%02x\n",
+                   frame_count, i, off, a[off], b[off]);
+            mismatches++;
+          }
+        }
+      }
+      if (mismatches == 0)
+        printf("  chunkCount=2 frameCount=%d: IDENTICAL byte-for-byte\n", frame_count);
+      else
+        printf("  chunkCount=2 frameCount=%d: %zu+ mismatches found - NOT identical\n", frame_count,
+               mismatches);
     }
     free_item(&ti);
   }
