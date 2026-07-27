@@ -719,18 +719,31 @@ native_playback_chunk_count(const WorkItem* item) {
   return 1;
 }
 
+extern "C" void
+playback_kernel_plain(void** frame_slots, WorkItem* item, int frame_count, int chunk_index,
+                              int chunk_count) ;
+
+extern "C" void
+playback_kernel_aligned(void** frame_slots, WorkItem* item, int frame_count, int chunk_index,
+                              int chunk_count) ;
+
 // Mirrors FUN_0003f294 (0x3f294, "plain" kernel wrapper - CONFIRMED): picks
 // the chunk count and dispatches through FUN_0003ec78 with the "plain"
-// kernel - now native_playback_kernel_plain instead of by-address FUN_0004a140.
+// kernel - playback_kernel_plain (playback_kernel.s), a direct assembly
+// transliteration of the real FUN_0004a140, not by-address anymore and not
+// the from-scratch NEON-intrinsics native_playback_kernel_plain either (see
+// AGENTS.md's Phase 9 "fifth pass": the intrinsics port passed every
+// black-box verification this codebase has - probe, ab-test, bench - but
+// still produced visible real-hardware artifacts; the literal
+// transliteration fixed them, root cause still unidentified).
 static void
 native_dispatch_plain_kernel(void** frame_slots,
                              WorkItem* item,
                              int frame_count) {
   int chunk_count = native_playback_chunk_count(item);
   ab_capture_kernel(item, "plain", frame_count, chunk_count);
-  // auto* kernel = resolve_ptr<PlaybackKernelFn>(0x4a140);
   native_playback_kernel_dispatch(
-    native_playback_kernel_plain, frame_slots, item, frame_count, chunk_count);
+    playback_kernel_plain, frame_slots, item, frame_count, chunk_count);
 }
 
 // Mirrors FUN_0003f1f0 (0x3f1f0, the "aligned" kernel wrapper - CONFIRMED):
@@ -777,9 +790,8 @@ native_dispatch_aligned_kernel(void** frame_slots,
                                int frame_count) {
   int chunk_count = native_playback_chunk_count(item);
   ab_capture_kernel(item, "aligned", frame_count, chunk_count);
-  // auto* kernel = resolve_ptr<PlaybackKernelFn>(0x4a234);
   native_playback_kernel_dispatch(
-    native_playback_kernel_plain, frame_slots, item, frame_count, chunk_count);
+    playback_kernel_aligned, frame_slots, item, frame_count, chunk_count);
 }
 
 // Mirrors advance_work_item_frames (0x3a984) byte-exactly, re-derived
