@@ -60,27 +60,41 @@
 // header comment above for the full derivation. Two implementations below,
 // selected by #ifdef:
 //
-//   - The NEON path loads all 8 rows' packed LUT words into a single vector
-//     register and, for each of the 8 output sub-phases, extracts that
-//     sub-phase's 2-bit field from all 8 rows AT ONCE (variable per-lane
-//     shift + mask), places each row's value at its own destination bit
-//     position (another per-lane variable shift, using the fixed
-//     {14,12,10,8,6,4,2,0} row->shift mapping), and OR-reduces the 8 lanes
-//     down to one scalar - mirroring the real library's own strategy here
-//     (per CLAUDE.md's FUN_0004a234 cases 4-8 analysis: "extract all 8
-//     sub-phases from one lane-shifted vector at once"), not a literal
-//     instruction-for-instruction transliteration of its compiler-generated
-//     NEON (which was never fully decompiled/named - only shape-confirmed,
-//     see swtcon_architecture.md §8) but the same underlying vectorization.
+//   - The NEON path is a direct port of the real library's own strategy for
+//     this exact step, read from FUN_0004a140's case-8 (frameCount=8, the
+//     dominant real-world case - see AGENTS.md's Phase 9 entry) handler at
+//     0x49524 via Ghidra disassembly (not decompile - the compiler-generated
+//     pseudocode for this heavily-scheduled function was unreliable to read
+//     directly). Unlike an OR-reduce over one subphase at a time (row ->
+//     8-lane vector, reduce to scalar, repeat per subphase - discarded after
+//     an earlier pass, see git history), the real kernel vectorizes the
+//     OTHER axis: one row at a time, hardware-replicated into all 8 lanes
+//     via a single "load and duplicate" instruction (VLD1.16 {dX[],dY[]} -
+//     vld1q_dup_u16), then extracts ALL 8 subphases from that one row's LUT
+//     word in a single per-lane variable shift + mask (confirmed via the
+//     constant vector loaded once from a literal pool at the function's
+//     entry, reused unchanged for every row - kExtractShiftAmounts below),
+//     repositions the row's own 8 subphase values into their shared bit
+//     range via a per-row IMMEDIATE shift (confirmed via the disassembly's
+//     literal `vshl.i16 qN, qN, #14/#12/.../#2` instructions, one per row,
+//     row 7 using no shift at all), and accumulates via plain vector ADD
+//     instead of OR across all 8 rows - safe because each row's 2-bit field
+//     lands in a disjoint bit range of the 16-bit lane (rows exactly tile
+//     the 16 bits with no overlap), so ADD and OR are equivalent here with
+//     no carry ever crossing a field boundary. This eliminates the
+//     horizontal lane-reduce entirely (no vext/vorr fold chain) - the whole
+//     8-subphase result falls out as one accumulator vector, one vst1q away
+//     from `shared[]`.
 //   - The portable scalar fallback is the original nested loop, used for
 //     non-NEON builds (e.g. the x86_64 dev-host/clang emulator preset, which
 //     has no ARM target at all).
 //
-// Both are byte-for-byte equivalent by construction: OR is commutative and
-// associative, so reordering the reduction (subphase-outer/row-vectorized
-// here vs. the scalar version's row-outer/subphase-inner) changes nothing
-// observable. Verified via tools/qsgepaper-preload/playback_kernel_bench.cpp
-// and the swtcon-ab-test A/B harness (native builds are deterministic and
+// Both are byte-for-byte equivalent by construction: OR (scalar) and ADD
+// (NEON, over disjoint bit ranges) are both commutative/associative, so
+// reordering the reduction - row-outer/subphase-vectorized here vs. the
+// scalar version's row-outer/subphase-inner - changes nothing observable.
+// Verified via tools/qsgepaper-preload/playback_kernel_bench.cpp and the
+// swtcon-ab-test A/B harness (native builds are deterministic and
 // self-consistent regardless of which path compiled in).
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
 #define SWTCON_PLAYBACK_KERNEL_NEON 1
@@ -88,28 +102,48 @@
 
 static inline void
 compute_shared_subphase_words(const uint16_t lut_words[8], uint16_t shared[8]) {
-  // Row r's 2-bit value lands at bit (7-r)*2 of its destination subphase
-  // word - see the file header comment.
-  static const int16_t kPlaceShiftAmounts[8] = {14, 12, 10, 8, 6, 4, 2, 0};
-  const uint16x8_t words = vld1q_u16(lut_words);
-  const int16x8_t place_shift = vld1q_s16(kPlaceShiftAmounts);
+  // Extracts subphase b's 2-bit field from a row's LUT word via a right
+  // shift of 2b (vshlq_u16's per-lane shift is signed; negative shifts
+  // right) - the same constant vector for every row, matching the real
+  // kernel loading it once (d8/d9 from a literal pool) and reusing it
+  // across all 8 rows.
+  static const int16_t kExtractShiftAmounts[8] = {0, -2, -4, -6, -8, -10, -12, -14};
+  const int16x8_t extract_shift = vld1q_s16(kExtractShiftAmounts);
   const uint16x8_t three = vdupq_n_u16(3);
+  uint16x8_t acc = vdupq_n_u16(0);
 
-  for (int b = 0; b < 8; b++) {
-    // vshlq_u16 takes a per-lane SIGNED shift amount; negative shifts
-    // right. -2*b extracts bits [2b,2b+1] of each row's LUT word into the
-    // low 2 bits of that lane, for all 8 rows in one instruction.
-    const int16x8_t extract_shift = vdupq_n_s16((int16_t)(-2 * b));
-    const uint16x8_t two_bits = vandq_u16(vshlq_u16(words, extract_shift), three);
-    const uint16x8_t placed = vshlq_u16(two_bits, place_shift);
+  // Manually unrolled (not a `for` loop) so the per-row reposition shift
+  // below is a true compile-time immediate (vshlq_n_u16 requires one),
+  // matching the real kernel's own per-row immediate-shift instructions
+  // rather than a runtime-computed shift amount. Row 7 needs no reposition
+  // shift at all (matching the real kernel emitting no shift instruction
+  // for it either), so it gets its own macro rather than a `shift == 0`
+  // branch inside a single one - `vshlq_n_u16(x, 0)` isn't guaranteed to be
+  // a valid immediate on every NEON intrinics header.
+#define SWTCON_PLAYBACK_ROW(r, shift)                                      \
+  do {                                                                     \
+    uint16x8_t rep = vld1q_dup_u16(&lut_words[r]);                         \
+    uint16x8_t extracted = vandq_u16(vshlq_u16(rep, extract_shift), three); \
+    acc = vaddq_u16(acc, vshlq_n_u16(extracted, shift));                   \
+  } while (0)
+#define SWTCON_PLAYBACK_ROW_NOSHIFT(r)                                     \
+  do {                                                                     \
+    uint16x8_t rep = vld1q_dup_u16(&lut_words[r]);                         \
+    uint16x8_t extracted = vandq_u16(vshlq_u16(rep, extract_shift), three); \
+    acc = vaddq_u16(acc, extracted);                                       \
+  } while (0)
+  SWTCON_PLAYBACK_ROW(0, 14);
+  SWTCON_PLAYBACK_ROW(1, 12);
+  SWTCON_PLAYBACK_ROW(2, 10);
+  SWTCON_PLAYBACK_ROW(3, 8);
+  SWTCON_PLAYBACK_ROW(4, 6);
+  SWTCON_PLAYBACK_ROW(5, 4);
+  SWTCON_PLAYBACK_ROW(6, 2);
+  SWTCON_PLAYBACK_ROW_NOSHIFT(7);
+#undef SWTCON_PLAYBACK_ROW
+#undef SWTCON_PLAYBACK_ROW_NOSHIFT
 
-    // Horizontal OR-reduce the 8 lanes down to one scalar: fold the high
-    // half into the low half, then fold the remaining 4/2 lanes pairwise.
-    const uint16x4_t or4 = vorr_u16(vget_low_u16(placed), vget_high_u16(placed));
-    const uint16x4_t or2 = vorr_u16(or4, vext_u16(or4, or4, 2));
-    const uint16x4_t or1 = vorr_u16(or2, vext_u16(or2, or2, 1));
-    shared[b] = vget_lane_u16(or1, 0);
-  }
+  vst1q_u16(shared, acc);
 }
 #else
 #define SWTCON_PLAYBACK_KERNEL_NEON 0
@@ -164,7 +198,15 @@ native_playback_kernel_plain(void** frame_slots, WorkItem* item, int frame_count
     // per row (was previously recomputed 8x per group).
     const size_t col_base = (size_t)stride * (col - item->rectX0);
 
-    for (int g = 0; g < num_groups; g++) {
+    // byte_off(g) = ((col+3)*0x104 + (rectY0>>3) + g + 0x1a) * 4 is an
+    // arithmetic sequence in g with a constant stride of 4 bytes - the real
+    // library precomputes this whole sequence for a column in one pass
+    // rather than re-deriving it via multiplication per group (see
+    // AGENTS.md's Phase 9 entry on FUN_0004a140's case-8 handler); a running
+    // accumulator gets the same effect without needing a scratch array.
+    size_t byte_off = (size_t)((col + 3) * 0x104 + (item->rectY0 >> 3) + 0x1a) * 4;
+
+    for (int g = 0; g < num_groups; g++, byte_off += 4) {
       int row_base = item->rectY0 + g * 8;
 
       // stateDataPtr (state) is already rebased to THIS item's own rect
@@ -186,7 +228,6 @@ native_playback_kernel_plain(void** frame_slots, WorkItem* item, int frame_count
       uint16_t shared[8];
       compute_shared_subphase_words(lut_words, shared);
 
-      size_t byte_off = (size_t)((col + 3) * 0x104 + (item->rectY0 >> 3) + g + 0x1a) * 4;
       for (int k = 0; k < frame_count; k++) {
         auto* dest = (uint16_t*)((uint8_t*)frame_slots[k] + byte_off);
         *dest = (uint16_t)(*dest | shared[phase_bit0 + k]);
