@@ -1,7 +1,19 @@
 cmake_minimum_required(VERSION 3.10)
 project(qsgepaper-preload)
 
-add_executable(qsgepaper-test main.cpp swtcon.cpp native_init.cpp native_update.cpp native_display.cpp ab_capture.cpp)
+# The project's "release" preset ships MinSizeRel (-Os, optimize for code
+# size) - a reasonable default for the binary as a whole, but a bad fit for
+# native_playback_kernel.cpp specifically: it's a tight, compute-bound,
+# per-pixel hot loop (see AGENTS.md's Phase 9) where -Os measurably leaves
+# performance on the table (loop unrolling/scheduling -Os intentionally
+# skips). Override just this one file to -O3 regardless of the overall
+# build type - a later flag wins over the build type's -Os/-Og/etc, so this
+# doesn't need to touch CMAKE_BUILD_TYPE or affect the rest of the binary's
+# size.
+set_source_files_properties(native_playback_kernel.cpp PROPERTIES COMPILE_OPTIONS "-O3")
+
+add_executable(qsgepaper-test main.cpp swtcon.cpp native_init.cpp native_update.cpp native_display.cpp
+                               native_playback_kernel.cpp ab_capture.cpp)
 target_link_libraries(qsgepaper-test dl)
 
 # libqsgepaper.so was built against the C++11 std::string SSO ABI
@@ -34,7 +46,8 @@ target_compile_definitions(dispatch-processed-regions-probe PRIVATE _GLIBCXX_USE
 # A/B regression harness: runs a matrix of update sequences and captures the
 # transient drive stream so a native-vs-library (SWTCON_LIBDISPATCH) diff can
 # catch pipeline regressions the settled buffers miss - see ab_harness.cpp.
-add_executable(swtcon-ab-test ab_harness.cpp swtcon.cpp native_init.cpp native_update.cpp native_display.cpp ab_capture.cpp)
+add_executable(swtcon-ab-test ab_harness.cpp swtcon.cpp native_init.cpp native_update.cpp native_display.cpp
+                               native_playback_kernel.cpp ab_capture.cpp)
 target_link_libraries(swtcon-ab-test dl)
 target_compile_definitions(swtcon-ab-test PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
 
@@ -45,17 +58,18 @@ add_executable(playback-kernel-probe playback_kernel_probe.cpp native_init.cpp n
 target_link_libraries(playback-kernel-probe dl)
 target_compile_definitions(playback-kernel-probe PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
 
-# Microbenchmark for native_playback_kernel_plain (native_display.cpp), the
-# native port of the two worker-side playback kernels - measures its compute
-# cost in isolation and, where the library is available, against the real
-# NEON FUN_0004a140/FUN_0004a234 - see playback_kernel_bench.cpp's header
-# comment. Links native_display.cpp (for the kernel itself) plus its
-# ab_capture.cpp dependency; deliberately does NOT link swtcon.cpp - it
+# Microbenchmark for native_playback_kernel_plain (native_playback_kernel.cpp),
+# the native port of the two worker-side playback kernels - measures its
+# compute cost in isolation and, where the library is available, against the
+# real NEON FUN_0004a140/FUN_0004a234 - see playback_kernel_bench.cpp's header
+# comment. Links native_display.cpp (for the surrounding dispatch code) and
+# native_playback_kernel.cpp (the kernel itself) plus their ab_capture.cpp
+# dependency; deliberately does NOT link swtcon.cpp - it
 # defines its own minimal swtcon_runtime_offset(), same as
 # playback_kernel_probe.cpp, to dlopen the library independently rather than
 # through swtcon.cpp's production load_lib() path.
 add_executable(playback-kernel-bench playback_kernel_bench.cpp native_init.cpp native_update.cpp
-                                      native_display.cpp ab_capture.cpp)
+                                      native_display.cpp native_playback_kernel.cpp ab_capture.cpp)
 target_link_libraries(playback-kernel-bench dl)
 target_compile_definitions(playback-kernel-bench PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
 

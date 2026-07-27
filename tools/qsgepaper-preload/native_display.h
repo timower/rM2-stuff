@@ -49,10 +49,11 @@ void* native_display_thread_func(void* arg);
 // [rectX0,rectX1] restricted to [chunkIndex,chunkCount)'s column sub-range,
 // and each 8-row group in [rectY0,rectY1], looks up this call's waveform
 // drive value per pixel and ORs it into up to `frameCount` frame slots - see
-// the definition in native_display.cpp for the full byte-verified breakdown
-// of the LUT-index and destination-address formulas. Non-static so
-// tools/qsgepaper-preload/playback_kernel_bench.cpp can call it directly to
-// measure the compute cost in isolation from the threading/dispatch code
-// around it (native_playback_kernel_dispatch).
+// the definition in native_playback_kernel.cpp (its own translation unit as
+// of Phase 9, so its NEON fast path can sit behind an #ifdef) for the full
+// byte-verified breakdown of the LUT-index and destination-address
+// formulas. Non-static so tools/qsgepaper-preload/playback_kernel_bench.cpp
+// can call it directly to measure the compute cost in isolation from the
+// threading/dispatch code around it (native_playback_kernel_dispatch).
 void native_playback_kernel_plain(void** frame_slots, WorkItem* item, int frame_count, int chunk_index,
                                    int chunk_count);

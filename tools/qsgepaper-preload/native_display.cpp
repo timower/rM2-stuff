@@ -52,7 +52,9 @@ stamp_last_pan_timestamp(UpdateQueueGlobals* queue) {
 // call sites); step 2's double pan-to-16 stamps the same fields but without
 // advancing curFrame, so it isn't routed through this helper.
 static void
-pan_and_advance_frame(UpdateQueueGlobals* queue, FrameCursorGlobals* cursor, bool unblank) {
+pan_and_advance_frame(UpdateQueueGlobals* queue,
+                      FrameCursorGlobals* cursor,
+                      bool unblank) {
   int frame_idx = queue->curFrame % 16;
   if (unblank)
     native_pan_and_unblank(frame_idx);
@@ -124,7 +126,8 @@ native_worker_thread_func(void*) {
           continue;
         }
 
-        int r = pthread_cond_timedwait(&queue->workerCond, &queue->workerCondMutex, &deadline);
+        int r = pthread_cond_timedwait(
+          &queue->workerCond, &queue->workerCondMutex, &deadline);
         if (r == ETIMEDOUT) {
           native_blank_fb();
           want_timed = false;
@@ -143,7 +146,8 @@ native_worker_thread_func(void*) {
 
     // 7. Un-blank and advance one frame, unless a flash or shutdown is
     // pending (both handled below instead).
-    if (native_is_fb_blanked() && queue->workerThreadShutdown == 0 && queue->flashRequested == 0) {
+    if (native_is_fb_blanked() && queue->workerThreadShutdown == 0 &&
+        queue->flashRequested == 0) {
       pan_and_advance_frame(queue, cursor, /*unblank=*/true);
     }
 
@@ -156,18 +160,24 @@ native_worker_thread_func(void*) {
       float temp = native_get_current_temperature();
       SpRef lut_sp{};
       native_select_waveform_lut(
-        temp, &lut_sp, (std::vector<ModeEntry*>*)(void*)queue->waveformStructRaw, /*mode=*/0);
+        temp,
+        &lut_sp,
+        (std::vector<ModeEntry*>*)(void*)queue->waveformStructRaw,
+        /*mode=*/0);
 
       if (native_update_lut_is_valid(lut_sp)) {
         static const uint16_t kFlashPatterns[3] = { 0x0000, 0x5555, 0xaaaa };
         for (int i = 0; i < 3; i++)
-          native_write_lut_pattern(native_frame_buffer_addr(i), kFlashPatterns[i]);
+          native_write_lut_pattern(native_frame_buffer_addr(i),
+                                   kFlashPatterns[i]);
 
         auto* lut = (const LUTEntry*)lut_sp.ptr;
         native_pan_and_unblank((int)native_read_lut_packed_pixel(lut, 0, 0, 0));
-        int phase_count = lut->size_kb; // doubles as this LUT's frame/phase count
+        int phase_count =
+          lut->size_kb; // doubles as this LUT's frame/phase count
         for (int phase = 1; phase < phase_count; phase++)
-          native_pan_to_frame((int)native_read_lut_packed_pixel(lut, 0, 0, phase));
+          native_pan_to_frame(
+            (int)native_read_lut_packed_pixel(lut, 0, 0, phase));
         native_pan_to_frame(0);
         native_pan_to_frame(16);
         native_blank_fb();
@@ -260,7 +270,7 @@ static_assert(sizeof(Sp3Block) == 0x28, "Sp3Block layout drift");
 
 static void
 native_sp3_dispose(void* ctrl) {
-  delete[](uint16_t*)((Sp3Block*)ctrl)->rr.dataPtr;
+  delete[] (uint16_t*)((Sp3Block*)ctrl)->rr.dataPtr;
 }
 
 static void
@@ -268,7 +278,9 @@ native_sp3_destroy(void* ctrl) {
   ::operator delete(ctrl);
 }
 
-static void* kNativeSp3Vtable[4] = { nullptr, nullptr, (void*)native_sp3_dispose,
+static void* kNativeSp3Vtable[4] = { nullptr,
+                                     nullptr,
+                                     (void*)native_sp3_dispose,
                                      (void*)native_sp3_destroy };
 
 // Native reimplementation of the display-commit kernels FUN_0004f8f0
@@ -295,7 +307,9 @@ static bool
 native_commit_item(WorkItem* item) {
   int rows = item->rectY1 - item->rectY0 + 1;
   int cols = item->rectX1 - item->rectX0 + 1;
-  int strideRows = (rows + 0xf) & ~0xf; // round_up(rows, 16), same as regionRows/sp3 convention
+  int strideRows =
+    (rows + 0xf) &
+    ~0xf; // round_up(rows, 16), same as regionRows/sp3 convention
 
   auto* block = (Sp3Block*)::operator new(sizeof(Sp3Block));
   block->vtable = kNativeSp3Vtable;
@@ -335,17 +349,18 @@ native_commit_item(WorkItem* item) {
   item->stateDataPtr = block->rr.dataPtr;
   release_sp(old_ctrl);
 
-  // Read the new pixel through item.gap (the REBASED RegionRows::dataPtr, +0x08),
-  // NOT regionRows->dataPtr. For a split piece (native_piece_builder) the
-  // regionRows shared_ptr still points at the ORIGINAL region's struct (origin =
-  // old rect's x0/y0), and only `gap` is rebased to the piece's own origin - so
-  // indexing regionRows->dataPtr with piece-local coords reads from the wrong
-  // spot and leaves border seams. FUN_0004f8f0 uses param_1[2] (== item.gap) as
-  // the base with stride from regionRows->stride, exactly this. (For a whole,
-  // unsplit item gap == regionRows->dataPtr, which is why full-screen updates
-  // rendered fine before this fix.)
+  // Read the new pixel through item.gap (the REBASED RegionRows::dataPtr,
+  // +0x08), NOT regionRows->dataPtr. For a split piece (native_piece_builder)
+  // the regionRows shared_ptr still points at the ORIGINAL region's struct
+  // (origin = old rect's x0/y0), and only `gap` is rebased to the piece's own
+  // origin - so indexing regionRows->dataPtr with piece-local coords reads from
+  // the wrong spot and leaves border seams. FUN_0004f8f0 uses param_1[2] (==
+  // item.gap) as the base with stride from regionRows->stride, exactly this.
+  // (For a whole, unsplit item gap == regionRows->dataPtr, which is why
+  // full-screen updates rendered fine before this fix.)
   auto* regionRows = (RegionRows*)item->regionRows.ptr;
-  const uint8_t* gapBuf = regionRows ? (const uint8_t*)(uintptr_t)(uint32_t)item->gap : nullptr;
+  const uint8_t* gapBuf =
+    regionRows ? (const uint8_t*)(uintptr_t)(uint32_t)item->gap : nullptr;
   int gapStride = regionRows ? regionRows->stride : 0;
   uint16_t* state = (uint16_t*)g_pStateBufferNative;
   bool force = item->sync != 0;
@@ -358,11 +373,13 @@ native_commit_item(WorkItem* item) {
       int localCol = col - item->rectX0;
       for (int row = item->rectY0; row <= item->rectY1; row++) {
         int localRow = row - item->rectY0;
-        uint16_t new_raw = gapBuf ? gapBuf[(int64_t)localCol * gapStride + localRow] : 0;
+        uint16_t new_raw =
+          gapBuf ? gapBuf[(int64_t)localCol * gapStride + localRow] : 0;
         uint16_t old = state[(size_t)col * kScreenHeight + row];
         bool is_sentinel = new_raw == 0x20;
         uint16_t effective_new = is_sentinel ? old : new_raw;
-        uint16_t packed = is_sentinel ? 0x0400 : (uint16_t)((old << 5) | effective_new);
+        uint16_t packed =
+          is_sentinel ? 0x0400 : (uint16_t)((old << 5) | effective_new);
         sp3Buf[(size_t)strideRows * localCol + localRow] = packed;
         state[(size_t)col * kScreenHeight + row] = effective_new;
       }
@@ -385,7 +402,8 @@ native_commit_item(WorkItem* item) {
     // g_pStateBuffer/out_rect update gating exactly (a lone changed pixel
     // still widens Y to its whole enclosing group of 8, confirmed via
     // dispatch_processed_regions_probe.cpp's single-pixel test).
-    for (int groupStart = item->rectY0; groupStart <= item->rectY1; groupStart += 8) {
+    for (int groupStart = item->rectY0; groupStart <= item->rectY1;
+         groupStart += 8) {
       int groupEnd = std::min(groupStart + 7, item->rectY1);
       bool groupChanged = false;
       uint16_t newState[8], packedVal[8];
@@ -393,7 +411,8 @@ native_commit_item(WorkItem* item) {
       for (int row = groupStart; row <= groupEnd; row++) {
         int localRow = row - item->rectY0;
         int lane = row - groupStart;
-        uint16_t new_raw = gapBuf ? gapBuf[(int64_t)localCol * gapStride + localRow] : 0;
+        uint16_t new_raw =
+          gapBuf ? gapBuf[(int64_t)localCol * gapStride + localRow] : 0;
         uint16_t old = state[(size_t)col * kScreenHeight + row];
         bool is_sentinel = new_raw == 0x20;
         bool unchanged = new_raw == old;
@@ -401,7 +420,8 @@ native_commit_item(WorkItem* item) {
         uint16_t effective_new = skip ? old : new_raw;
 
         newState[lane] = effective_new;
-        packedVal[lane] = skip ? 0x0400 : (uint16_t)((old << 5) | effective_new);
+        packedVal[lane] =
+          skip ? 0x0400 : (uint16_t)((old << 5) | effective_new);
         sp3Buf[(size_t)strideRows * localCol + localRow] = packedVal[lane];
         if (!skip)
           groupChanged = true;
@@ -431,8 +451,8 @@ native_commit_item(WorkItem* item) {
   // seed origin the buffer was laid out with; sp3Buf is indexed with
   // strideRows*(col-seedX0)+(row-seedY0), so the narrowed rect starts at
   // strideRows*(outX0-seedX0)+(outY0-seedY0) into it.
-  item->stateDataPtr =
-    sp3Buf + (size_t)strideRows * (outX0 - block->rr.x0) + (size_t)(outY0 - block->rr.y0);
+  item->stateDataPtr = sp3Buf + (size_t)strideRows * (outX0 - block->rr.x0) +
+                       (size_t)(outY0 - block->rr.y0);
   return true;
 }
 
@@ -475,7 +495,8 @@ native_dispatch_processed_regions_native(ListHead* sub_list) {
     auto* next = node->next;
     WorkItem* item = &node->item;
 
-    bool degenerate_on_entry = item->rectY1 < item->rectY0 || item->rectX1 < item->rectX0;
+    bool degenerate_on_entry =
+      item->rectY1 < item->rectY0 || item->rectX1 < item->rectX0;
     bool survives = !degenerate_on_entry && native_commit_item(item);
 
     if (!survives) {
@@ -558,9 +579,11 @@ native_gc_processed_updates() {
 
     if (queue->curFrame >= item.frameAnchor + item.lutWidthMinus1) {
       for (auto* other = (WorkItemNode*)queue->listProcessedUpdates.next;
-           (void*)other != &queue->listProcessedUpdates; other = other->next) {
+           (void*)other != &queue->listProcessedUpdates;
+           other = other->next) {
         WorkItem& other_item = other->item;
-        for (auto* dep = (IntListNode*)other_item.intList.next; (void*)dep != &other_item.intList;) {
+        for (auto* dep = (IntListNode*)other_item.intList.next;
+             (void*)dep != &other_item.intList;) {
           auto* dep_next = dep->next;
           if ((WorkItem*)(intptr_t)dep->value == &item) {
             list_unhook(dep);
@@ -588,10 +611,12 @@ static void
 native_build_overlap_dependency_list(ListHead* sub_list) {
   auto* queue = update_queue_globals();
 
-  for (auto* node = (WorkItemNode*)sub_list->next; (void*)node != sub_list; node = node->next) {
+  for (auto* node = (WorkItemNode*)sub_list->next; (void*)node != sub_list;
+       node = node->next) {
     WorkItem& item = node->item;
 
-    for (auto* dep = (IntListNode*)item.intList.next; (void*)dep != &item.intList;) {
+    for (auto* dep = (IntListNode*)item.intList.next;
+         (void*)dep != &item.intList;) {
       auto* dep_next = dep->next;
       ::operator delete(dep);
       dep = dep_next;
@@ -603,12 +628,14 @@ native_build_overlap_dependency_list(ListHead* sub_list) {
       continue; // degenerate item rect - no dependencies possible
 
     for (auto* other_node = (WorkItemNode*)queue->listProcessedUpdates.next;
-         (void*)other_node != &queue->listProcessedUpdates; other_node = other_node->next) {
+         (void*)other_node != &queue->listProcessedUpdates;
+         other_node = other_node->next) {
       WorkItem& other = other_node->item;
       if (other.rectY0 > other.rectY1 || other.rectX0 > other.rectX1)
         continue; // degenerate other rect
 
-      bool overlap = other.rectX0 <= item.rectX1 && item.rectX0 <= other.rectX1 &&
+      bool overlap = other.rectX0 <= item.rectX1 &&
+                     item.rectX0 <= other.rectX1 &&
                      other.rectY0 <= item.rectY1 && item.rectY0 <= other.rectY1;
       if (!overlap)
         continue;
@@ -616,7 +643,8 @@ native_build_overlap_dependency_list(ListHead* sub_list) {
         continue; // "other" won't outlive item - no need to track it
 
       auto* dep = (IntListNode*)::operator new(sizeof(IntListNode));
-      dep->value = (int32_t)(intptr_t)&other; // a WorkItem*, see IntListNode's comment
+      dep->value =
+        (int32_t)(intptr_t)&other; // a WorkItem*, see IntListNode's comment
       list_insert_before(&item.intList, dep);
       item.intListCount++;
     }
@@ -628,105 +656,12 @@ native_build_overlap_dependency_list(ListHead* sub_list) {
 // (frameSlots[8], item, frameCount, chunkIndex, chunkCount).
 using PlaybackKernelFn = void (*)(void**, WorkItem*, int, int, int);
 
-// Native reimplementation of FUN_0004a140 (0x4a140, the "plain" playback
-// kernel) - fully reversed via tools/qsgepaper-preload/playback_kernel_probe.cpp
-// (isolated by-address calls against the real library with guard-paged
-// buffers, cross-checked against its Ghidra decompile - see AGENTS.md). For
-// each column in [rectX0,rectX1] restricted to this call's
-// [chunkIndex,chunkCount) column sub-range, and each 8-row group in
-// [rectY0,rectY1]:
-//   - fetches each of the group's 8 rows' packed LUT word ONCE (word_idx =
-//     phase/8, indexed using the row's own transition value - the raw
-//     stateDataPtr u16, used DIRECTLY as the LUT's (row*mode_width+col)
-//     index, not split via >>5/&0x1f - the same formula as
-//     native_read_lut_packed_pixel, see WorkItem::stateDataPtr's comment);
-//   - for every one of the 8 possible sub-phases (bit offsets 0-7) packed
-//     into that one word, extracts each row's 2-bit value and OR-accumulates
-//     it into a per-sub-phase 16-bit word at bit position (7-row)*2 - row 0
-//     lands at the TOP of the word, row 7 at the bottom (confirmed
-//     empirically via 4 isolated single-row probe experiments, matching the
-//     180-degree-rotation convention already established for
-//     render_update_kernel elsewhere in this codebase, not a naive lane
-//     order);
-//   - for k in [0,frameCount): ORs shared-buffer entry (phase&7)+k into
-//     frameSlots[k] at the SAME destination address (only the target buffer
-//     differs per k). This is why frameCount 1-8 all reduce to the same
-//     per-column/per-group computation done once: native_advance_work_item_frames
-//     always picks frameCount so phase&7+frameCount never crosses the
-//     8-sub-phase boundary of a single LUT word (confirmed: case 2's
-//     decompile does one shared LUT fetch, not two independent ones).
-// Destination byte offset from frameSlots[k]'s base (probe-verified across
-// single/multi-group rects and multi-column chunk ranges):
-//   ((col+3)*0x104 + (rectY0>>3) + group + 0x1a) * 4
-// - a 32-bit-word-per-column stride matching FbInitParams' xres=0x104=260.
-// mode_width is read from item->lut, but the 2-bit/8-rows-per-word packing
-// constants are hardcoded immediates in the real kernel too (not driven by
-// lut->bit_depth at runtime) - matches native_load_waveform, which always
-// produces bit_depth=2 LUTs, so this native port hardcodes the same
-// assumption rather than generalizing for a case that never occurs.
-//
-// Non-static (extern, declared in native_display.h): tools/qsgepaper-preload/
-// playback_kernel_bench.cpp calls this directly to isolate the compute cost
-// of the real, shipped kernel from the threading/dispatch machinery around
-// it - real hardware confirmed this is currently much slower than the
-// library's NEON-hand-tuned equivalent (see that file for the benchmark).
-void
-native_playback_kernel_plain(void** frame_slots, WorkItem* item, int frame_count, int chunk_index,
-                              int chunk_count) {
-  if (item->rectY1 < item->rectY0 || item->rectX1 < item->rectX0)
-    return;
-
-  int num_groups = ((item->rectY1 - item->rectY0) + 1) >> 3;
-  if (num_groups == 0)
-    return;
-
-  int span = item->rectX1 - item->rectX0;  // 0-based, inclusive
-  int chunk_width = (span + 1) / chunk_count;
-  int col_lo = chunk_width * chunk_index;
-  int col_hi = (chunk_index != chunk_count - 1) ? (chunk_width - 1 + col_lo) : span;
-
-  const auto* lut = (const LUTEntry*)item->lut.ptr;
-  const uint16_t* lut_data = (const uint16_t*)lut->data;
-  int mw = lut->mode_width;
-  int word_idx = item->phase / 8;
-  int phase_bit0 = item->phase & 7;
-
-  const uint16_t* state = (const uint16_t*)item->stateDataPtr;
-  int stride = ((const RegionRows*)item->sp3.ptr)->stride;
-
-  for (int c = col_lo; c <= col_hi; c++) {
-    int col = item->rectX0 + c;
-    for (int g = 0; g < num_groups; g++) {
-      int row_base = item->rectY0 + g * 8;
-      uint16_t shared[8] = {};
-      for (int r = 0; r < 8; r++) {
-        int row = row_base + r;
-        // stateDataPtr (state) is already rebased to THIS item's own rect
-        // origin (see WorkItem::stateDataPtr's comment / native_commit_item),
-        // so the index here must be item-rect-relative, not sp3-relative -
-        // indexing with (col-sp3->x0)/(row-sp3->y0) here would double-apply
-        // the rebase and run off the end of the sp3 buffer for any narrowed
-        // item (item rect always a subset of sp3's own, outward-8-aligned
-        // rect) - confirmed via AddressSanitizer, which caught a
-        // heap-buffer-overflow read here on the very first narrowed item.
-        size_t idx = (size_t)stride * (col - item->rectX0) + (row - item->rectY0);
-        uint16_t transition = state[idx];
-        uint16_t lut_word = lut_data[(size_t)mw * mw * word_idx + word_idx + transition];
-        int shift = (7 - r) * 2;
-        for (int b = 0; b < 8; b++) {
-          uint16_t value = (lut_word >> (2 * b)) & 3;
-          shared[b] = (uint16_t)(shared[b] | (value << shift));
-        }
-      }
-
-      size_t byte_off = (size_t)((col + 3) * 0x104 + (item->rectY0 >> 3) + g + 0x1a) * 4;
-      for (int k = 0; k < frame_count; k++) {
-        auto* dest = (uint16_t*)((uint8_t*)frame_slots[k] + byte_off);
-        *dest = (uint16_t)(*dest | shared[phase_bit0 + k]);
-      }
-    }
-  }
-}
+// native_playback_kernel_plain itself (the native port of FUN_0004a140/
+// FUN_0004a234, "the plain playback kernel") now lives in its own
+// translation unit, native_playback_kernel.cpp, so its NEON fast path
+// (Phase 9, see AGENTS.md) can sit behind an #ifdef without dragging in
+// this file's threading/globals/ab_capture dependencies. See that file's
+// header comment for the full byte-verified algorithm breakdown.
 
 // Mirrors FUN_0003ec78 (0x3ec78, CONFIRMED): the third independent thread
 // pool. Below 2 chunks, calls the kernel synchronously; at 2+, spins up one
@@ -738,21 +673,26 @@ native_playback_kernel_plain(void** frame_slots, WorkItem* item, int frame_count
 // including the LUT-wraparound correction - unsynchronized plain field
 // writes, matching the library (no mutex held here either).
 static void
-native_playback_kernel_dispatch(PlaybackKernelFn kernel_fn, void** frame_slots, WorkItem* item,
-                                 int frame_count, int chunk_count) {
+native_playback_kernel_dispatch(PlaybackKernelFn kernel_fn,
+                                void** frame_slots,
+                                WorkItem* item,
+                                int frame_count,
+                                int chunk_count) {
   if (chunk_count < 2) {
     kernel_fn(frame_slots, item, frame_count, 0, 1);
   } else {
     std::vector<std::thread> threads;
     threads.reserve(chunk_count);
     for (int i = 0; i < chunk_count; i++)
-      threads.emplace_back(kernel_fn, frame_slots, item, frame_count, i, chunk_count);
+      threads.emplace_back(
+        kernel_fn, frame_slots, item, frame_count, i, chunk_count);
     for (auto& t : threads)
       t.join();
   }
 
   int32_t new_phase = item->phase + frame_count;
-  int32_t lut_width = *(const int32_t*)item->lut.ptr; // full packed width, NOT lutWidthMinus1
+  int32_t lut_width =
+    *(const int32_t*)item->lut.ptr; // full packed width, NOT lutWidthMinus1
   item->frameCursor += frame_count;
   item->phase = (int16_t)new_phase;
   if (lut_width <= new_phase) {
@@ -771,7 +711,8 @@ static int
 native_playback_chunk_count(const WorkItem* item) {
   if (item->rectY0 <= item->rectY1 && item->rectX0 <= item->rectX1) {
     int32_t width_span = item->rectX1 - item->rectX0;
-    int64_t area = (int64_t)(width_span + 1) * (item->rectY1 - item->rectY0 + 1);
+    int64_t area =
+      (int64_t)(width_span + 1) * (item->rectY1 - item->rectY0 + 1);
     if (area > 20000)
       return width_span < 10 ? 1 : 2;
   }
@@ -782,11 +723,14 @@ native_playback_chunk_count(const WorkItem* item) {
 // the chunk count and dispatches through FUN_0003ec78 with the "plain"
 // kernel - now native_playback_kernel_plain instead of by-address FUN_0004a140.
 static void
-native_dispatch_plain_kernel(void** frame_slots, WorkItem* item, int frame_count) {
+native_dispatch_plain_kernel(void** frame_slots,
+                             WorkItem* item,
+                             int frame_count) {
   int chunk_count = native_playback_chunk_count(item);
   ab_capture_kernel(item, "plain", frame_count, chunk_count);
-  native_playback_kernel_dispatch(native_playback_kernel_plain, frame_slots, item, frame_count,
-                                   chunk_count);
+  // auto* kernel = resolve_ptr<PlaybackKernelFn>(0x4a140);
+  native_playback_kernel_dispatch(
+    native_playback_kernel_plain, frame_slots, item, frame_count, chunk_count);
 }
 
 // Mirrors FUN_0003f1f0 (0x3f1f0, the "aligned" kernel wrapper - CONFIRMED):
@@ -828,11 +772,14 @@ native_dispatch_plain_kernel(void** frame_slots, WorkItem* item, int frame_count
 // code, provably same output - so no separate native implementation is
 // needed, and the delegates never need reversing at all.
 static void
-native_dispatch_aligned_kernel(void** frame_slots, WorkItem* item, int frame_count) {
+native_dispatch_aligned_kernel(void** frame_slots,
+                               WorkItem* item,
+                               int frame_count) {
   int chunk_count = native_playback_chunk_count(item);
   ab_capture_kernel(item, "aligned", frame_count, chunk_count);
-  native_playback_kernel_dispatch(native_playback_kernel_plain, frame_slots, item, frame_count,
-                                   chunk_count);
+  // auto* kernel = resolve_ptr<PlaybackKernelFn>(0x4a234);
+  native_playback_kernel_dispatch(
+    native_playback_kernel_plain, frame_slots, item, frame_count, chunk_count);
 }
 
 // Mirrors advance_work_item_frames (0x3a984) byte-exactly, re-derived
@@ -874,7 +821,9 @@ native_advance_work_item_frames(WorkItem* item) {
   bool int_list_empty = (item->intList.next == &item->intList);
   bool have_active_dep = false;
   if (!int_list_empty) {
-    for (auto* dep = (IntListNode*)item->intList.next; (void*)dep != &item->intList; dep = dep->next) {
+    for (auto* dep = (IntListNode*)item->intList.next;
+         (void*)dep != &item->intList;
+         dep = dep->next) {
       auto* other = (WorkItem*)(intptr_t)dep->value;
       if (item->frameAnchor < other->frameAnchor + other->lutWidthMinus1) {
         have_active_dep = true;
@@ -890,9 +839,12 @@ native_advance_work_item_frames(WorkItem* item) {
     // settled (its own intList empty) linked item before clamping.
     if (!int_list_empty) {
       int32_t bound = 0x7ffffffe;
-      for (auto* dep = (IntListNode*)item->intList.next; (void*)dep != &item->intList; dep = dep->next) {
+      for (auto* dep = (IntListNode*)item->intList.next;
+           (void*)dep != &item->intList;
+           dep = dep->next) {
         auto* other = (WorkItem*)(intptr_t)dep->value;
-        bool other_settled = (other->intList.next == &other->intList) && (other->phase < other->lutWidthMinus1);
+        bool other_settled = (other->intList.next == &other->intList) &&
+                             (other->phase < other->lutWidthMinus1);
         if (other_settled)
           bound = std::min(bound, other->frameCursor - 1);
       }
@@ -902,7 +854,8 @@ native_advance_work_item_frames(WorkItem* item) {
     }
 
     if (frame_count == 0 || budget < frame_count)
-      return; // full abort - matches the library's early `return` here (no tail either)
+      return; // full abort - matches the library's early `return` here (no tail
+              // either)
 
     native_dispatch_plain_kernel(frame_slots, item, frame_count);
     dispatched = true;
@@ -941,8 +894,8 @@ native_advance_work_item_frames(WorkItem* item) {
   // wait loop learns there's more to display.
   int32_t new_frame_cursor = item->frameCursor;
   if (new_frame_cursor < queue->curFrame - 1) {
-    std::cerr << "swtcon: generator thread has fallen behind... update=" << new_frame_cursor
-              << ", next=" << queue->curFrame << std::endl;
+    std::cerr << "swtcon: generator thread has fallen behind... update="
+              << new_frame_cursor << ", next=" << queue->curFrame << std::endl;
   }
   if (new_frame_cursor <= queue->targetFrame)
     return;
@@ -973,13 +926,16 @@ native_display_thread_func(void*) {
     // 2. g_pListProcessedUpdates GC.
     native_gc_processed_updates();
 
-    bool processed_empty = (queue->listProcessedUpdates.next == &queue->listProcessedUpdates);
-    bool incoming_empty = (queue->listIncomingUpdates.next == &queue->listIncomingUpdates);
+    bool processed_empty =
+      (queue->listProcessedUpdates.next == &queue->listProcessedUpdates);
+    bool incoming_empty =
+      (queue->listIncomingUpdates.next == &queue->listIncomingUpdates);
     if (processed_empty && incoming_empty && queue->shutdownRequested != 0)
       break;
 
     // 3-6. Incoming-batch intake, gate-check, dispatch, commit.
-    if (!incoming_empty && pthread_mutex_trylock(&queue->updateQueueMutex) == 0) {
+    if (!incoming_empty &&
+        pthread_mutex_trylock(&queue->updateQueueMutex) == 0) {
       auto* batch = (BatchNode*)queue->listIncomingUpdates.next;
       while ((void*)batch != &queue->listIncomingUpdates) {
         auto* next_batch = batch->next;
@@ -1000,14 +956,19 @@ native_display_thread_func(void*) {
           // FullRefresh-only dependency's completion pointless).
           int32_t max_lifetime = 0;
           for (auto* item_node = (WorkItemNode*)batch->subList.next;
-               (void*)item_node != &batch->subList; item_node = item_node->next) {
+               (void*)item_node != &batch->subList;
+               item_node = item_node->next) {
             WorkItem& item = item_node->item;
             int32_t item_max = 0;
-            for (auto* dep = (IntListNode*)item.intList.next; (void*)dep != &item.intList; dep = dep->next) {
+            for (auto* dep = (IntListNode*)item.intList.next;
+                 (void*)dep != &item.intList;
+                 dep = dep->next) {
               auto* other = (WorkItem*)(intptr_t)dep->value;
-              bool skip = item.sync == 0 && other->sync == 0 && item.fullRefresh != 0 && other->fullRefresh != 0;
+              bool skip = item.sync == 0 && other->sync == 0 &&
+                          item.fullRefresh != 0 && other->fullRefresh != 0;
               if (!skip)
-                item_max = std::max(item_max, other->frameAnchor + other->lutWidthMinus1);
+                item_max = std::max(item_max,
+                                    other->frameAnchor + other->lutWidthMinus1);
             }
             max_lifetime = std::max(max_lifetime, item_max);
           }
@@ -1019,23 +980,29 @@ native_display_thread_func(void*) {
             // instead of the native port, so the two can be diffed on identical
             // input (how the +0x44 rebasing bug in native_commit_item was
             // found - see that function). Read once, cached.
-            static const bool use_lib_dispatch = (getenv("SWTCON_LIBDISPATCH") != nullptr);
-            bool dispatched = use_lib_dispatch
-                                ? native_dispatch_processed_regions(&batch->subList)
-                                : native_dispatch_processed_regions_native(&batch->subList);
+            static const bool use_lib_dispatch =
+              (getenv("SWTCON_LIBDISPATCH") != nullptr);
+            bool dispatched =
+              use_lib_dispatch
+                ? native_dispatch_processed_regions(&batch->subList)
+                : native_dispatch_processed_regions_native(&batch->subList);
 
-            ab_capture_dispatch(&batch->subList); // no-op unless SWTCON_AB_CAPTURE set
+            ab_capture_dispatch(
+              &batch->subList); // no-op unless SWTCON_AB_CAPTURE set
 
             if (dispatched) {
               int32_t target;
-              if (!cursor->bWorkerThreadBusy || queue->curFrame != queue->targetFrame) {
+              if (!cursor->bWorkerThreadBusy ||
+                  queue->curFrame != queue->targetFrame) {
                 int64_t workload_sum = 0;
                 int32_t min_x0 = INT32_MAX;
                 for (auto* item_node = (WorkItemNode*)batch->subList.next;
-                     (void*)item_node != &batch->subList; item_node = item_node->next) {
+                     (void*)item_node != &batch->subList;
+                     item_node = item_node->next) {
                   WorkItem& item = item_node->item;
                   int32_t width = 0, height = 0;
-                  if (item.rectY0 <= item.rectY1 && item.rectX0 <= item.rectX1) {
+                  if (item.rectY0 <= item.rectY1 &&
+                      item.rectX0 <= item.rectX1) {
                     height = item.rectY1 - item.rectY0 + 1;
                     width = item.rectX1 - item.rectX0 + 1;
                   }
@@ -1043,15 +1010,20 @@ native_display_thread_func(void*) {
                   min_x0 = std::min(min_x0, item.rectX0);
                 }
                 int32_t budget = (int32_t)workload_sum + 100;
-                int32_t pace_target = (int32_t)(((int64_t)min_x0 + 1) * 0x1d96 / 1000);
+                int32_t pace_target =
+                  (int32_t)(((int64_t)min_x0 + 1) * 0x1d96 / 1000);
 
                 pthread_mutex_lock(&queue->displayTimingMutex);
                 struct timespec now;
                 clock_gettime(CLOCK_MONOTONIC_RAW, &now);
                 int32_t base_frame =
-                  (queue->curFrame - 1 == cursor->nLastPannedFrame) ? queue->curFrame : queue->curFrame - 1;
-                int64_t elapsed_us = (int64_t)(now.tv_sec - queue->lastPanTimestamp.tv_sec) * 1000000 +
-                                     (now.tv_nsec - queue->lastPanTimestamp.tv_nsec) / 1000;
+                  (queue->curFrame - 1 == cursor->nLastPannedFrame)
+                    ? queue->curFrame
+                    : queue->curFrame - 1;
+                int64_t elapsed_us =
+                  (int64_t)(now.tv_sec - queue->lastPanTimestamp.tv_sec) *
+                    1000000 +
+                  (now.tv_nsec - queue->lastPanTimestamp.tv_nsec) / 1000;
                 pthread_mutex_unlock(&queue->displayTimingMutex);
 
                 if (elapsed_us > 11762) {
@@ -1075,7 +1047,8 @@ native_display_thread_func(void*) {
 
               int32_t committed = std::max(max_lifetime, target);
               for (auto* item_node = (WorkItemNode*)batch->subList.next;
-                   (void*)item_node != &batch->subList; item_node = item_node->next) {
+                   (void*)item_node != &batch->subList;
+                   item_node = item_node->next) {
                 item_node->item.frameCursor = committed;
                 item_node->item.frameAnchor = committed;
               }
@@ -1084,9 +1057,11 @@ native_display_thread_func(void*) {
               native_build_overlap_dependency_list(&batch->subList);
 
               for (auto* item_node = (WorkItemNode*)batch->subList.next;
-                   (void*)item_node != &batch->subList; item_node = item_node->next) {
+                   (void*)item_node != &batch->subList;
+                   item_node = item_node->next) {
                 native_advance_work_item_frames(&item_node->item);
-                auto* new_node = (WorkItemNode*)::operator new(sizeof(WorkItemNode));
+                auto* new_node =
+                  (WorkItemNode*)::operator new(sizeof(WorkItemNode));
                 native_update_item_copy(&new_node->item, &item_node->item);
                 list_insert_before(&queue->listProcessedUpdates, new_node);
                 queue->processedUpdatesCount++;
@@ -1109,7 +1084,8 @@ native_display_thread_func(void*) {
     // 7. Bottom-of-loop sweep: keep playing back any processed item that
     // still has frames left, even if this tick didn't commit a new batch.
     for (auto* node = (WorkItemNode*)queue->listProcessedUpdates.next;
-         (void*)node != &queue->listProcessedUpdates; node = node->next) {
+         (void*)node != &queue->listProcessedUpdates;
+         node = node->next) {
       if (node->item.phase < node->item.lutWidthMinus1)
         native_advance_work_item_frames(&node->item);
     }
