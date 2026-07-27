@@ -218,12 +218,36 @@ native_playback_kernel_plain(void** frame_slots, WorkItem* item, int frame_count
       // rect) - confirmed via AddressSanitizer, which caught a
       // heap-buffer-overflow read here on the very first narrowed item.
       uint16_t lut_words[8];
+#if SWTCON_PLAYBACK_KERNEL_NEON
+      // A group's 8 rows are contiguous in `state` (idx increases by exactly
+      // 1 per row - see the comment above), so all 8 transition values can
+      // be gathered with a single 128-bit load instead of 8 scalar ones -
+      // confirmed directly in the real aligned kernel's own case-8 handler
+      // (FUN_0004a234, 0x4d1c0: `vld1.16 {d6,d7},[r3]` loads exactly one
+      // group's 8 transitions at once, vs. this port's previous 8 separate
+      // `ldrh`-equivalent scalar reads). The subsequent per-lane extract
+      // (vgetq_lane_u16) is still scalar because the LUT lookup itself is a
+      // genuine data-dependent gather - this target's NEON has no gather
+      // instruction, and the real kernel doesn't have one either (see
+      // AGENTS.md's Phase 9 entry).
+      size_t idx0 = col_base + (size_t)(row_base - item->rectY0);
+      uint16x8_t transitions = vld1q_u16(&state[idx0]);
+      lut_words[0] = lut_data[lut_word_base + vgetq_lane_u16(transitions, 0)];
+      lut_words[1] = lut_data[lut_word_base + vgetq_lane_u16(transitions, 1)];
+      lut_words[2] = lut_data[lut_word_base + vgetq_lane_u16(transitions, 2)];
+      lut_words[3] = lut_data[lut_word_base + vgetq_lane_u16(transitions, 3)];
+      lut_words[4] = lut_data[lut_word_base + vgetq_lane_u16(transitions, 4)];
+      lut_words[5] = lut_data[lut_word_base + vgetq_lane_u16(transitions, 5)];
+      lut_words[6] = lut_data[lut_word_base + vgetq_lane_u16(transitions, 6)];
+      lut_words[7] = lut_data[lut_word_base + vgetq_lane_u16(transitions, 7)];
+#else
       for (int r = 0; r < 8; r++) {
         int row = row_base + r;
         size_t idx = col_base + (size_t)(row - item->rectY0);
         uint16_t transition = state[idx];
         lut_words[r] = lut_data[lut_word_base + transition];
       }
+#endif
 
       uint16_t shared[8];
       compute_shared_subphase_words(lut_words, shared);

@@ -1,46 +1,46 @@
-Library loaded, runtime_offset=0x76ba5000 - will benchmark FUN_0004a140/FUN_0004a234 too
+Library loaded, runtime_offset=0x76adb000 - will benchmark FUN_0004a140/FUN_0004a234 too
 
 === tiny 32x8 (1 group), frameCount=8 ===
-    native        10976.5 ns/call      23.3 Mpix/s    0.09% of a 11.76ms panel tick  (27332 iters)
-    lib-plain     22830.8 ns/call      11.2 Mpix/s    0.19% of a 11.76ms panel tick  (13141 iters)
-    -> native is 0.48x the library plain kernel's time
-    lib-aligned     7683.3 ns/call      33.3 Mpix/s    0.07% of a 11.76ms panel tick  (39046 iters)
-    -> native is 1.43x the library aligned kernel's time
+    native         9716.0 ns/call      26.3 Mpix/s    0.08% of a 11.76ms panel tick  (30877 iters)
+    lib-plain     22558.8 ns/call      11.3 Mpix/s    0.19% of a 11.76ms panel tick  (13299 iters)
+    -> native is 0.43x the library plain kernel's time
+    lib-aligned     7543.4 ns/call      33.9 Mpix/s    0.06% of a 11.76ms panel tick  (39770 iters)
+    -> native is 1.29x the library aligned kernel's time
 
 === text-row 256x16 (2 groups), frameCount=8 ===
-    native       179767.4 ns/call      22.8 Mpix/s    1.53% of a 11.76ms panel tick  (1669 iters)
-    lib-plain    228993.8 ns/call      17.9 Mpix/s    1.95% of a 11.76ms panel tick  (1311 iters)
-    -> native is 0.79x the library plain kernel's time
-    lib-aligned    95369.2 ns/call      42.9 Mpix/s    0.81% of a 11.76ms panel tick  (3146 iters)
-    -> native is 1.88x the library aligned kernel's time
+    native       165853.5 ns/call      24.7 Mpix/s    1.41% of a 11.76ms panel tick  (1809 iters)
+    lib-plain    228735.3 ns/call      17.9 Mpix/s    1.94% of a 11.76ms panel tick  (1312 iters)
+    -> native is 0.73x the library plain kernel's time
+    lib-aligned    95340.5 ns/call      43.0 Mpix/s    0.81% of a 11.76ms panel tick  (3147 iters)
+    -> native is 1.74x the library aligned kernel's time
 
 === menu 400x128 (16 groups), frameCount=8 ===
-    native      2209162.5 ns/call      23.2 Mpix/s   18.78% of a 11.76ms panel tick  (136 iters)
-    lib-plain   1573977.0 ns/call      32.5 Mpix/s   13.38% of a 11.76ms panel tick  (191 iters)
-    -> native is 1.40x the library plain kernel's time
-    lib-aligned   893076.6 ns/call      57.3 Mpix/s    7.59% of a 11.76ms panel tick  (336 iters)
-    -> native is 2.47x the library aligned kernel's time
+    native      2067386.5 ns/call      24.8 Mpix/s   17.58% of a 11.76ms panel tick  (146 iters)
+    lib-plain   1597360.9 ns/call      32.1 Mpix/s   13.58% of a 11.76ms panel tick  (188 iters)
+    -> native is 1.29x the library plain kernel's time
+    lib-aligned   903807.9 ns/call      56.6 Mpix/s    7.68% of a 11.76ms panel tick  (332 iters)
+    -> native is 2.29x the library aligned kernel's time
 
 === half-screen 700x936 (117 groups), frameCount=8 ===
-    native     32460079.3 ns/call      20.2 Mpix/s  276.00% of a 11.76ms panel tick  (20 iters)
-    lib-plain  20173115.8 ns/call      32.5 Mpix/s  171.53% of a 11.76ms panel tick  (20 iters)
-    -> native is 1.61x the library plain kernel's time
-    lib-aligned 12665891.2 ns/call      51.7 Mpix/s  107.69% of a 11.76ms panel tick  (24 iters)
-    -> native is 2.56x the library aligned kernel's time
+    native     29871432.4 ns/call      21.9 Mpix/s  253.99% of a 11.76ms panel tick  (20 iters)
+    lib-plain  20031474.8 ns/call      32.7 Mpix/s  170.32% of a 11.76ms panel tick  (20 iters)
+    -> native is 1.49x the library plain kernel's time
+    lib-aligned 12592548.8 ns/call      52.0 Mpix/s  107.07% of a 11.76ms panel tick  (24 iters)
+    -> native is 2.37x the library aligned kernel's time
 
 === full-screen 1404x1872 (234 groups) fc=8, frameCount=8 ===
-    native     128166291.7 ns/call      20.5 Mpix/s  1089.76% of a 11.76ms panel tick  (20 iters)
-    lib-plain  78026425.8 ns/call      33.7 Mpix/s  663.43% of a 11.76ms panel tick  (20 iters)
-    -> native is 1.64x the library plain kernel's time
-    lib-aligned 49714164.4 ns/call      52.9 Mpix/s  422.70% of a 11.76ms panel tick  (20 iters)
-    -> native is 2.58x the library aligned kernel's time
+    native     117576741.3 ns/call      22.4 Mpix/s  999.72% of a 11.76ms panel tick  (20 iters)
+    lib-plain  75783836.6 ns/call      34.7 Mpix/s  644.37% of a 11.76ms panel tick  (20 iters)
+    -> native is 1.55x the library plain kernel's time
+    lib-aligned 49478699.4 ns/call      53.1 Mpix/s  420.70% of a 11.76ms panel tick  (20 iters)
+    -> native is 2.38x the library aligned kernel's time
 
 === full-screen 1404x1872 (234 groups) fc=1, frameCount=1 ===
-    native     64449427.0 ns/call      40.8 Mpix/s  547.99% of a 11.76ms panel tick  (20 iters)
-    lib-plain  37106615.4 ns/call      70.8 Mpix/s  315.51% of a 11.76ms panel tick  (20 iters)
-    -> native is 1.74x the library plain kernel's time
-    lib-aligned 19147423.6 ns/call     137.3 Mpix/s  162.80% of a 11.76ms panel tick  (20 iters)
-    -> native is 3.37x the library aligned kernel's time
+    native     54231232.5 ns/call      48.5 Mpix/s  461.11% of a 11.76ms panel tick  (20 iters)
+    lib-plain  36833520.8 ns/call      71.4 Mpix/s  313.18% of a 11.76ms panel tick  (20 iters)
+    -> native is 1.47x the library plain kernel's time
+    lib-aligned 19123685.8 ns/call     137.4 Mpix/s  162.60% of a 11.76ms panel tick  (20 iters)
+    -> native is 2.84x the library aligned kernel's time
 
 Note: absolute ns/call numbers are only meaningful within this single run/machine - the
 native-vs-library ratios are the portable signal. The 11.76ms figure is the whole display
