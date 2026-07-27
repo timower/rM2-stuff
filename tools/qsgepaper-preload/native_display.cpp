@@ -223,9 +223,10 @@ native_request_flash_and_wait() {
 // architecture doc, which turned out to have the wrong kernel-selection
 // rule for advance_work_item_frames - see that function's comment).
 //
-// Both worker-side playback kernels (0x4a140 "plain" and 0x4a234
-// "overlap-aware") are native now, sharing one implementation
-// (native_playback_kernel_plain below) - see native_dispatch_overlap_kernel's
+// Both worker-side playback kernels (0x4a140 "plain" and 0x4a234, formerly
+// mislabeled "overlap-aware" - see native_dispatch_aligned_kernel's comment
+// for why that name was wrong) are native now, sharing one implementation
+// (native_playback_kernel_plain below) - see native_dispatch_aligned_kernel's
 // comment for why a single native function covers both by-address
 // originals. This was the last remaining by-address call anywhere in the
 // production pipeline (display_thread_func's own by-address call at
@@ -663,7 +664,13 @@ using PlaybackKernelFn = void (*)(void**, WorkItem*, int, int, int);
 // lut->bit_depth at runtime) - matches native_load_waveform, which always
 // produces bit_depth=2 LUTs, so this native port hardcodes the same
 // assumption rather than generalizing for a case that never occurs.
-static void
+//
+// Non-static (extern, declared in native_display.h): tools/qsgepaper-preload/
+// playback_kernel_bench.cpp calls this directly to isolate the compute cost
+// of the real, shipped kernel from the threading/dispatch machinery around
+// it - real hardware confirmed this is currently much slower than the
+// library's NEON-hand-tuned equivalent (see that file for the benchmark).
+void
 native_playback_kernel_plain(void** frame_slots, WorkItem* item, int frame_count, int chunk_index,
                               int chunk_count) {
   if (item->rectY1 < item->rectY0 || item->rectX1 < item->rectX0)
@@ -782,9 +789,20 @@ native_dispatch_plain_kernel(void** frame_slots, WorkItem* item, int frame_count
                                    chunk_count);
 }
 
-// Mirrors FUN_0003f1f0 (0x3f1f0, "overlap-aware" kernel wrapper -
-// CONFIRMED): same as above, dispatching to what used to be the separate
-// by-address "overlap-aware" kernel (0x4a234).
+// Mirrors FUN_0003f1f0 (0x3f1f0, the "aligned" kernel wrapper - CONFIRMED):
+// same as above, dispatching to what used to be the separate by-address
+// kernel at 0x4a234.
+//
+// NAMING: this and FUN_0004a234 were previously called "overlap-aware"/
+// "overlap" - a name inherited from the fact that the selection rule below
+// (native_advance_work_item_frames) consults the item's overlap-dependency
+// intList to choose between this path and the plain one. That name is
+// backwards and misleading: this path fires exactly when there is NO active
+// overlap dependency left to account for (see have_active_dep below) - it
+// has nothing to do with overlap handling itself. The real distinguishing
+// requirement is `phase % 8 == 0` (see FUN_0004a234's NEON strategy below) -
+// an alignment-driven fast path, not an overlap-driven one. Renamed to
+// "aligned" throughout (function, address macros, log tag) to match.
 //
 // FUN_0004a234 turned out NOT to be a distinct algorithm: a decisive probe
 // test (tools/qsgepaper-preload/playback_kernel_probe.cpp Experiment 7) calls
@@ -801,7 +819,7 @@ native_dispatch_plain_kernel(void** frame_slots, WorkItem* item, int frame_count
 // same row->bit packing order - no new field, no global, no `intList`
 // access, no allocation, no threads. The only difference is NEON unrolling
 // strategy: FUN_0004a234's cases 4-8 extract all 8 sub-phases from one
-// lane-shifted vector at once (valid only because the overlap-kernel
+// lane-shifted vector at once (valid only because the aligned-kernel
 // selection rule - see advance_work_item_frames's kernel-selection comment -
 // guarantees `phase&7==0` whenever this path is taken, i.e. there's no
 // `(phase&7)+k` offset to compute), where FUN_0004a140 does the general
@@ -810,9 +828,9 @@ native_dispatch_plain_kernel(void** frame_slots, WorkItem* item, int frame_count
 // code, provably same output - so no separate native implementation is
 // needed, and the delegates never need reversing at all.
 static void
-native_dispatch_overlap_kernel(void** frame_slots, WorkItem* item, int frame_count) {
+native_dispatch_aligned_kernel(void** frame_slots, WorkItem* item, int frame_count) {
   int chunk_count = native_playback_chunk_count(item);
-  ab_capture_kernel(item, "overlap", frame_count, chunk_count);
+  ab_capture_kernel(item, "aligned", frame_count, chunk_count);
   native_playback_kernel_dispatch(native_playback_kernel_plain, frame_slots, item, frame_count,
                                    chunk_count);
 }
@@ -820,17 +838,20 @@ native_dispatch_overlap_kernel(void** frame_slots, WorkItem* item, int frame_cou
 // Mirrors advance_work_item_frames (0x3a984) byte-exactly, re-derived
 // directly from disassembly this pass (see swtcon_architecture.md §6.4).
 // This CORRECTS the architecture doc's earlier higher-level sketch: kernel
-// selection is NOT simply "intList empty -> plain, non-empty -> overlap".
+// selection is NOT simply "intList empty -> plain, non-empty -> aligned".
 // The real rule is:
 //   - if intList has an ACTIVE dependency (one whose frameAnchor+
 //     lutWidthMinus1 still exceeds this item's own frameAnchor): always
 //     the "plain" kernel (0x4a140), regardless of phase alignment.
 //   - otherwise (intList empty, or every dependency has already expired):
-//     the "overlap-aware" kernel (0x4a234) if phase is 8-aligned, else
-//     still the "plain" kernel.
-// i.e. the overlap-aware kernel only fires on an 8-aligned phase boundary
-// with no live dependency left to account for - the opposite of what its
-// name suggests at a glance.
+//     the "aligned" kernel (0x4a234) if phase is 8-aligned, else still the
+//     "plain" kernel.
+// i.e. the aligned kernel only fires on an 8-aligned phase boundary with no
+// live dependency left to account for - which is exactly why "overlap-aware"
+// (its name before this pass) was backwards and misleading: it fires when
+// there's NO overlap left to track, not when there is. It's an alignment
+// fast path, not an overlap-aware one - see native_dispatch_aligned_kernel's
+// comment.
 static void
 native_advance_work_item_frames(WorkItem* item) {
   auto* queue = update_queue_globals();
@@ -886,10 +907,10 @@ native_advance_work_item_frames(WorkItem* item) {
     native_dispatch_plain_kernel(frame_slots, item, frame_count);
     dispatched = true;
   } else if (budget >= frame_count) {
-    native_dispatch_overlap_kernel(frame_slots, item, frame_count);
+    native_dispatch_aligned_kernel(frame_slots, item, frame_count);
     dispatched = true;
   }
-  // else: overlap path, insufficient budget - skip the kernel call but
+  // else: aligned path, insufficient budget - skip the kernel call but
   // still fall through to the shared tail below (unlike the plain path's
   // early return above).
 

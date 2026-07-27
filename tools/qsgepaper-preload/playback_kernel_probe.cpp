@@ -1,6 +1,10 @@
 // Empirical probe for the two worker-side playback kernels FUN_0004a140
-// ("plain") and FUN_0004a234 ("overlap-aware") - the last still-library
-// by-address calls anywhere in the pipeline (AGENTS.md next step). Same
+// ("plain") and FUN_0004a234 (called "overlap-aware" at the time this probe
+// was written - later corrected to "aligned", see native_display.cpp's
+// native_dispatch_aligned_kernel: it fires on an 8-phase-aligned boundary
+// with no live overlap dependency, the opposite of what "overlap-aware"
+// suggests) - the last still-library by-address calls anywhere in the
+// pipeline (AGENTS.md next step). Same
 // "load the real library, call the real function directly, inspect what
 // happened" approach as render_kernel_addr_map.cpp/
 // dispatch_processed_regions_probe.cpp - deliberately does NOT try to
@@ -43,7 +47,7 @@
 
 #define INSTANCE_ADDR 0x35de0
 #define PLAIN_PLAYBACK_KERNEL_ADDR 0x4a140
-#define OVERLAP_PLAYBACK_KERNEL_ADDR 0x4a234
+#define ALIGNED_PLAYBACK_KERNEL_ADDR 0x4a234
 
 // One full hardware frame slot, bytes - bitsPerPixel(0x20) * xres(0x104) *
 // yres(0x580) / 8, matching FbInitParams in swtcon.cpp and native_init_lut's
@@ -316,7 +320,7 @@ main() {
   printf("native_init_statebuffer done, bridged pStatebuffer/pGammaTable\n");
 
   auto plain_kernel = (PlaybackKernelFn)(g_runtime_offset + PLAIN_PLAYBACK_KERNEL_ADDR);
-  auto overlap_kernel = (PlaybackKernelFn)(g_runtime_offset + OVERLAP_PLAYBACK_KERNEL_ADDR);
+  auto aligned_kernel = (PlaybackKernelFn)(g_runtime_offset + ALIGNED_PLAYBACK_KERNEL_ADDR);
 
   // The frameSlots[8] pointer array itself is guard-paged too, not just the
   // buffers it points to - if the kernel ever indexes past slot 7 (a wrong
@@ -552,21 +556,21 @@ main() {
 
   // --- Experiment 7: are FUN_0004a234's cases 4-8 computationally
   // IDENTICAL to FUN_0004a140, not just similarly-shaped? A Ghidra decompile
-  // pass on case 8 (94/117 real overlap-kernel calls in one ab-test run,
+  // pass on case 8 (94/117 real aligned-kernel calls in one ab-test run,
   // vs. 23 for case 5 and 0 for cases 1-4/6-7 - see AGENTS.md) found it
   // touches the exact same WorkItem fields (0xc/0x10/0x14/0x18/0x28/0x2c/
   // 0x3c/0x44), the exact same LUT-index formula, the exact same
   // destination address formula, and the exact same row->bit packing order
   // as FUN_0004a140 - no new field, no global, no intList access, just a
   // different NEON unrolling strategy (justified by phase&7==0 always
-  // holding when the overlap kernel is selected, letting it extract all 8
+  // holding when the aligned kernel is selected, letting it extract all 8
   // sub-phases from one lane-shifted vector instead of doing the (phase&7)+k
   // slice FUN_0004a140 does). If true, native_playback_kernel_plain should
   // already produce byte-identical output to the real FUN_0004a234 - this
   // decisive test calls BOTH kernels on the IDENTICAL WorkItem/state/LUT
   // (into separate frame-slot buffers) and diffs every byte, rather than
   // trusting the decompile reading alone. Uses phase=0 (8-aligned, required
-  // for the overlap-kernel path to ever be selected in real usage) and
+  // for the aligned-kernel path to ever be selected in real usage) and
   // frameCount=8 so every one of the 8 packed sub-phases gets exercised in
   // one call - the richest single-call test available. A varied
   // pseudo-random transition/LUT fill (not a uniform value) avoids a
@@ -618,7 +622,7 @@ main() {
       clear_slots();
       plain_kernel(frame_slots, &ti.node->item, frame_count, /*chunkIndex=*/0, /*chunkCount=*/1);
       clear_slots_b();
-      overlap_kernel(frame_slots_b, &ti.node->item, frame_count, /*chunkIndex=*/0, /*chunkCount=*/1);
+      aligned_kernel(frame_slots_b, &ti.node->item, frame_count, /*chunkIndex=*/0, /*chunkCount=*/1);
 
       size_t mismatches = 0;
       for (int i = 0; i < 8 && mismatches < 20; i++) {
@@ -626,7 +630,7 @@ main() {
         const uint8_t* b = (const uint8_t*)frame_slots_b[i];
         for (size_t off = 0; off < kFrameSlotBytes && mismatches < 20; off++) {
           if (a[off] != b[off]) {
-            printf("  frameCount=%d MISMATCH slot%d @0x%zx: plain=0x%02x overlap=0x%02x\n",
+            printf("  frameCount=%d MISMATCH slot%d @0x%zx: plain=0x%02x aligned=0x%02x\n",
                    frame_count, i, off, a[off], b[off]);
             mismatches++;
           }
@@ -649,8 +653,8 @@ main() {
       plain_kernel(frame_slots, &ti.node->item, frame_count, 0, 2);
       plain_kernel(frame_slots, &ti.node->item, frame_count, 1, 2);
       clear_slots_b();
-      overlap_kernel(frame_slots_b, &ti.node->item, frame_count, 0, 2);
-      overlap_kernel(frame_slots_b, &ti.node->item, frame_count, 1, 2);
+      aligned_kernel(frame_slots_b, &ti.node->item, frame_count, 0, 2);
+      aligned_kernel(frame_slots_b, &ti.node->item, frame_count, 1, 2);
 
       size_t mismatches = 0;
       for (int i = 0; i < 8 && mismatches < 20; i++) {
@@ -658,7 +662,7 @@ main() {
         const uint8_t* b = (const uint8_t*)frame_slots_b[i];
         for (size_t off = 0; off < kFrameSlotBytes && mismatches < 20; off++) {
           if (a[off] != b[off]) {
-            printf("  chunkCount=2 frameCount=%d MISMATCH slot%d @0x%zx: plain=0x%02x overlap=0x%02x\n",
+            printf("  chunkCount=2 frameCount=%d MISMATCH slot%d @0x%zx: plain=0x%02x aligned=0x%02x\n",
                    frame_count, i, off, a[off], b[off]);
             mismatches++;
           }

@@ -155,7 +155,7 @@ run_matrix() {
   //    into the second item's intList unconditionally. That mismatch is
   //    exactly what makes native_advance_work_item_frames's have_active_dep
   //    check re-derive true later, forcing the "plain" playback kernel
-  //    (0x4a140) instead of "overlap" (0x4a234) - the branch the KERN log
+  //    (0x4a140) instead of "aligned" (0x4a234) - the branch the KERN log
   //    showed as never hit by cases 1-7 (AGENTS.md next step).
   //
   //    For that dependency to be built at all, the FIRST item must already

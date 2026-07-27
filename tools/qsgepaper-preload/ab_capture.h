@@ -36,7 +36,9 @@ void ab_capture_dispatch(ListHead* sub_list);
 void ab_capture_playback(const WorkItem* item, int start_frame, int end_frame);
 
 // Per still-library playback-kernel call (0x4a140 "plain" / 0x4a234
-// "overlap"), logged right before the call so `phase`/`lutWidthMinus1`
+// "aligned" - formerly logged as "overlap", a misnomer corrected in
+// native_display.cpp's native_dispatch_aligned_kernel), logged right before
+// the call so `phase`/`lutWidthMinus1`
 // reflect pre-advance state. Purpose: find out which (kernel, frame_count)
 // combinations the real test matrix actually exercises, to prioritize the
 // piecewise reversal of FUN_0004a234's frameCount jump table (AGENTS.md next

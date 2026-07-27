@@ -45,6 +45,20 @@ add_executable(playback-kernel-probe playback_kernel_probe.cpp native_init.cpp n
 target_link_libraries(playback-kernel-probe dl)
 target_compile_definitions(playback-kernel-probe PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
 
+# Microbenchmark for native_playback_kernel_plain (native_display.cpp), the
+# native port of the two worker-side playback kernels - measures its compute
+# cost in isolation and, where the library is available, against the real
+# NEON FUN_0004a140/FUN_0004a234 - see playback_kernel_bench.cpp's header
+# comment. Links native_display.cpp (for the kernel itself) plus its
+# ab_capture.cpp dependency; deliberately does NOT link swtcon.cpp - it
+# defines its own minimal swtcon_runtime_offset(), same as
+# playback_kernel_probe.cpp, to dlopen the library independently rather than
+# through swtcon.cpp's production load_lib() path.
+add_executable(playback-kernel-bench playback_kernel_bench.cpp native_init.cpp native_update.cpp
+                                      native_display.cpp ab_capture.cpp)
+target_link_libraries(playback-kernel-bench dl)
+target_compile_definitions(playback-kernel-bench PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
+
 install(
   TARGETS qsgepaper-test
   COMPONENT tools
