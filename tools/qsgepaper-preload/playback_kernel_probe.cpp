@@ -438,6 +438,117 @@ main() {
     free_item(&ti);
   }
 
+  // --- Experiment 4: per-row bit-position mapping. Experiment 3's single
+  // active row (absolute row 0, the first row of the 8-row group) landed in
+  // the HIGH bits of the HIGH byte (0x7fbd9, bits 7:6) - i.e. bits[15:14] of
+  // the little-endian 16-bit pair, not bits[1:0] as a naive lane0->shift0
+  // reading of the NEON sequence would suggest. That's consistent with a
+  // reversed row order (row 0 -> top bits, row 7 -> bottom bits), matching
+  // the 180-degree-rotation convention already confirmed elsewhere in this
+  // codebase (render_update_kernel's addressing). Isolate each of the 8 rows
+  // one at a time (fresh item per row, all other rows left at an
+  // always-zero-drive transition) to map every row unambiguously.
+  {
+    printf("\n=== Experiment 4: per-row bit-position mapping (one row active at a time) ===\n");
+    const int X0 = 500;
+    for (int r = 0; r < 8; r++) {
+      TestItem ti;
+      build_item(&ti, 0, X0, 7, X0, /*fill_transition=*/0, /*phase=*/0, /*mode_width=*/32,
+                 /*bit_depth=*/2, /*lut_width=*/8);
+      // Row r gets transition (oldState=1,newState=0) = 32; every other row
+      // keeps the default fill transition 0, whose LUT cell is left
+      // unmarked (0) - only row r should produce nonzero output.
+      auto cell = [&](int col, int row) -> uint16_t& {
+        return ti.stateBuf[(size_t)ti.sp3rr.stride * (col - ti.sp3rr.x0) + (row - ti.sp3rr.y0)];
+      };
+      cell(X0, r) = (1 << 5) | 0;
+      write_lut_packed_pixel(&ti.lut, /*row=*/1, /*col=*/0, /*phase=*/0, 3);
+      clear_slots();
+
+      plain_kernel(frame_slots, &ti.node->item, /*frameCount=*/1, /*chunkIndex=*/0, /*chunkCount=*/1);
+
+      bool found = false;
+      for (int i = 0; i < 8 && !found; i++) {
+        const uint8_t* buf = (const uint8_t*)frame_slots[i];
+        for (size_t off = 0; off < kFrameSlotBytes; off++) {
+          if (buf[off] != 0) {
+            printf("  row=%d -> slot%d byte@0x%zx = 0x%02x\n", r, i, off, buf[off]);
+            found = true;
+            break;
+          }
+        }
+      }
+      if (!found)
+        printf("  row=%d -> NO nonzero output found\n", r);
+      free_item(&ti);
+    }
+  }
+
+  // --- Experiment 5: multi-group rect (16 rows = 2 groups of 8, single
+  // column). Ghidra decompile trace (frameCount==1 case) predicts the two
+  // groups land in CONTIGUOUS 4-byte slots at the same column's base address
+  // (group g at base+g*4), each holding its own 8-row packed word with the
+  // same reversed row->bit mapping as experiment 4. All 16 rows given the
+  // same always-drive-3 transition, so both group words should read back as
+  // 0xffff if the prediction holds.
+  {
+    printf("\n=== Experiment 5: multi-group rect (16 rows, predicts group1 at base+4) ===\n");
+    const int X0 = 500;
+    TestItem ti;
+    build_item(&ti, 0, X0, 15, X0, /*fill_transition=*/(1 << 5) | 0, /*phase=*/0, /*mode_width=*/32,
+               /*bit_depth=*/2, /*lut_width=*/8);
+    write_lut_packed_pixel(&ti.lut, /*row=*/1, /*col=*/0, /*phase=*/0, 3);
+    clear_slots();
+
+    plain_kernel(frame_slots, &ti.node->item, /*frameCount=*/1, /*chunkIndex=*/0, /*chunkCount=*/1);
+
+    size_t n = scan_nonzero("slot0", (const uint8_t*)frame_slots[0], kFrameSlotBytes, 20);
+    printf("  slot0: %zu nonzero bytes total (predicted: 4, at 0x7fbd8-0x7fbd9 and 0x7fbdc-0x7fbdd)\n",
+           n);
+    free_item(&ti);
+  }
+
+  // --- Experiment 6: frameCount>1 generalization. Ghidra decompile of case
+  // 2 shows it does NOT run case 1's LUT lookup twice at phase and phase+1 -
+  // it computes an 8-entry shared buffer ONCE per column/row-group (one
+  // entry per possible sub-phase 0-7 within the current LUT word, i.e. all 8
+  // bit-offsets extractable from the single fetched packed-LUT word), then
+  // frameSlots[k] (k=0..frameCount-1) just reads out shared-buffer entry
+  // (phase&7)+k - never a second independent LUT fetch. This works because
+  // native_advance_work_item_frames's frame_count is always chosen so
+  // phase&7 + frameCount never crosses an 8-phase LUT-word boundary, i.e.
+  // frameCount<=8-phase%8. Verify: one active row (row=0) with a LUT entry
+  // whose phase=0 slot (bit-offset 0) = 1 and phase=1 slot (bit-offset 1,
+  // SAME LUT word since word_idx=phase/8=0 for both) = 2 - two DIFFERENT
+  // values baked into the one word case 1 alone could never distinguish.
+  // frameCount=2 at phase=0 should split them cleanly across frameSlots[0]
+  // (value 1, at bits[15:14] since row=0) and frameSlots[1] (value 2, same
+  // bit position, same destination address - independent target buffers).
+  {
+    printf("\n=== Experiment 6: frameCount=2 shared-buffer hypothesis ===\n");
+    const int X0 = 500;
+    TestItem ti;
+    build_item(&ti, 0, X0, 7, X0, /*fill_transition=*/0, /*phase=*/0, /*mode_width=*/32,
+               /*bit_depth=*/2, /*lut_width=*/16);
+    auto cell = [&](int col, int row) -> uint16_t& {
+      return ti.stateBuf[(size_t)ti.sp3rr.stride * (col - ti.sp3rr.x0) + (row - ti.sp3rr.y0)];
+    };
+    cell(X0, 0) = (1 << 5) | 0;  // row 0 only: transition (oldState=1,newState=0) = 32
+    write_lut_packed_pixel(&ti.lut, /*row=*/1, /*col=*/0, /*phase=*/0, 1);  // bit-offset 0
+    write_lut_packed_pixel(&ti.lut, /*row=*/1, /*col=*/0, /*phase=*/1, 2);  // bit-offset 1, same word
+    clear_slots();
+
+    plain_kernel(frame_slots, &ti.node->item, /*frameCount=*/2, /*chunkIndex=*/0, /*chunkCount=*/1);
+
+    for (int i = 0; i < 8; i++) {
+      size_t n = scan_nonzero("slot", (const uint8_t*)frame_slots[i], kFrameSlotBytes, 10);
+      if (n)
+        printf("  slot%d: %zu nonzero bytes\n", i, n);
+    }
+    printf("  predicted: slot0 byte@0x7fbd9=0x40 (value 1<<6), slot1 byte@0x7fbd9=0x80 (value 2<<6)\n");
+    free_item(&ti);
+  }
+
   // frame_slots are guard-paged mmap regions, not malloc'd - leaked
   // intentionally, same as build_item's buffers (see free_item).
   return 0;

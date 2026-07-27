@@ -224,11 +224,11 @@ native_request_flash_and_wait() {
 // rule for advance_work_item_frames - see that function's comment).
 //
 // One piece stays still-library, called by address exactly like
-// render_update_kernel is in the update path:
-//   0x4a140/0x4a234 the two worker-side playback kernels ("plain"/
-//           "overlap-aware") - call signature confirmed, bodies
-//           [derived]/[guess] (see architecture doc §8).
-constexpr uintptr_t kPlainPlaybackKernelAddr = 0x4a140;
+// render_update_kernel used to be in the update path:
+//   0x4a234 the "overlap-aware" worker-side playback kernel - call signature
+//           confirmed, body still [guess] (see architecture doc §8). Its
+//           sibling, the "plain" kernel at 0x4a140, is native now
+//           (native_playback_kernel_plain below).
 constexpr uintptr_t kOverlapPlaybackKernelAddr = 0x4a234;
 
 extern void* g_pStateBufferNative;
@@ -621,9 +621,95 @@ native_build_overlap_dependency_list(ListHead* sub_list) {
   }
 }
 
-// Signature shared by both still-library worker-side playback kernels
-// (0x4a140/0x4a234): (frameSlots[8], item, frameCount, chunkIndex, chunkCount).
+// Signature shared by both worker-side playback kernels (native
+// native_playback_kernel_plain and the still-library FUN_0004a234):
+// (frameSlots[8], item, frameCount, chunkIndex, chunkCount).
 using PlaybackKernelFn = void (*)(void**, WorkItem*, int, int, int);
+
+// Native reimplementation of FUN_0004a140 (0x4a140, the "plain" playback
+// kernel) - fully reversed via tools/qsgepaper-preload/playback_kernel_probe.cpp
+// (isolated by-address calls against the real library with guard-paged
+// buffers, cross-checked against its Ghidra decompile - see AGENTS.md). For
+// each column in [rectX0,rectX1] restricted to this call's
+// [chunkIndex,chunkCount) column sub-range, and each 8-row group in
+// [rectY0,rectY1]:
+//   - fetches each of the group's 8 rows' packed LUT word ONCE (word_idx =
+//     phase/8, indexed using the row's own transition value - the raw
+//     stateDataPtr u16, used DIRECTLY as the LUT's (row*mode_width+col)
+//     index, not split via >>5/&0x1f - the same formula as
+//     native_read_lut_packed_pixel, see WorkItem::stateDataPtr's comment);
+//   - for every one of the 8 possible sub-phases (bit offsets 0-7) packed
+//     into that one word, extracts each row's 2-bit value and OR-accumulates
+//     it into a per-sub-phase 16-bit word at bit position (7-row)*2 - row 0
+//     lands at the TOP of the word, row 7 at the bottom (confirmed
+//     empirically via 4 isolated single-row probe experiments, matching the
+//     180-degree-rotation convention already established for
+//     render_update_kernel elsewhere in this codebase, not a naive lane
+//     order);
+//   - for k in [0,frameCount): ORs shared-buffer entry (phase&7)+k into
+//     frameSlots[k] at the SAME destination address (only the target buffer
+//     differs per k). This is why frameCount 1-8 all reduce to the same
+//     per-column/per-group computation done once: native_advance_work_item_frames
+//     always picks frameCount so phase&7+frameCount never crosses the
+//     8-sub-phase boundary of a single LUT word (confirmed: case 2's
+//     decompile does one shared LUT fetch, not two independent ones).
+// Destination byte offset from frameSlots[k]'s base (probe-verified across
+// single/multi-group rects and multi-column chunk ranges):
+//   ((col+3)*0x104 + (rectY0>>3) + group + 0x1a) * 4
+// - a 32-bit-word-per-column stride matching FbInitParams' xres=0x104=260.
+// mode_width is read from item->lut, but the 2-bit/8-rows-per-word packing
+// constants are hardcoded immediates in the real kernel too (not driven by
+// lut->bit_depth at runtime) - matches native_load_waveform, which always
+// produces bit_depth=2 LUTs, so this native port hardcodes the same
+// assumption rather than generalizing for a case that never occurs.
+static void
+native_playback_kernel_plain(void** frame_slots, WorkItem* item, int frame_count, int chunk_index,
+                              int chunk_count) {
+  if (item->rectY1 < item->rectY0 || item->rectX1 < item->rectX0)
+    return;
+
+  int num_groups = ((item->rectY1 - item->rectY0) + 1) >> 3;
+  if (num_groups == 0)
+    return;
+
+  int span = item->rectX1 - item->rectX0;  // 0-based, inclusive
+  int chunk_width = (span + 1) / chunk_count;
+  int col_lo = chunk_width * chunk_index;
+  int col_hi = (chunk_index != chunk_count - 1) ? (chunk_width - 1 + col_lo) : span;
+
+  const auto* lut = (const LUTEntry*)item->lut.ptr;
+  const uint16_t* lut_data = (const uint16_t*)lut->data;
+  int mw = lut->mode_width;
+  int word_idx = item->phase / 8;
+  int phase_bit0 = item->phase & 7;
+
+  const auto* sp3 = (const RegionRows*)item->sp3.ptr;
+  const uint16_t* state = (const uint16_t*)item->stateDataPtr;
+
+  for (int c = col_lo; c <= col_hi; c++) {
+    int col = item->rectX0 + c;
+    for (int g = 0; g < num_groups; g++) {
+      int row_base = item->rectY0 + g * 8;
+      uint16_t shared[8] = {};
+      for (int r = 0; r < 8; r++) {
+        int row = row_base + r;
+        uint16_t transition = state[(size_t)sp3->stride * (col - sp3->x0) + (row - sp3->y0)];
+        uint16_t lut_word = lut_data[(size_t)mw * mw * word_idx + word_idx + transition];
+        int shift = (7 - r) * 2;
+        for (int b = 0; b < 8; b++) {
+          uint16_t value = (lut_word >> (2 * b)) & 3;
+          shared[b] = (uint16_t)(shared[b] | (value << shift));
+        }
+      }
+
+      size_t byte_off = (size_t)((col + 3) * 0x104 + (item->rectY0 >> 3) + g + 0x1a) * 4;
+      for (int k = 0; k < frame_count; k++) {
+        auto* dest = (uint16_t*)((uint8_t*)frame_slots[k] + byte_off);
+        *dest = (uint16_t)(*dest | shared[phase_bit0 + k]);
+      }
+    }
+  }
+}
 
 // Mirrors FUN_0003ec78 (0x3ec78, CONFIRMED): the third independent thread
 // pool. Below 2 chunks, calls the kernel synchronously; at 2+, spins up one
@@ -677,13 +763,13 @@ native_playback_chunk_count(const WorkItem* item) {
 
 // Mirrors FUN_0003f294 (0x3f294, "plain" kernel wrapper - CONFIRMED): picks
 // the chunk count and dispatches through FUN_0003ec78 with the "plain"
-// kernel (0x4a140).
+// kernel - now native_playback_kernel_plain instead of by-address FUN_0004a140.
 static void
 native_dispatch_plain_kernel(void** frame_slots, WorkItem* item, int frame_count) {
-  auto kernel_fn = resolve_ptr<PlaybackKernelFn>(kPlainPlaybackKernelAddr);
   int chunk_count = native_playback_chunk_count(item);
   ab_capture_kernel(item, "plain", frame_count, chunk_count);
-  native_playback_kernel_dispatch(kernel_fn, frame_slots, item, frame_count, chunk_count);
+  native_playback_kernel_dispatch(native_playback_kernel_plain, frame_slots, item, frame_count,
+                                   chunk_count);
 }
 
 // Mirrors FUN_0003f1f0 (0x3f1f0, "overlap-aware" kernel wrapper -
