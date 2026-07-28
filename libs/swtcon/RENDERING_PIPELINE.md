@@ -50,7 +50,7 @@ Because the reMarkable 2 uses a CPU-driven Software TCON (`swtcon`), `pixel_mode
 ### `flags` (Synchronization)
 *   **`0`**: Async. Pushes the update to the queue without forcing the calling thread to wait.
 *   **`1`**: Sync. Instructs the hardware queue to process the frame and ensures `WaitForUpdate()` blocks until completion.
-*   **`2`**: FastDraw. Used for `swapBuffers_impl`'s entire async "mode 0 fast UI + pen" branch alike - `pixel_mode` (6 vs 7 for pen) is selected by a *different*, higher-level `EPFramebuffer::UpdateFlag` bit that never itself reaches `update_data`, not by this flag. Never set in the two-pass synchronous full-screen clear (that path only ever passes `flags=1`) - see `tools/qsgepaper-preload/swtcon.h`'s `UpdateFlags` comment, which corrects this project's earlier "FullRefresh" mislabel of this same bit.
+*   **`2`**: FastDraw. Used for `swapBuffers_impl`'s entire async "mode 0 fast UI + pen" branch alike - `pixel_mode` (6 vs 7 for pen) is selected by a *different*, higher-level `EPFramebuffer::UpdateFlag` bit that never itself reaches `update_data`, not by this flag. Never set in the two-pass synchronous full-screen clear (that path only ever passes `flags=1`) - see `libs/swtcon/include/swtcon.h`'s `UpdateFlags` comment, which corrects this project's earlier "FullRefresh" mislabel of this same bit.
 
 ---
 
