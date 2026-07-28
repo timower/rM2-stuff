@@ -15,7 +15,6 @@
 #include <unistd.h>
 #include <vector>
 
-#include "ab_capture.h"
 #include "native_init.h"
 #include "native_update.h"
 #include "qsgepaper_globals.h"
@@ -238,10 +237,10 @@ native_request_flash_and_wait() {
 // for why that name was wrong) are native now, sharing one implementation
 // (native_playback_kernel_plain below) - see native_dispatch_aligned_kernel's
 // comment for why a single native function covers both by-address
-// originals. This was the last remaining by-address call anywhere in the
-// production pipeline (display_thread_func's own by-address call at
-// dispatch_processed_regions, further up this file, is kept only as a
-// SWTCON_LIBDISPATCH-gated A/B testing fallback - see its comment).
+// originals. Zero by-address calls remain in the production pipeline; the
+// library is only ever touched at all under SWTCON_LIBIMPL (swtcon.cpp),
+// which switches every public swtcon_* entry point to the real library
+// wholesale rather than splicing it into individual native call sites.
 
 extern void* g_pStateBufferNative;
 
@@ -510,16 +509,6 @@ native_dispatch_processed_regions_native(ListHead* sub_list) {
   return any_survived;
 }
 
-constexpr uintptr_t kDispatchProcessedRegionsAddr = 0x50660;
-
-// Original still-library by-address call, kept as an A/B fallback (flip the
-// call site back to this to compare against the real library).
-[[maybe_unused]] static bool
-native_dispatch_processed_regions(ListHead* sub_list) {
-  auto fn = resolve_ptr<bool (*)(ListHead*)>(kDispatchProcessedRegionsAddr);
-  return fn(sub_list);
-}
-
 // Mirrors copy_init_frame_row (0x53be4, newly named this pass): restores
 // one stale frame-slot row from the LUT blob's fixed reference row.
 static void
@@ -660,8 +649,8 @@ using PlaybackKernelFn = void (*)(void**, WorkItem*, int, int, int);
 // FUN_0004a234, "the plain playback kernel") now lives in its own
 // translation unit, native_playback_kernel.cpp, so its NEON fast path
 // (Phase 9, see AGENTS.md) can sit behind an #ifdef without dragging in
-// this file's threading/globals/ab_capture dependencies. See that file's
-// header comment for the full byte-verified algorithm breakdown.
+// this file's threading/globals dependencies. See that file's header
+// comment for the full byte-verified algorithm breakdown.
 
 // Mirrors FUN_0003ec78 (0x3ec78, CONFIRMED): the third independent thread
 // pool. Below 2 chunks, calls the kernel synchronously; at 2+, spins up one
@@ -741,7 +730,6 @@ native_dispatch_plain_kernel(void** frame_slots,
                              WorkItem* item,
                              int frame_count) {
   int chunk_count = native_playback_chunk_count(item);
-  ab_capture_kernel(item, "plain", frame_count, chunk_count);
   native_playback_kernel_dispatch(
     playback_kernel_plain, frame_slots, item, frame_count, chunk_count);
 }
@@ -789,7 +777,6 @@ native_dispatch_aligned_kernel(void** frame_slots,
                                WorkItem* item,
                                int frame_count) {
   int chunk_count = native_playback_chunk_count(item);
-  ab_capture_kernel(item, "aligned", frame_count, chunk_count);
   native_playback_kernel_dispatch(
     playback_kernel_aligned, frame_slots, item, frame_count, chunk_count);
 }
@@ -894,12 +881,6 @@ native_advance_work_item_frames(WorkItem* item) {
     }
   }
 
-  // A/B harness: record the transient frames this advance just wrote (race-free
-  // - display thread only, right after the kernel returned). No-op unless
-  // SWTCON_AB_CAPTURE is set. This is the layer that caught the +0x44 bug.
-  if (dispatched && item->frameCursor != start_frame_cursor)
-    ab_capture_playback(item, start_frame_cursor, item->frameCursor);
-
   // Shared tail: cosmetic "fallen behind" warning, then bump targetFrame and
   // wake the worker thread if this item's cursor moved it forward - the
   // only place targetFrame is written, and how the (native) worker thread's
@@ -987,20 +968,7 @@ native_display_thread_func(void*) {
 
           int32_t gate_target = std::max(max_lifetime, queue->curFrame);
           if (cursor->nFrameCleanupCursor - gate_target > 6) {
-            // A/B toggle: set SWTCON_LIBDISPATCH=1 in the environment to route
-            // this call through the still-library dispatch_processed_regions
-            // instead of the native port, so the two can be diffed on identical
-            // input (how the +0x44 rebasing bug in native_commit_item was
-            // found - see that function). Read once, cached.
-            static const bool use_lib_dispatch =
-              (getenv("SWTCON_LIBDISPATCH") != nullptr);
-            bool dispatched =
-              use_lib_dispatch
-                ? native_dispatch_processed_regions(&batch->subList)
-                : native_dispatch_processed_regions_native(&batch->subList);
-
-            ab_capture_dispatch(
-              &batch->subList); // no-op unless SWTCON_AB_CAPTURE set
+            bool dispatched = native_dispatch_processed_regions_native(&batch->subList);
 
             if (dispatched) {
               int32_t target;

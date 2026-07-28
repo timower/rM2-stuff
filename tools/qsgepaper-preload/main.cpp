@@ -73,6 +73,19 @@ enum UpdateFlags {
 
 int main(int argc, char** argv) {
     install_segv_handler();
+
+    // No argument: run every test case (unchanged default behavior). "0":
+    // init only, skip the whole update block (same as the old
+    // SWTCON_INIT_ONLY env var, kept working below for compatibility). "N"
+    // (>=1): run only test case N, skipping every other one - added to let
+    // an A/B pan-capture comparison isolate a single test case, since the
+    // racy un-synced-overlap/active-dependency tests (cases 8 and 9) are
+    // the prime suspects for divergence that isn't a real bug, just
+    // real-time interleaving noise.
+    bool has_test_arg = argc > 1;
+    int selected_test = has_test_arg ? atoi(argv[1]) : -1;
+    auto should_run = [&](int n) { return !has_test_arg || selected_test == n; };
+
     uint16_t* image = swtcon_init();
     if (!image) {
         return 1;
@@ -85,7 +98,7 @@ int main(int argc, char** argv) {
         swtcon_dump_buffers();
     }
 
-    if (image) {
+    if (image && !getenv("SWTCON_INIT_ONLY") && selected_test != 0) {
         auto do_update = [&](update_data& req) {
             swtcon_lock();
             swtcon_update(&req);
@@ -95,6 +108,7 @@ int main(int argc, char** argv) {
             }
         };
 
+        if (should_run(1)) {
         std::cout << "Testing HQ" << std::endl;
         for (int y = 0; y < SCREEN_HEIGHT; y++) {
           for (int x = 0; x < SCREEN_WIDTH; x++) {
@@ -111,7 +125,9 @@ int main(int argc, char** argv) {
         TIME(do_update(req1));
         std::cout << "Done" << std::endl;
         getchar();
+        }
 
+        if (should_run(2)) {
         std::cout << "Testing medium" << std::endl;
         for (int y = 0; y < SCREEN_HEIGHT; y++) {
           for (int x = 0; x < SCREEN_WIDTH; x++) {
@@ -127,7 +143,9 @@ int main(int argc, char** argv) {
         TIME(do_update(req2));
         std::cout << "Done" << std::endl;
         getchar();
+        }
 
+        if (should_run(3)) {
         std::cout << "Clearing" << std::endl;
         for (int y = 0; y < SCREEN_HEIGHT; y++)
           for (int x = 0; x < SCREEN_WIDTH; x++)
@@ -137,6 +155,7 @@ int main(int argc, char** argv) {
         TIME(do_update(req3));
         std::cout << "Done" << std::endl;
         getchar();
+        }
 
         // --- Region-overlap coverage ---
         //
@@ -178,6 +197,7 @@ int main(int argc, char** argv) {
             swtcon_unlock_post();
         };
 
+        if (should_run(4)) {
         std::cout << "Overlap: two non-overlapping regions in one batch" << std::endl;
         fill_rect(0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, 0xFFFF);
         fill_rect(0, 0, 800, 600, 0x0);
@@ -188,7 +208,9 @@ int main(int argc, char** argv) {
         }));
         std::cout << "Done" << std::endl;
         getchar();
+        }
 
+        if (should_run(5)) {
         std::cout << "Overlap: hole punched in the middle of a pending region "
                      "(exercises all four split pieces)" << std::endl;
         fill_rect(0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, 0xFFFF);
@@ -200,7 +222,9 @@ int main(int argc, char** argv) {
         }));
         std::cout << "Done" << std::endl;
         getchar();
+        }
 
+        if (should_run(6)) {
         std::cout << "Overlap: single-edge overlap (exercises exactly one "
                      "split piece)" << std::endl;
         fill_rect(0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, 0xFFFF);
@@ -212,7 +236,9 @@ int main(int argc, char** argv) {
         }));
         std::cout << "Done" << std::endl;
         getchar();
+        }
 
+        if (should_run(7)) {
         std::cout << "Overlap: second region fully contains the first "
                      "(exercises full-containment removal, zero pieces)" << std::endl;
         fill_rect(0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, 0xFFFF);
@@ -224,7 +250,9 @@ int main(int argc, char** argv) {
         }));
         std::cout << "Done" << std::endl;
         getchar();
+        }
 
+        if (should_run(8)) {
         std::cout << "Overlap: burst of un-synced overlapping updates "
                      "(best-effort coverage of clipping against not-yet-"
                      "claimed queued batches, races the worker thread)" << std::endl;
@@ -248,12 +276,14 @@ int main(int argc, char** argv) {
         swtcon_wait();
         std::cout << "Done" << std::endl;
         getchar();
+        }
 
         // --- Playback-kernel coverage (see AGENTS.md's FUN_0004a140/
         // FUN_0004a234 next-step and swtcon-ab-test's KERN capture, which
         // found the tests above never exercise the "plain" kernel or
         // chunk_count=1) ---
 
+        if (should_run(9)) {
         std::cout << "Overlap: in-flight active dependency (both items "
                      "FullRefresh, neither Sync) forcing the second item "
                      "onto the 'plain' playback kernel (0x4a140) instead of "
@@ -274,7 +304,9 @@ int main(int argc, char** argv) {
         swtcon_wait();
         std::cout << "Done" << std::endl;
         getchar();
+        }
 
+        if (should_run(10)) {
         std::cout << "Overlap: small isolated rect (area well under 20000px) "
                      "-> forces native_playback_chunk_count's synchronous "
                      "chunk_count=1 dispatch path, never exercised by the "
@@ -290,6 +322,7 @@ int main(int argc, char** argv) {
         TIME(do_batch({ rect_req(100, 100, 180, 180, HQ, 9) }));
         std::cout << "Done" << std::endl;
         getchar();
+        }
     }
 
     // Memory will be cleaned up by OS, skipping destroy for this test tool.

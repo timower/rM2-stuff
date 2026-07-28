@@ -13,6 +13,12 @@ target_link_libraries(${PROJECT_NAME} PRIVATE linux::mxcfb)
 
 add_executable(fb-dump dump.cpp)
 
+# Diffs two SWTCON_PAN_CAPTURE dumps produced by libioctl-dump.so's
+# capture_pan (main.cpp) - the black-box A/B check for SWTCON_LIBIMPL, run
+# the same way as swtcon-ab-test --compare (on-target/emulator, via ssh - see
+# CLAUDE.md's Building and Testing section).
+add_executable(pan-capture-compare pan_capture_compare.cpp)
+
 install(
   TARGETS ioctl-dump
   COMPONENT ioctl-dump

@@ -68,6 +68,19 @@ swtcon_runtime_offset() {
   return g_runtime_offset;
 }
 
+// This probe doesn't link swtcon.cpp (see CMakeLists.txt), which normally
+// owns these - it never uses SWTCON_LIBIMPL library mode, so a
+// permanently-false/null stub is enough to satisfy native_update.cpp's link
+// requirements.
+bool
+swtcon_lib_impl_enabled() {
+  return false;
+}
+void (*qsgepaper_lock)() = nullptr;
+void (*qsgepaper_update)(update_data*) = nullptr;
+void (*qsgepaper_unlock_post)() = nullptr;
+void (*qsgepaper_wait)() = nullptr;
+
 static uintptr_t
 load_library() {
   void* handle = dlopen("/usr/lib/plugins/scenegraph/libqsgepaper.so", RTLD_NOW | RTLD_GLOBAL);

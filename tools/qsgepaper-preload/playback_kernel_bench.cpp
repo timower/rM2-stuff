@@ -76,6 +76,19 @@ swtcon_runtime_offset() {
   return g_runtime_offset;
 }
 
+// This bench doesn't link swtcon.cpp (see CMakeLists.txt), which normally
+// owns these - it never uses SWTCON_LIBIMPL library mode, so a
+// permanently-false/null stub is enough to satisfy native_update.cpp's link
+// requirements.
+bool
+swtcon_lib_impl_enabled() {
+  return false;
+}
+void (*qsgepaper_lock)() = nullptr;
+void (*qsgepaper_update)(update_data*) = nullptr;
+void (*qsgepaper_unlock_post)() = nullptr;
+void (*qsgepaper_wait)() = nullptr;
+
 static void
 segv_handler(int sig, siginfo_t* si, void* ucv) {
   auto* uc = (ucontext_t*)ucv;

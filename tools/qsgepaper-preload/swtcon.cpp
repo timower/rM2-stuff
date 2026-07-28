@@ -1,5 +1,7 @@
 #include "swtcon.h"
+#include "swtcon_libimpl.h"
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
 #include <fcntl.h>
@@ -26,6 +28,8 @@
 #define LOCK_ADDR 0x3b690
 #define UNLOCK_POST_ADDR 0x3dd90
 #define WAIT_ADDR 0x3b644
+#define FLASH_ADDR 0x3b4b4
+#define SHUTDOWN_ADDR 0x3b6b4
 
 typedef int (*init_func_t)(void* state_out, int zero);
 
@@ -45,6 +49,23 @@ void (*qsgepaper_lock)() = nullptr;
 void (*qsgepaper_update)(update_data*) = nullptr;
 void (*qsgepaper_unlock_post)() = nullptr;
 void (*qsgepaper_wait)() = nullptr;
+
+// EPFramebufferSwtcon::initialize (0x38e30) calls qsgepaper_init and then
+// this - the startup flash, blocking until it completes - before doing
+// anything else (see native_request_flash_and_wait's comment, which mirrors
+// this natively). Library mode needs to call it explicitly too: unlike the
+// other four, it isn't reached through any of the five public swtcon_*
+// entry points on its own.
+static void (*qsgepaper_flash)() = nullptr;
+
+// actualShutdown (0x3b6b4) - library mode calls this by address too, the
+// same way it calls init/lock/update/unlock_post/wait/flash, instead of
+// re-running the native shutdown reimplementation against the library's own
+// UpdateQueueGlobals via resolve_ptr. Confirmed via Ghidra decompile to be
+// exactly the sequence swtcon_shutdown's native branch below already
+// mirrors (drain queues, signal+join both threads, save statebuffer,
+// blank+free framebuffer/statebuffer/LUT, unlock pid file).
+static void (*qsgepaper_shutdown)(int) = nullptr;
 
 static void
 load_lib() {
@@ -76,11 +97,19 @@ load_lib() {
   qsgepaper_update = (void (*)(update_data*))(runtime_offset + UPDATE_ADDR);
   qsgepaper_unlock_post = (void (*)())(runtime_offset + UNLOCK_POST_ADDR);
   qsgepaper_wait = (void (*)())(runtime_offset + WAIT_ADDR);
+  qsgepaper_flash = (void (*)())(runtime_offset + FLASH_ADDR);
+  qsgepaper_shutdown = (void (*)(int))(runtime_offset + SHUTDOWN_ADDR);
 }
 
 uintptr_t
 swtcon_runtime_offset() {
   return runtime_offset;
+}
+
+bool
+swtcon_lib_impl_enabled() {
+  static const bool enabled = getenv("SWTCON_LIBIMPL") != nullptr;
+  return enabled;
 }
 
 extern void* g_pImageBufferNative;
@@ -97,12 +126,33 @@ extern struct fb_fix_screeninfo g_fbFixScreeninfoNative;
 
 uint16_t*
 swtcon_init() {
-  load_lib();
   std::cout << "swtcon_init: initialization sequence starting..." << std::endl;
 
-#if 1
-    // --- NATIVE INIT IMPLEMENTATION ---
-    if (native_create_pid_file() != 0) return nullptr;
+  if (swtcon_lib_impl_enabled()) {
+    load_lib();
+
+    char state[256];
+    memset(state, 0, sizeof(state));
+
+    std::cout << "Initializing swtcon (library mode)..." << std::endl;
+    int init_res = qsgepaper_init(state, 0);
+    if (init_res != 0) {
+      std::cerr << "Error initializing swtcon, res: " << init_res << std::endl;
+      return nullptr;
+    }
+
+    // Matches EPFramebufferSwtcon::initialize's own call sequence (see
+    // qsgepaper_flash's comment) - native mode does the equivalent via
+    // native_request_flash_and_wait() at the end of its own init path below.
+    std::cout << "Requesting startup flash (library mode)..." << std::endl;
+    qsgepaper_flash();
+
+    uint16_t* image = *(uint16_t**)(state + 0x14);
+    return image;
+  }
+
+  // --- NATIVE INIT IMPLEMENTATION ---
+  if (native_create_pid_file() != 0) return nullptr;
 
     if (native_init_statebuffer() != 0) return nullptr;
 
@@ -238,21 +288,6 @@ swtcon_init() {
 
     std::cout << "swtcon_init: native initialization complete!" << std::endl;
     return (uint16_t*)g_pImageBufferNative;
-
-#else
-  char state[256];
-  memset(state, 0, sizeof(state));
-
-  std::cout << "Initializing swtcon..." << std::endl;
-  int init_res = qsgepaper_init(state, 0);
-  if (init_res != 0) {
-    std::cerr << "Error initializing swtcon, res: " << init_res << std::endl;
-    return nullptr;
-  }
-  uint16_t* image = *(uint16_t**)(state + 0x14);
-  return image;
-
-#endif
 }
 
 // Walk the waveform vector and print each LUT's metadata plus a checksum of
@@ -331,6 +366,16 @@ swtcon_dump_buffers() {
 
 void
 swtcon_shutdown(int state_ptr_or_zero) {
+  if (swtcon_lib_impl_enabled()) {
+    // Library mode: nothing native was ever allocated (swtcon_init never
+    // touched update_queue_globals()), so there's no native teardown to run
+    // - just call the library's own actualShutdown (0x3b6b4) by address,
+    // the same way every other public entry point does in this mode.
+    qsgepaper_shutdown(state_ptr_or_zero);
+    std::cout << "swtcon_shutdown: complete (library mode)." << std::endl;
+    return;
+  }
+
   std::cout << "swtcon_shutdown: waiting for updates to complete..."
             << std::endl;
 

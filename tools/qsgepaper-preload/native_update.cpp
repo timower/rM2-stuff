@@ -1,17 +1,14 @@
 #include "native_update.h"
 #include "native_init.h"
+#include "swtcon_libimpl.h"
 #include <cstring>
 #include <pthread.h>
 #include <semaphore.h>
 #include <unistd.h>
 #include <vector>
 
-// Set to 1 to use the native re-implementations of update/lock/unlock/wait;
-// 0 falls back to the library exports (for A/B comparison).
-#define NATIVE_UPDATE 1
-
 // Library exports resolved once at dlopen time (see swtcon.cpp's load_lib),
-// used only by the NATIVE_UPDATE==0 fallback below.
+// used only by the swtcon_lib_impl_enabled() fallback below.
 extern void (*qsgepaper_lock)();
 extern void (*qsgepaper_update)(update_data*);
 extern void (*qsgepaper_unlock_post)();
@@ -643,17 +640,20 @@ native_update_lut_is_valid(const SpRef& lut) {
 
 void
 swtcon_lock() {
-#if NATIVE_UPDATE
+  if (swtcon_lib_impl_enabled()) {
+    qsgepaper_lock();
+    return;
+  }
   // LockSwapMutex: take the update-queue mutex.
   pthread_mutex_lock(&update_queue_globals()->updateQueueMutex);
-#else
-  qsgepaper_lock();
-#endif
 }
 
 void
 swtcon_update(update_data* data) {
-#if NATIVE_UPDATE
+  if (swtcon_lib_impl_enabled()) {
+    qsgepaper_update(data);
+    return;
+  }
   auto* queue = update_queue_globals();
 
   alignas(16) WorkItem item;
@@ -731,14 +731,14 @@ swtcon_update(update_data* data) {
   release_sp(item.lut.ctrl);
   release_sp(item.regionRows.ctrl);
   (void)seq;
-#else
-  qsgepaper_update(data);
-#endif
 }
 
 void
 swtcon_unlock_post() {
-#if NATIVE_UPDATE
+  if (swtcon_lib_impl_enabled()) {
+    qsgepaper_unlock_post();
+    return;
+  }
   auto* queue = update_queue_globals();
 
   // Find the insertion point: walk backwards from the head, skipping batches
@@ -764,21 +764,18 @@ swtcon_unlock_post() {
 
   pthread_mutex_unlock(&queue->updateQueueMutex);
   sem_post(&queue->displayThreadSem); // wake the display thread
-#else
-  qsgepaper_unlock_post();
-#endif
 }
 
 void
 swtcon_wait() {
-#if NATIVE_UPDATE
+  if (swtcon_lib_impl_enabled()) {
+    qsgepaper_wait();
+    return;
+  }
   // WaitForUpdate: spin until shutdown or the batch queue drains.
   auto* queue = update_queue_globals();
   while (queue->shutdownRequested == 0 &&
          queue->listIncomingUpdates.next != &queue->listIncomingUpdates) {
     usleep(100);
   }
-#else
-  qsgepaper_wait();
-#endif
 }

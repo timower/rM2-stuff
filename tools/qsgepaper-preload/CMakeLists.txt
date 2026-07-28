@@ -13,7 +13,7 @@ project(qsgepaper-preload CXX ASM)
 set_source_files_properties(native_playback_kernel.cpp PROPERTIES COMPILE_OPTIONS "-O3")
 
 add_executable(qsgepaper-test main.cpp swtcon.cpp native_init.cpp native_update.cpp native_display.cpp
-                               native_playback_kernel.cpp ab_capture.cpp ./playback_kernel.s ./playback_kernel_aligned.s)
+                               native_playback_kernel.cpp ./playback_kernel.s ./playback_kernel_aligned.s)
 target_link_libraries(qsgepaper-test dl)
 
 # libqsgepaper.so was built against the C++11 std::string SSO ABI
@@ -43,14 +43,6 @@ add_executable(dispatch-processed-regions-probe dispatch_processed_regions_probe
 target_link_libraries(dispatch-processed-regions-probe dl)
 target_compile_definitions(dispatch-processed-regions-probe PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
 
-# A/B regression harness: runs a matrix of update sequences and captures the
-# transient drive stream so a native-vs-library (SWTCON_LIBDISPATCH) diff can
-# catch pipeline regressions the settled buffers miss - see ab_harness.cpp.
-add_executable(swtcon-ab-test ab_harness.cpp swtcon.cpp native_init.cpp native_update.cpp native_display.cpp
-                               native_playback_kernel.cpp ab_capture.cpp ./playback_kernel.s ./playback_kernel_aligned.s)
-target_link_libraries(swtcon-ab-test dl)
-target_compile_definitions(swtcon-ab-test PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
-
 # Empirical probe for the two worker-side playback kernels (still-library,
 # the last remaining by-address calls in the pipeline) - see
 # playback_kernel_probe.cpp's header comment.
@@ -63,13 +55,12 @@ target_compile_definitions(playback-kernel-probe PRIVATE _GLIBCXX_USE_CXX11_ABI=
 # compute cost in isolation and, where the library is available, against the
 # real NEON FUN_0004a140/FUN_0004a234 - see playback_kernel_bench.cpp's header
 # comment. Links native_display.cpp (for the surrounding dispatch code) and
-# native_playback_kernel.cpp (the kernel itself) plus their ab_capture.cpp
-# dependency; deliberately does NOT link swtcon.cpp - it
-# defines its own minimal swtcon_runtime_offset(), same as
+# native_playback_kernel.cpp (the kernel itself); deliberately does NOT link
+# swtcon.cpp - it defines its own minimal swtcon_runtime_offset(), same as
 # playback_kernel_probe.cpp, to dlopen the library independently rather than
 # through swtcon.cpp's production load_lib() path.
 add_executable(playback-kernel-bench playback_kernel_bench.cpp native_init.cpp native_update.cpp
-                                      native_display.cpp native_playback_kernel.cpp ab_capture.cpp
+                                      native_display.cpp native_playback_kernel.cpp
                                       ./playback_kernel.s ./playback_kernel_aligned.s)
 target_link_libraries(playback-kernel-bench dl)
 target_compile_definitions(playback-kernel-bench PRIVATE _GLIBCXX_USE_CXX11_ABI=1)

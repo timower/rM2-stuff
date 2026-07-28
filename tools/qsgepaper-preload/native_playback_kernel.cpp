@@ -46,7 +46,7 @@
 // Split into its own translation unit (Phase 9, see AGENTS.md/CLAUDE.md) so a
 // NEON-vectorized fast path can live alongside the portable scalar one behind
 // an #ifdef, without dragging every other native_display.cpp dependency
-// (threads, globals, ab_capture, ...) into the same file.
+// (threads, globals, ...) into the same file.
 //
 // Non-static (extern, declared in native_display.h): tools/qsgepaper-preload/
 // playback_kernel_bench.cpp calls this directly to isolate the compute cost

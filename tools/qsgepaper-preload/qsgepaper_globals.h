@@ -178,9 +178,19 @@ frame_cursor_globals() {
 // g_nPidFdNative global instead, so native_unlock_pid_file reads that
 // directly rather than through here.
 
+// NOT zero-initialized in the real library: g_flCachedTemperature's initial
+// bytes in libqsgepaper.so's own data image are 0x41c80000 (25.0f), a
+// genuine initialized default (room temperature), not .bss. Confirmed via
+// Ghidra memory inspection at 0x66e20 after tracking down a real behavioral
+// divergence this got wrong - with 0.0f here, a sensor-read failure (which
+// happens on the emulator, no hwmon path) leaves the two sides selecting
+// different temperature-indexed waveform LUT entries (0C vs 25C bucket),
+// visible as a completely different phase count/content for the startup
+// flash waveform (149 phases vs ~99) even though everything else about the
+// flash sequence matches exactly.
 inline float*
 cached_temperature_ptr() {
-  static float t = 0.0f;
+  static float t = 25.0f;
   return &t;
 }
 

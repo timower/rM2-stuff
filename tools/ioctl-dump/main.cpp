@@ -1,6 +1,8 @@
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <string_view>
@@ -26,9 +28,79 @@ constexpr int fake_fd = 1337;
 constexpr int xres = 0x104;
 constexpr int yres = 0x580;
 // constexpr int bytes_per_pixel = 4;
+constexpr int line_length = 0x410; // matches FBIOGET_FSCREENINFO's answer below
+constexpr size_t frame_slot_bytes = (size_t)yres * line_length;
 
 bool inXochitl = false;
 void* globalMem = nullptr;
+
+// Black-box A/B comparison: rather than diffing internal swtcon state (which
+// requires native and library code to share process globals - see CLAUDE.md
+// Phase 7's note that the old SWTCON_LIBDISPATCH mid-pipeline splice is now
+// structurally defunct for that reason), hash exactly what gets sent to the
+// panel - both on FBIOPAN_DISPLAY *and* on a successful FBIOPUT_VSCREENINFO,
+// which also sets yoffset and is what native_pan_and_unblank (native_init.cpp)
+// actually uses for its pan, not FBIOPAN_DISPLAY - see capture_display's call
+// sites. Two completely independent process runs (native swtcon vs.
+// SWTCON_LIBIMPL=1) can be diffed purely by their emitted display sequence,
+// with no shared state needed at all. Gated on SWTCON_PAN_CAPTURE=<path>; a
+// no-op otherwise.
+uint32_t
+fnv1a(const void* data, size_t len) {
+  uint32_t h = 2166136261u;
+  const uint8_t* p = (const uint8_t*)data;
+  for (size_t i = 0; i < len; i++)
+    h = (h ^ p[i]) * 16777619u;
+  return h;
+}
+
+std::ofstream*
+pan_capture_stream() {
+  static std::ofstream* f = [] () -> std::ofstream* {
+    const char* path = getenv("SWTCON_PAN_CAPTURE");
+    if (!path)
+      return nullptr;
+    return new std::ofstream(path, std::ios::out | std::ios::trunc);
+  }();
+  return f;
+}
+
+void
+capture_display(uint32_t offset, uint32_t idx) {
+  auto* f = pan_capture_stream();
+  if (!f || !globalMem)
+    return;
+
+  size_t byte_off = (size_t)offset * line_length;
+  uint32_t hash = fnv1a((const uint8_t*)globalMem + byte_off, frame_slot_bytes);
+
+  // The ring slot index doesn't matter to the physical panel at all - it's
+  // just which memory address this particular display change happened to
+  // read from. What matters is the sequence of images actually shown, in
+  // order: every call here (FBIOPAN_DISPLAY, or a successful
+  // FBIOPUT_VSCREENINFO pan) displays whatever's in the target slot right
+  // now, so the perceptible "frame changed" event is exactly when that
+  // content differs from whatever the *immediately preceding* one showed -
+  // regardless of slot. (Per-slot dedup, tried first, was wrong: it
+  // collapsed "this slot's content changed since *that slot* was last
+  // read," which isn't the same as "the display changed since a moment
+  // ago" - two different slots showing genuinely different waveform-phase
+  // content back to back is normal, expected signal, not idle noise.)
+  static uint32_t last_shown_hash = 0;
+  static bool last_shown_valid = false;
+  static uint64_t seq = 0;
+
+  bool changed = !last_shown_valid || last_shown_hash != hash;
+  last_shown_hash = hash;
+  last_shown_valid = true;
+  if (!changed)
+    return;
+
+  *f << "PAN seq=" << seq++ << " idx=" << idx << " yoffset=0x" << std::hex
+     << offset << std::dec << " hash=" << std::hex << std::setw(8)
+     << std::setfill('0') << hash << std::dec << "\n";
+  f->flush();
+}
 
 int
 handleIOCTL(unsigned long request, char* ptr) {
@@ -88,6 +160,12 @@ handleIOCTL(unsigned long request, char* ptr) {
   if (request == FBIOPUT_VSCREENINFO) {
     std::cout << "Put info:\n"
               << std::hex << std::showbase << *(fb_var_screeninfo*)ptr << "\n";
+    // native_pan_and_unblank (native_init.cpp) sets the pan offset via THIS
+    // ioctl, not FBIOPAN_DISPLAY - the first frame of every unblank
+    // transition (init priming, every unblank-advance, the first frame of
+    // every flash cycle) would otherwise be invisible to capture_display.
+    auto offset = ((fb_var_screeninfo*)ptr)->yoffset;
+    capture_display(offset, offset / yres);
     return 0;
   }
 
@@ -101,6 +179,7 @@ handleIOCTL(unsigned long request, char* ptr) {
     auto idx = offset / yres;
     std::cout << "FBIOPAN: " << std::dec << std::setw(2) << idx << " "
               << std::hex << std::showbase << offset << "\n";
+    capture_display(offset, idx);
     return 0;
   }
 
