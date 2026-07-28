@@ -160,11 +160,10 @@ native_worker_thread_func(void*) {
     if (queue->flashRequested != 0) {
       float temp = native_get_current_temperature();
       std::shared_ptr<LUTEntry> lut_sp;
-      native_select_waveform_lut(
-        temp,
-        &lut_sp,
-        &queue->waveform,
-        /*mode=*/0);
+      native_select_waveform_lut(temp,
+                                 &lut_sp,
+                                 &queue->waveform,
+                                 /*mode=*/0);
 
       if (native_update_lut_is_valid(lut_sp)) {
         static const uint16_t kFlashPatterns[3] = { 0x0000, 0x5555, 0xaaaa };
@@ -331,7 +330,8 @@ native_commit_item(WorkItem* item) {
   // before this fix.)
   auto* regionRows = item->regionRows.get();
   const uint8_t* pixelBuf =
-    regionRows ? (const uint8_t*)(uintptr_t)(uint32_t)item->pixelDataPtr : nullptr;
+    regionRows ? (const uint8_t*)(uintptr_t)(uint32_t)item->pixelDataPtr
+               : nullptr;
   int pixelStride = regionRows ? regionRows->stride : 0;
   uint16_t* state = (uint16_t*)g_pStateBufferNative;
   bool force = item->sync != 0;
@@ -393,7 +393,8 @@ native_commit_item(WorkItem* item) {
         newState[lane] = effective_new;
         packedVal[lane] =
           skip ? 0x0400 : (uint16_t)((old << 5) | effective_new);
-        transitionBuf[(size_t)strideRows * localCol + localRow] = packedVal[lane];
+        transitionBuf[(size_t)strideRows * localCol + localRow] =
+          packedVal[lane];
         if (!skip)
           groupChanged = true;
       }
@@ -422,8 +423,9 @@ native_commit_item(WorkItem* item) {
   // still hold the seed origin the buffer was laid out with; transitionBuf
   // is indexed with strideRows*(col-seedX0)+(row-seedY0), so the narrowed
   // rect starts at strideRows*(outX0-seedX0)+(outY0-seedY0) into it.
-  item->transitionDataPtr = transitionBuf + (size_t)strideRows * (outX0 - rr->x0) +
-                           (size_t)(outY0 - rr->y0);
+  item->transitionDataPtr = transitionBuf +
+                            (size_t)strideRows * (outX0 - rr->x0) +
+                            (size_t)(outY0 - rr->y0);
   return true;
 }
 
@@ -646,14 +648,6 @@ native_playback_chunk_count(const WorkItem* item) {
   return 1;
 }
 
-extern "C" void
-playback_kernel_plain(void** frame_slots, WorkItem* item, int frame_count, int chunk_index,
-                              int chunk_count) ;
-
-extern "C" void
-playback_kernel_aligned(void** frame_slots, WorkItem* item, int frame_count, int chunk_index,
-                              int chunk_count) ;
-
 // Mirrors FUN_0003f294 (0x3f294, "plain" kernel wrapper - CONFIRMED): picks
 // the chunk count and dispatches through FUN_0003ec78 with the "plain"
 // kernel - playback_kernel_plain (playback_kernel.s), a direct assembly
@@ -669,7 +663,7 @@ native_dispatch_plain_kernel(void** frame_slots,
                              int frame_count) {
   int chunk_count = native_playback_chunk_count(item);
   native_playback_kernel_dispatch(
-    playback_kernel_plain, frame_slots, item, frame_count, chunk_count);
+    native_playback_kernel_plain, frame_slots, item, frame_count, chunk_count);
 }
 
 // Mirrors FUN_0003f1f0 (0x3f1f0, the "aligned" kernel wrapper - CONFIRMED):
@@ -715,8 +709,11 @@ native_dispatch_aligned_kernel(void** frame_slots,
                                WorkItem* item,
                                int frame_count) {
   int chunk_count = native_playback_chunk_count(item);
-  native_playback_kernel_dispatch(
-    playback_kernel_aligned, frame_slots, item, frame_count, chunk_count);
+  native_playback_kernel_dispatch(native_playback_kernel_aligned,
+                                  frame_slots,
+                                  item,
+                                  frame_count,
+                                  chunk_count);
 }
 
 // Mirrors advance_work_item_frames (0x3a984) byte-exactly, re-derived
@@ -772,8 +769,8 @@ native_advance_work_item_frames(WorkItem* item) {
     if (!int_list_empty) {
       int32_t bound = 0x7ffffffe;
       for (auto* other : item->deps) {
-        bool other_settled = other->deps.empty() &&
-                             (other->phase < other->lutWidthMinus1);
+        bool other_settled =
+          other->deps.empty() && (other->phase < other->lutWidthMinus1);
         if (other_settled)
           bound = std::min(bound, other->frameCursor - 1);
       }
@@ -880,15 +877,16 @@ native_display_thread_func(void*) {
             bool skip = item.sync == 0 && other->sync == 0 &&
                         item.fullRefresh != 0 && other->fullRefresh != 0;
             if (!skip)
-              item_max = std::max(item_max,
-                                  other->frameAnchor + other->lutWidthMinus1);
+              item_max =
+                std::max(item_max, other->frameAnchor + other->lutWidthMinus1);
           }
           max_lifetime = std::max(max_lifetime, item_max);
         }
 
         int32_t gate_target = std::max(max_lifetime, queue->curFrame);
         if (cursor->nFrameCleanupCursor - gate_target > 6) {
-          bool dispatched = native_dispatch_processed_regions_native(batch.subList);
+          bool dispatched =
+            native_dispatch_processed_regions_native(batch.subList);
 
           if (dispatched) {
             int32_t target;
@@ -898,8 +896,7 @@ native_display_thread_func(void*) {
               int32_t min_x0 = INT32_MAX;
               for (auto& item : batch.subList) {
                 int32_t width = 0, height = 0;
-                if (item.rectY0 <= item.rectY1 &&
-                    item.rectX0 <= item.rectX1) {
+                if (item.rectY0 <= item.rectY1 && item.rectX0 <= item.rectX1) {
                   height = item.rectY1 - item.rectY0 + 1;
                   width = item.rectX1 - item.rectX0 + 1;
                 }

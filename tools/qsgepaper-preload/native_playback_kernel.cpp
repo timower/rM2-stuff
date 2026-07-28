@@ -6,13 +6,24 @@
 #include "native_init.h"   // LUTEntry
 #include "native_update.h" // WorkItem, RegionRows
 
+#define KERNEL_MODE_C 1
+#define KERNEL_MODE_ASM 2
+#define KERNEL_MODE_NEON 3
+
+#define KERNEL_MODE KERNEL_MODE_ASM
+
+#if KERNEL_MODE == KERNEL_MODE_NEON && !defined(__ARM_NEON) &&                 \
+  !defined(__ARM_NEON__)
+#error "Unsupported kernel mode"
+#endif
+
 // Native reimplementation of FUN_0004a140 (0x4a140, the "plain" playback
-// kernel) - fully reversed via tools/qsgepaper-preload/playback_kernel_probe.cpp
-// (isolated by-address calls against the real library with guard-paged
-// buffers, cross-checked against its Ghidra decompile - see AGENTS.md). For
-// each column in [rectX0,rectX1] restricted to this call's
-// [chunkIndex,chunkCount) column sub-range, and each 8-row group in
-// [rectY0,rectY1]:
+// kernel) - fully reversed via
+// tools/qsgepaper-preload/playback_kernel_probe.cpp (isolated by-address calls
+// against the real library with guard-paged buffers, cross-checked against its
+// Ghidra decompile - see AGENTS.md). For each column in [rectX0,rectX1]
+// restricted to this call's [chunkIndex,chunkCount) column sub-range, and each
+// 8-row group in [rectY0,rectY1]:
 //   - fetches each of the group's 8 rows' packed LUT word ONCE (word_idx =
 //     phase/8, indexed using the row's own transition value - the raw
 //     transitionDataPtr u16, used DIRECTLY as the LUT's (row*mode_width+col)
@@ -29,10 +40,11 @@
 //   - for k in [0,frameCount): ORs shared-buffer entry (phase&7)+k into
 //     frameSlots[k] at the SAME destination address (only the target buffer
 //     differs per k). This is why frameCount 1-8 all reduce to the same
-//     per-column/per-group computation done once: native_advance_work_item_frames
-//     always picks frameCount so phase&7+frameCount never crosses the
-//     8-sub-phase boundary of a single LUT word (confirmed: case 2's
-//     decompile does one shared LUT fetch, not two independent ones).
+//     per-column/per-group computation done once:
+//     native_advance_work_item_frames always picks frameCount so
+//     phase&7+frameCount never crosses the 8-sub-phase boundary of a single LUT
+//     word (confirmed: case 2's decompile does one shared LUT fetch, not two
+//     independent ones).
 // Destination byte offset from frameSlots[k]'s base (probe-verified across
 // single/multi-group rects and multi-column chunk ranges):
 //   ((col+3)*0x104 + (rectY0>>3) + group + 0x1a) * 4
@@ -96,7 +108,7 @@
 // Verified via tools/qsgepaper-preload/playback_kernel_bench.cpp and the
 // swtcon-ab-test A/B harness (native builds are deterministic and
 // self-consistent regardless of which path compiled in).
-#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#if KERNEL_MODE == KERNEL_MODE_NEON
 #define SWTCON_PLAYBACK_KERNEL_NEON 1
 #include <arm_neon.h>
 
@@ -107,7 +119,8 @@ compute_shared_subphase_words(const uint16_t lut_words[8], uint16_t shared[8]) {
   // right) - the same constant vector for every row, matching the real
   // kernel loading it once (d8/d9 from a literal pool) and reusing it
   // across all 8 rows.
-  static const int16_t kExtractShiftAmounts[8] = {0, -2, -4, -6, -8, -10, -12, -14};
+  static const int16_t kExtractShiftAmounts[8] = { 0,  -2,  -4,  -6,
+                                                   -8, -10, -12, -14 };
   const int16x8_t extract_shift = vld1q_s16(kExtractShiftAmounts);
   const uint16x8_t three = vdupq_n_u16(3);
   uint16x8_t acc = vdupq_n_u16(0);
@@ -120,17 +133,17 @@ compute_shared_subphase_words(const uint16_t lut_words[8], uint16_t shared[8]) {
   // for it either), so it gets its own macro rather than a `shift == 0`
   // branch inside a single one - `vshlq_n_u16(x, 0)` isn't guaranteed to be
   // a valid immediate on every NEON intrinics header.
-#define SWTCON_PLAYBACK_ROW(r, shift)                                      \
-  do {                                                                     \
-    uint16x8_t rep = vld1q_dup_u16(&lut_words[r]);                         \
-    uint16x8_t extracted = vandq_u16(vshlq_u16(rep, extract_shift), three); \
-    acc = vaddq_u16(acc, vshlq_n_u16(extracted, shift));                   \
+#define SWTCON_PLAYBACK_ROW(r, shift)                                          \
+  do {                                                                         \
+    uint16x8_t rep = vld1q_dup_u16(&lut_words[r]);                             \
+    uint16x8_t extracted = vandq_u16(vshlq_u16(rep, extract_shift), three);    \
+    acc = vaddq_u16(acc, vshlq_n_u16(extracted, shift));                       \
   } while (0)
-#define SWTCON_PLAYBACK_ROW_NOSHIFT(r)                                     \
-  do {                                                                     \
-    uint16x8_t rep = vld1q_dup_u16(&lut_words[r]);                         \
-    uint16x8_t extracted = vandq_u16(vshlq_u16(rep, extract_shift), three); \
-    acc = vaddq_u16(acc, extracted);                                       \
+#define SWTCON_PLAYBACK_ROW_NOSHIFT(r)                                         \
+  do {                                                                         \
+    uint16x8_t rep = vld1q_dup_u16(&lut_words[r]);                             \
+    uint16x8_t extracted = vandq_u16(vshlq_u16(rep, extract_shift), three);    \
+    acc = vaddq_u16(acc, extracted);                                           \
   } while (0)
   SWTCON_PLAYBACK_ROW(0, 14);
   SWTCON_PLAYBACK_ROW(1, 12);
@@ -145,7 +158,7 @@ compute_shared_subphase_words(const uint16_t lut_words[8], uint16_t shared[8]) {
 
   vst1q_u16(shared, acc);
 }
-#else
+#elif KERNEL_MODE == KERNEL_MODE_C
 #define SWTCON_PLAYBACK_KERNEL_NEON 0
 
 static inline void
@@ -163,9 +176,14 @@ compute_shared_subphase_words(const uint16_t lut_words[8], uint16_t shared[8]) {
 }
 #endif
 
+#if KERNEL_MODE != KERNEL_MODE_ASM
+
 void
-native_playback_kernel_plain(void** frame_slots, WorkItem* item, int frame_count, int chunk_index,
-                              int chunk_count) {
+native_playback_kernel_plain(void** frame_slots,
+                             WorkItem* item,
+                             int frame_count,
+                             int chunk_index,
+                             int chunk_count) {
   if (item->rectY1 < item->rectY0 || item->rectX1 < item->rectX0)
     return;
 
@@ -173,10 +191,11 @@ native_playback_kernel_plain(void** frame_slots, WorkItem* item, int frame_count
   if (num_groups == 0)
     return;
 
-  int span = item->rectX1 - item->rectX0;  // 0-based, inclusive
+  int span = item->rectX1 - item->rectX0; // 0-based, inclusive
   int chunk_width = (span + 1) / chunk_count;
   int col_lo = chunk_width * chunk_index;
-  int col_hi = (chunk_index != chunk_count - 1) ? (chunk_width - 1 + col_lo) : span;
+  int col_hi =
+    (chunk_index != chunk_count - 1) ? (chunk_width - 1 + col_lo) : span;
 
   const auto* lut = item->lut.get();
   const uint16_t* lut_data = (const uint16_t*)lut->data;
@@ -204,7 +223,8 @@ native_playback_kernel_plain(void** frame_slots, WorkItem* item, int frame_count
     // rather than re-deriving it via multiplication per group (see
     // AGENTS.md's Phase 9 entry on FUN_0004a140's case-8 handler); a running
     // accumulator gets the same effect without needing a scratch array.
-    size_t byte_off = (size_t)((col + 3) * 0x104 + (item->rectY0 >> 3) + 0x1a) * 4;
+    size_t byte_off =
+      (size_t)((col + 3) * 0x104 + (item->rectY0 >> 3) + 0x1a) * 4;
 
     for (int g = 0; g < num_groups; g++, byte_off += 4) {
       int row_base = item->rectY0 + g * 8;
@@ -261,3 +281,50 @@ native_playback_kernel_plain(void** frame_slots, WorkItem* item, int frame_count
     }
   }
 }
+void
+native_playback_kernel_aligned(void** frame_slots,
+                               WorkItem* item,
+                               int frame_count,
+                               int chunk_index,
+                               int chunk_count) {
+  native_playback_kernel_plain(
+    frame_slots, item, frame_count, chunk_index, chunk_count);
+}
+
+#else
+
+extern "C" void
+playback_kernel_plain(void** frame_slots,
+                      WorkItem* item,
+                      int frame_count,
+                      int chunk_index,
+                      int chunk_count);
+
+extern "C" void
+playback_kernel_aligned(void** frame_slots,
+                        WorkItem* item,
+                        int frame_count,
+                        int chunk_index,
+                        int chunk_count);
+
+void
+native_playback_kernel_plain(void** frame_slots,
+                             WorkItem* item,
+                             int frame_count,
+                             int chunk_index,
+                             int chunk_count) {
+  playback_kernel_plain(
+    frame_slots, item, frame_count, chunk_index, chunk_count);
+}
+
+void
+native_playback_kernel_aligned(void** frame_slots,
+                               WorkItem* item,
+                               int frame_count,
+                               int chunk_index,
+                               int chunk_count) {
+  playback_kernel_aligned(
+    frame_slots, item, frame_count, chunk_index, chunk_count);
+}
+
+#endif
