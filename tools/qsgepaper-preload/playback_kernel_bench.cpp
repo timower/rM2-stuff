@@ -55,18 +55,16 @@
 // coincidence).
 constexpr size_t kFrameSlotBytes = 0x165800;
 
-// SCREEN_WIDTH/SCREEN_HEIGHT (swtcon_architecture.md §6.2 step 2) - the
-// largest rect any single WorkItem can ever cover (a full-panel HQ refresh).
-constexpr int kScreenWidth = 1404;
-constexpr int kScreenHeight = 1872;
-
-// The panel's own per-frame-tick pacing period, in microseconds - the two
-// pacing-target constants (11761/23523 - one and two ticks) in
-// native_display.cpp's display_thread_func port. Not this kernel's own
-// budget (the whole pipeline - dispatch, both kernels, panning - shares it
-// across however many in-flight items there are), but the only concrete
-// real-time deadline in this codebase to size "is this fast enough" against.
-constexpr double kPanelFrameTickUs = 11761.0;
+// kScreenWidth/kScreenHeight (the largest rect any single WorkItem can ever
+// cover - a full-panel HQ refresh, swtcon_architecture.md §6.2 step 2) and
+// kPanelFrameTickUs both live in qsgepaper_globals.h now, shared with
+// native_display.cpp's display_thread_func pacing-target formula (which
+// used to re-hardcode its own copies of the latter). This comment on
+// kPanelFrameTickUs is kept here since this is still the file that explains
+// what the constant is FOR in benchmark terms: not this kernel's own budget
+// (the whole pipeline - dispatch, both kernels, panning - shares it across
+// however many in-flight items there are), but the only concrete real-time
+// deadline in this codebase to size "is this fast enough" against.
 
 typedef void (*PlaybackKernelFn)(void**, WorkItem*, int, int, int);
 

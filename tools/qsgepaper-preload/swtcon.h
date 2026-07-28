@@ -2,10 +2,10 @@
 #include <stdint.h>
 
 struct update_data {
-    int y;
-    int x;
-    int height;
-    int width;
+    int y0;
+    int x0;
+    int y1; // was misleadingly named "height" - it's the bottom-right corner's y, not a size
+    int x1; // was misleadingly named "width" - it's the bottom-right corner's x, not a size
     int flags;
     int update_mode;
     int zero;

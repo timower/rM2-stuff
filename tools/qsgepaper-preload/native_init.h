@@ -17,6 +17,25 @@ struct LUTEntry {
     ~LUTEntry();
 };
 
+// Sizes of the fixed, single-instance buffers native_init_statebuffer/
+// native_init_lut allocate - each is duplicated (as a raw literal) at every
+// site that (re)allocates, fills, or checksums that buffer, so this is the
+// one place all of them should read from. `kStatebufferSize` doubles as the
+// 16-bit image buffer's size (g_pImageBufferNative) since both are
+// kScreenWidth*kScreenHeight 16-bit-per-pixel buffers - see
+// native_init_statebuffer's own comment for which is which.
+constexpr size_t kStatebufferSize = (size_t)kScreenWidth * kScreenHeight * 2;
+constexpr size_t kGammaTableSize = 0x4400;    // == 128 temperature entries * 0x88 bytes
+constexpr size_t kLutBlobSize = 0x165800;     // one full frame slot's worth (bitsPerPixel*xres*yres/8, see FbInitParams in swtcon.cpp)
+
+// The neutral per-pixel statebuffer fill (native_init_statebuffer,
+// native_reset_statebuffer_neutral): each 32-bit word packs two identical
+// 16-bit "state = 0x001e" pixels, NOT a byte-wise 0x1e fill (memset(0x1e)
+// would produce per-pixel state 0x1e1e instead and corrupt every waveform
+// transition the render kernels compute - a real bug this codebase hit
+// once, see native_init_statebuffer's comment).
+constexpr uint32_t kNeutralStateWord = 0x001e001e;
+
 struct ModeEntry {
     std::string name;
     std::vector<std::shared_ptr<LUTEntry>> luts;

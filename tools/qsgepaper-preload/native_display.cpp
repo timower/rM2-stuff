@@ -56,7 +56,7 @@ static void
 pan_and_advance_frame(UpdateQueueGlobals* queue,
                       FrameCursorGlobals* cursor,
                       bool unblank) {
-  int frame_idx = queue->curFrame % 16;
+  int frame_idx = queue->curFrame % kFrameSlotRingCount;
   if (unblank)
     native_pan_and_unblank(frame_idx);
   else
@@ -81,8 +81,8 @@ native_worker_thread_func(void*) {
     // stamp timing (no curFrame advance - the panel isn't showing a new
     // frame yet, just being kept alive).
     if (!native_is_fb_blanked()) {
-      native_pan_to_frame(16);
-      native_pan_to_frame(16);
+      native_pan_to_frame(kInitFrameSlotIndex);
+      native_pan_to_frame(kInitFrameSlotIndex);
       pthread_mutex_lock(&queue->displayTimingMutex);
       stamp_last_pan_timestamp(queue);
       cursor->nLastPannedFrame = queue->curFrame - 1;
@@ -179,7 +179,7 @@ native_worker_thread_func(void*) {
           native_pan_to_frame(
             (int)native_read_lut_packed_pixel(lut, 0, 0, phase));
         native_pan_to_frame(0);
-        native_pan_to_frame(16);
+        native_pan_to_frame(kInitFrameSlotIndex);
         native_blank_fb();
         for (int i = 0; i < 3; i++)
           native_upload_lut_to_frame_slot(native_frame_buffer_addr(i));
@@ -244,9 +244,6 @@ native_request_flash_and_wait() {
 
 extern void* g_pStateBufferNative;
 
-constexpr int kScreenWidth = 1404;
-constexpr int kScreenHeight = 1872;
-
 // Native reimplementation of the display-commit kernels FUN_0004f8f0
 // (item.sync==0, "incremental") / FUN_0004e680 (sync!=0, "force") - see
 // swtcon_architecture.md §6.3 for the confirmed per-pixel formula (derived
@@ -272,9 +269,8 @@ static bool
 native_commit_item(WorkItem* item) {
   int rows = item->rectY1 - item->rectY0 + 1;
   int cols = item->rectX1 - item->rectX0 + 1;
-  int strideRows =
-    (rows + 0xf) &
-    ~0xf; // round_up(rows, 16), same as regionRows/pixelTransitions convention
+  int strideRows = (rows + kRegionRowsStrideAlign - 1) &
+                   ~(kRegionRowsStrideAlign - 1); // round_up(rows, 16)
 
   auto* rr = new RegionRows{};
   rr->y0 = item->rectY0;
@@ -347,10 +343,11 @@ native_commit_item(WorkItem* item) {
         uint16_t new_raw =
           pixelBuf ? pixelBuf[(int64_t)localCol * pixelStride + localRow] : 0;
         uint16_t old = state[(size_t)col * kScreenHeight + row];
-        bool is_sentinel = new_raw == 0x20;
+        bool is_sentinel = new_raw == kGatedPixelSentinel;
         uint16_t effective_new = is_sentinel ? old : new_raw;
-        uint16_t packed =
-          is_sentinel ? 0x0400 : (uint16_t)((old << 5) | effective_new);
+        uint16_t packed = is_sentinel
+                             ? kPixelTransitionUnchanged
+                             : (uint16_t)((old << kPixelTransitionShift) | effective_new);
         transitionBuf[(size_t)strideRows * localCol + localRow] = packed;
         state[(size_t)col * kScreenHeight + row] = effective_new;
       }
@@ -385,14 +382,14 @@ native_commit_item(WorkItem* item) {
         uint16_t new_raw =
           pixelBuf ? pixelBuf[(int64_t)localCol * pixelStride + localRow] : 0;
         uint16_t old = state[(size_t)col * kScreenHeight + row];
-        bool is_sentinel = new_raw == 0x20;
+        bool is_sentinel = new_raw == kGatedPixelSentinel;
         bool unchanged = new_raw == old;
         bool skip = is_sentinel || unchanged;
         uint16_t effective_new = skip ? old : new_raw;
 
         newState[lane] = effective_new;
-        packedVal[lane] =
-          skip ? 0x0400 : (uint16_t)((old << 5) | effective_new);
+        packedVal[lane] = skip ? kPixelTransitionUnchanged
+                                : (uint16_t)((old << kPixelTransitionShift) | effective_new);
         transitionBuf[(size_t)strideRows * localCol + localRow] =
           packedVal[lane];
         if (!skip)
@@ -508,8 +505,9 @@ native_stale_row_cleanup() {
   uint8_t* dirty_gate = backbuffer_dirty_gate();
   int32_t last_panned = cursor->nLastPannedFrame;
 
-  for (int32_t i = cursor->nFrameCleanupCursor - 15; i <= last_panned; i++) {
-    int32_t bucket = i % 16;
+  for (int32_t i = cursor->nFrameCleanupCursor - (kFrameSlotRingCount - 1);
+       i <= last_panned; i++) {
+    int32_t bucket = i % kFrameSlotRingCount;
     uint8_t* row = dirty_gate + (int64_t)bucket * kDirtyGateRowBytes;
     void* frame_slot = native_frame_buffer_addr(bucket);
 
@@ -518,7 +516,7 @@ native_stale_row_cleanup() {
         native_copy_init_frame_row(frame_slot, col);
     }
     memset(row, 0, kDirtyGateRowBytes);
-    cursor->nFrameCleanupCursor = i + 16;
+    cursor->nFrameCleanupCursor = i + kFrameSlotRingCount;
   }
 }
 
@@ -748,7 +746,8 @@ native_advance_work_item_frames(WorkItem* item) {
 
   void* frame_slots[8];
   for (int i = 0; i < 8; i++)
-    frame_slots[i] = native_frame_buffer_addr((start_frame_cursor + i) % 16);
+    frame_slots[i] =
+      native_frame_buffer_addr((start_frame_cursor + i) % kFrameSlotRingCount);
 
   int32_t budget = cursor->nFrameCleanupCursor - start_frame_cursor + 1;
 
@@ -802,7 +801,7 @@ native_advance_work_item_frames(WorkItem* item) {
     uint8_t* dirty_gate = backbuffer_dirty_gate();
     auto* transitions = item->pixelTransitions.get();
     for (int32_t f = start_frame_cursor; f != item->frameCursor; f++) {
-      uint8_t* row = dirty_gate + (int64_t)(f % 16) * kDirtyGateRowBytes;
+      uint8_t* row = dirty_gate + (int64_t)(f % kFrameSlotRingCount) * kDirtyGateRowBytes;
       for (int32_t col = transitions->x0; col <= transitions->x1; col++)
         row[col] = 1;
     }
@@ -904,8 +903,8 @@ native_display_thread_func(void*) {
                 min_x0 = std::min(min_x0, item.rectX0);
               }
               int32_t budget = (int32_t)workload_sum + 100;
-              int32_t pace_target =
-                (int32_t)(((int64_t)min_x0 + 1) * 0x1d96 / 1000);
+              int32_t pace_target = (int32_t)(((int64_t)min_x0 + 1) *
+                                              kColumnPaceUsPerColumnX1000 / 1000);
 
               pthread_mutex_lock(&queue->displayTimingMutex);
               struct timespec now;
@@ -920,7 +919,7 @@ native_display_thread_func(void*) {
                 (now.tv_nsec - queue->lastPanTimestamp.tv_nsec) / 1000;
               pthread_mutex_unlock(&queue->displayTimingMutex);
 
-              if (elapsed_us > 11762) {
+              if (elapsed_us > (int64_t)kPanelFrameTickUs + 1) {
                 elapsed_us = 0;
                 base_frame += 1;
               }
@@ -928,9 +927,9 @@ native_display_thread_func(void*) {
               int32_t diff = pace_target - (int32_t)elapsed_us;
               if (budget < diff)
                 target = base_frame;
-              else if (budget - diff <= 11761)
+              else if (budget - diff <= (int32_t)kPanelFrameTickUs)
                 target = base_frame + 1;
-              else if (budget - diff <= 23523)
+              else if (budget - diff <= (int32_t)kPanelFrameTickUs * 2 + 1)
                 target = base_frame + 2;
               else
                 target = queue->targetFrame;

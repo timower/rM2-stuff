@@ -168,8 +168,6 @@ int main(int argc, char** argv) {
         // hardware pass) so each later update's rect is clipped against the
         // earlier ones still sitting in the accumulation list.
         //
-        // update_data's "height"/"width" fields are actually the
-        // opposite-corner (y1/x1) coordinates, not sizes - see AGENTS.md.
         auto rect_req = [](int y0, int x0, int y1, int x1, int mode, int pixel_mode, int flags = 0) {
             return update_data{ y0, x0, y1, x1, flags, mode, 0, pixel_mode };
         };

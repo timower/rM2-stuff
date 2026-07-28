@@ -39,6 +39,30 @@ non_owning_sp(T* ptr) {
   return std::shared_ptr<T>(std::shared_ptr<void>(), ptr);
 }
 
+// The render kernel's "gated/inactive" pixel sentinel (native_render_kernel_
+// formula's case 7, native_update.cpp): the byte value render_update_kernel
+// writes into RegionRows::dataPtr for a pixel the backBuffer says is
+// inactive. native_commit_item later reads that same buffer back and
+// checks for this exact value to decide a pixel produced no real change -
+// the two checks must agree on this sentinel or a legitimately-computed
+// pixel value could be mistaken for "nothing happened here."
+constexpr uint16_t kGatedPixelSentinel = 0x20;
+
+// native_commit_item's packed-transition "unchanged" marker: written into
+// pixelTransitions instead of the real (oldState<<5)|newState packing
+// whenever a pixel didn't actually change (or was gated - see
+// kGatedPixelSentinel above). 0x0400 can never collide with a real packed
+// value since bit 10 is otherwise always 0 (state values are <=0x1f, and
+// 0x1f<<5 = 0x3e0, one bit short of bit 10).
+constexpr uint16_t kPixelTransitionUnchanged = 0x0400;
+
+// The bit width of one packed pixel state - see kPixelTransitionUnchanged's
+// packing formula, (oldState<<5)|newState, in native_commit_item
+// (native_display.cpp). NOT used to unpack: native_playback_kernel.cpp's LUT
+// index reads the raw packed u16 directly (see its own comment for why that
+// still lines up with this packing - only because mode_width==32 there).
+constexpr int kPixelTransitionShift = 5;
+
 // A work-item rect in the library's native {y0,x0,y1,x1} field order (see
 // WorkItem below).
 struct Rect {
@@ -46,7 +70,7 @@ struct Rect {
 };
 
 // The pre-clamp rect order swtcon_update builds from update_data's
-// x/y/width/height (see native_clamp_update_rect's comment for why this
+// x0/y0/x1/y1 (see native_clamp_update_rect's comment for why this
 // isn't the same axis order as Rect).
 struct XYRect {
   int32_t x0, y0, x1, y1;
@@ -72,6 +96,14 @@ struct RegionRows {
   int32_t size;
 };
 static_assert(sizeof(RegionRows) == 0x1c, "RegionRows layout drift");
+
+// The row-count alignment every RegionRows-shaped buffer's `stride` is
+// rounded up to (native_dispatch_update_regions's regionRows,
+// native_commit_item's pixelTransitions in native_display.cpp) - both
+// compute `round_up(rows, kRegionRowsStrideAlign)` independently, so this is
+// the one place that idiom should be named rather than re-spelled as a bare
+// `+0xf) & ~0xf` at each site.
+constexpr int32_t kRegionRowsStrideAlign = 16;
 
 // The library's internal "update work item", 0x5c bytes. Mirrors
 // update_item_ctor (0x3ffd0). Lives embedded at +8 inside a WorkItemNode.

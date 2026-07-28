@@ -145,10 +145,11 @@ native_update_item_ctor(WorkItem* item) {
 }
 
 // Native reimplementation of clamp_update_rect (0x4fc40). Input is
-// {x0,y0,x1,y1} (queue_update passes update_data's x/y/width/height reordered
-// this way - "width"/"height" are actually the opposite-corner coordinates,
-// not sizes: main.cpp's full-screen requests set them to SCREEN_WIDTH/
-// SCREEN_HEIGHT, matching the 1403/1871 constants below exactly). The
+// {x0,y0,x1,y1} (queue_update passes update_data's x0/y0/x1/y1 reordered
+// this way - update_data's x1/y1 are opposite-corner coordinates, not sizes,
+// hence the rename from the library's original "width"/"height" naming:
+// main.cpp's full-screen requests set them to SCREEN_WIDTH/SCREEN_HEIGHT,
+// matching the 1403/1871 constants below exactly). The
 // transform is an independent per-axis point reflection through
 // (SCREEN_HEIGHT-1, SCREEN_WIDTH-1) - i.e. it flips the rect into the
 // panel's 180-rotated hardware frame - with the y-axis rounded to 8-row
@@ -156,8 +157,8 @@ native_update_item_ctor(WorkItem* item) {
 // kernels. Output order is {y0,x0,y1,x1}.
 static Rect
 native_clamp_update_rect(const XYRect& in) {
-  constexpr int32_t kMaxY = 0x74f; // SCREEN_HEIGHT - 1 = 1871
-  constexpr int32_t kMaxX = 0x57b; // SCREEN_WIDTH - 1 = 1403
+  constexpr int32_t kMaxY = kScreenHeight - 1;
+  constexpr int32_t kMaxX = kScreenWidth - 1;
 
   auto non_neg = [](int v) { return v < 0 ? 0 : v; };
   auto clamp_hi = [](int v, int hi) { return v > hi ? hi : v; };
@@ -230,8 +231,6 @@ native_piece_builder(WorkItem* dest, const WorkItem* src, const Rect& piece_rect
 // wider than 98 columns) only ever splits this same computation into two
 // disjoint column ranges - it changes nothing about which output byte reads
 // which input byte, so this single-pass native port doesn't replicate it.
-constexpr int kScreenWidth = 1404;
-constexpr int kScreenHeight = 1872;
 
 extern void* g_pGammaTableNative;
 
@@ -264,7 +263,7 @@ native_render_kernel_formula(int case_, uint16_t src, bool back_active, uint8_t 
       return (uint8_t)(((lo5 + mid6 + hi5 + gamma) / 125) * 30);
     case 7:
       if (!back_active)
-        return 0x20;
+        return (uint8_t)kGatedPixelSentinel;
       return (uint8_t)(((lo5 + mid6 + hi5 + gamma) / 125) * 30);
     case 9:
       return (uint8_t)((((lo5 + mid6 + hi5) * 15 + gamma) / 125) << 1);
@@ -317,7 +316,8 @@ native_dispatch_update_regions(WorkItem* item, void* dataBuffer, void* backBuffe
   rr->size = 0;
 
   if (item->rectY0 <= item->rectY1 && item->rectX0 <= item->rectX1) {
-    int32_t stride = ((item->rectY1 - item->rectY0) + 0x10) & ~0xf; // round_up(height, 16)
+    int32_t stride = ((item->rectY1 - item->rectY0) + kRegionRowsStrideAlign) &
+                     ~(kRegionRowsStrideAlign - 1); // round_up(height, 16)
     int32_t size = stride * (item->rectX1 - item->rectX0 + 1);
     rr->stride = stride;
     rr->size = size;
@@ -494,9 +494,9 @@ swtcon_update(update_data* data) {
   alignas(16) WorkItem item;
   native_update_item_ctor(&item); // sets seq id, empties the shared_ptrs / list
 
-  // The input rect {y,x,height,width} is byte-reversed per 64-bit lane
-  // (vrev64.32) to {x,y,width,height} before clamping.
-  XYRect rev{ data->x, data->y, data->width, data->height };
+  // The input rect {y0,x0,y1,x1} is byte-reversed per 64-bit lane
+  // (vrev64.32) to {x0,y0,x1,y1} before clamping.
+  XYRect rev{ data->x0, data->y0, data->x1, data->y1 };
   Rect rect = native_clamp_update_rect(rev);
   item.rectY0 = rect.y0;
   item.rectX0 = rect.x0;

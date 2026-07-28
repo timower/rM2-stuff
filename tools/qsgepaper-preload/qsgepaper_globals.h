@@ -37,6 +37,43 @@
 // file. A vector of pointers only needs the pointee declared, not complete.
 struct ModeEntry;
 
+// The panel's native resolution - every full-screen buffer/rect bound in
+// this codebase derives from these two. Shared here (rather than each
+// production file keeping its own copy) since native_update.cpp and
+// native_display.cpp both need it and drift between copies would be a real
+// correctness risk, not just cosmetic - see e.g. native_clamp_update_rect's
+// reflection formula. The handful of standalone black-box probe/bench tools
+// (playback_kernel_bench.cpp etc.) intentionally keep their own local copy
+// instead, matching their own independence from the production headers.
+constexpr int32_t kScreenWidth = 1404;
+constexpr int32_t kScreenHeight = 1872;
+
+// The number of real, panel-visible frame slots in the ring buffer worker/
+// display-thread frame-cursor arithmetic wraps around (curFrame % N,
+// per-tick dirty-gate bucketing, etc.) - see FbInitParams::frameCount in
+// swtcon.cpp, which configures the framebuffer with exactly this many slots
+// plus one extra (kInitFrameSlotIndex below) reserved for priming/flashing.
+constexpr int32_t kFrameSlotRingCount = 16;
+
+// The one extra frame slot beyond the kFrameSlotRingCount real ones (index
+// == kFrameSlotRingCount since slots are 0-based) - used only to prime the
+// panel controller (native_prime_display) and during the startup flash
+// sequence, never part of the normal playback ring.
+constexpr int32_t kInitFrameSlotIndex = kFrameSlotRingCount;
+
+// The panel's own per-frame-tick pacing period, in microseconds - sizes
+// display_thread_func's frame-pacing target formula (native_display.cpp)
+// and is the only concrete real-time deadline in this codebase to check
+// kernel/dispatch performance against (see playback_kernel_bench.cpp).
+constexpr double kPanelFrameTickUs = 11761.0;
+
+// display_thread_func's pacing-target formula (native_display.cpp) scales
+// the batch's leftmost column by this factor (then /1000) to get a target
+// elapsed-time budget - an empirically reversed constant (byte-verified
+// against the real disassembly, not derived from any other constant here)
+// with no more specific name available than what it computes.
+constexpr int64_t kColumnPaceUsPerColumnX1000 = 0x1d96;
+
 // Helper to resolve a Ghidra address to a live pointer in the loaded
 // library, using the load bias swtcon_runtime_offset() computed at dlopen
 // time.
@@ -147,15 +184,15 @@ seq_counter_ptr() {
 // backBuffer dirty-gate array (formerly resolve_ptr<uint8_t*>(0x670d8) into
 // the library's .bss, byte-verified via decompilation of both
 // display_thread_func and advance_work_item_frames - see
-// swtcon_architecture.md §6.2 step 1 / §6.4): 16 buckets, one per
-// frame-slot ring position, each SCREEN_WIDTH (0x57c) bytes, one byte per
+// swtcon_architecture.md §6.2 step 1 / §6.4): one bucket per frame-slot ring
+// position (kFrameSlotRingCount), each kScreenWidth bytes, one byte per
 // column. advance_work_item_frames marks a newly-rendered frame's
 // [pixelTransitions.x0, pixelTransitions.x1] columns dirty in its
 // ring-position's bucket;
 // display_thread_func's stale-row cleanup drains + zeroes each bucket once
 // its ring position falls out of the live window.
-constexpr int32_t kDirtyGateRowBytes = 0x57c; // SCREEN_WIDTH
-constexpr int32_t kDirtyGateBucketCount = 16;
+constexpr int32_t kDirtyGateRowBytes = kScreenWidth;
+constexpr int32_t kDirtyGateBucketCount = kFrameSlotRingCount;
 
 // native_stale_row_cleanup (native_display.cpp) computes `bucket = i % 16`
 // for `i` as low as nFrameCleanupCursor-15, which is negative during the

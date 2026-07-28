@@ -17,14 +17,14 @@
 
 // The library keeps four separate buffers (see init_statebuffer + the
 // qsgepaper_init prologue). They are distinct allocations with distinct fills:
-//   g_pImageBufferNative  -> g_pDataBuffer  @0x670bc, 0x503580, memset 0xff
+//   g_pImageBufferNative  -> g_pDataBuffer  @0x670bc, kStatebufferSize, memset 0xff
 //                            (the 16-bit image buffer returned to the caller)
-//   g_pScreenBufferNative -> g_pBackBuffer  @0x670c0, 0x281ac0, calloc
-//                            (full-screen 1 byte/pixel back buffer)
-//   g_pStateBufferNative  -> DAT_0006d1d0   @0x6d1d0, 0x503580, memset 0x1e
+//   g_pScreenBufferNative -> g_pBackBuffer  @0x670c0, kScreenWidth*kScreenHeight,
+//                            calloc (full-screen 1 byte/pixel back buffer)
+//   g_pStateBufferNative  -> DAT_0006d1d0   @0x6d1d0, kStatebufferSize, memset 0x1e
 //                            (the persisted statebuffer)
-//   g_pGammaTableNative   -> DAT_0006d1d4   @0x6d1d4, 0x4400 ('U' + gamma LUT,
-//                            128 temperature entries x 0x88 bytes) read by the
+//   g_pGammaTableNative   -> DAT_0006d1d4   @0x6d1d4, kGammaTableSize ('U' + gamma
+//                            LUT, 128 temperature entries x 0x88 bytes) read by the
 //                            render kernel FUN_0004e7b8 as uVar40*0x88 + base.
 void* g_pImageBufferNative = nullptr;
 void* g_pScreenBufferNative = nullptr;
@@ -67,32 +67,32 @@ int native_create_pid_file() {
 }
 
 int native_init_statebuffer() {
-    size_t sz = 0x503580;
+    size_t sz = kStatebufferSize;
 
     // g_pDataBuffer: 16-bit image working buffer, returned to the caller.
     g_pImageBufferNative = malloc(sz);
     if (!g_pImageBufferNative) return -1;
     memset(g_pImageBufferNative, 0xff, sz);
 
-    // g_pBackBuffer: full-screen 1 byte/pixel back buffer (1404*1872 = 0x281ac0).
-    g_pScreenBufferNative = calloc(0x281ac0, 1);
+    // g_pBackBuffer: full-screen 1 byte/pixel back buffer.
+    g_pScreenBufferNative = calloc((size_t)kScreenWidth * kScreenHeight, 1);
     if (!g_pScreenBufferNative) return -1;
 
     // DAT_0006d1d0: the persisted statebuffer. init_statebuffer @0x4fad4 fills it
-    // with the 32-bit pattern 0x001e001e (bytes 1e 00 1e 00) — i.e. a per-pixel
-    // uint16 state of 0x001e, NOT every byte = 0x1e. Using a plain memset(0x1e)
-    // makes each state 0x1e1e and corrupts the waveform transitions the render
-    // kernels compute.
+    // with the 32-bit pattern kNeutralStateWord (bytes 1e 00 1e 00) — i.e. a
+    // per-pixel uint16 state of 0x001e, NOT every byte = 0x1e. Using a plain
+    // memset(0x1e) makes each state 0x1e1e and corrupts the waveform
+    // transitions the render kernels compute.
     g_pStateBufferNative = malloc(sz);
     if (!g_pStateBufferNative) return -1;
     {
         uint32_t* sp = (uint32_t*)g_pStateBufferNative;
         for (size_t i = 0; i < sz / 4; i++)
-            sp[i] = 0x001e001e;
+            sp[i] = kNeutralStateWord;
     }
 
     // DAT_0006d1d4: 'U' followed by the gamma LUT (128 entries x 0x88 bytes).
-    g_pGammaTableNative = malloc(0x4400);
+    g_pGammaTableNative = malloc(kGammaTableSize);
     if (!g_pGammaTableNative) return -1;
     // Matches init_statebuffer @0x4fad4: values are treated as UNSIGNED 16-bit
     // (the library does VectorSignedToFloat((uint)*puVar6) on a zero-extended
@@ -256,7 +256,7 @@ static void native_fill_lut_pattern(void* dest, int pattern) {
 }
 
 int native_init_lut() {
-    size_t sz = 0x165800;
+    size_t sz = kLutBlobSize;
     g_pLUTAddrNative = malloc(sz);
     if (!g_pLUTAddrNative) return -1;
     native_fill_lut_pattern(g_pLUTAddrNative, 0);
@@ -543,19 +543,20 @@ void* native_frame_buffer_addr(int frame_idx) {
 }
 
 void native_upload_lut_to_frame_slot(void* dest) {
-    memcpy(dest, g_pLUTAddrNative, 0x165800);
+    memcpy(dest, g_pLUTAddrNative, kLutBlobSize);
 }
 
 // Mirrors reset_statebuffer_neutral (0x4fbe0): reapplies the same
-// 0x001e001e-per-pixel fill native_init_statebuffer used at allocation time,
-// over the already-allocated statebuffer. Called by the worker thread after
-// its flash sequence to reset per-pixel state to neutral.
+// kNeutralStateWord-per-pixel fill native_init_statebuffer used at
+// allocation time, over the already-allocated statebuffer. Called by the
+// worker thread after its flash sequence to reset per-pixel state to
+// neutral.
 void native_reset_statebuffer_neutral() {
     auto* sb = statebuffer_globals();
-    size_t sz = 0x503580;
+    size_t sz = kStatebufferSize;
     uint32_t* sp = (uint32_t*)sb->pStatebuffer;
     for (size_t i = 0; i < sz / 4; i++)
-        sp[i] = 0x001e001e;
+        sp[i] = kNeutralStateWord;
 }
 
 // Mirrors read_lut_packed_pixel (0x40c58): generic bit-unpacking read of one
@@ -619,7 +620,7 @@ void native_prime_display() {
         native_refresh_temperature_cache();
         return;
     }
-    native_pan_and_unblank(16);
+    native_pan_and_unblank(kInitFrameSlotIndex);
     native_refresh_temperature_cache();
     native_blank_fb();
 }
@@ -673,8 +674,7 @@ void native_free_LUT() {
 
 void native_unlock_pid_file() {
     if (g_nPidFdNative > -1) {
-        // LOCK_UN = 8
-        if (flock(g_nPidFdNative, 8) == -1) {
+        if (flock(g_nPidFdNative, LOCK_UN) == -1) {
             std::cerr << "unable to unlock exclusive lock" << std::endl;
         }
         close(g_nPidFdNative);

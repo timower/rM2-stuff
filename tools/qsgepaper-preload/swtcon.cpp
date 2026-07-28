@@ -168,7 +168,7 @@ swtcon_init() {
     queue->backBuffer = g_pScreenBufferNative;
     sb->pStatebuffer = g_pStateBufferNative;
     sb->pGammaTable = g_pGammaTableNative;
-    sb->nSize = 0x503580;
+    sb->nSize = kStatebufferSize;
 
     char* path1 = (char*)"/usr/share/remarkable/320_R467_AF4731_ED103TC2C6_VB3300-KCD_TC.wbf";
 
@@ -184,7 +184,7 @@ swtcon_init() {
     fb_info.yres = 0x580;
     fb_info.bitsPerPixel = 0x20;
     fb_info.pixclock = 0x7080;
-    fb_info.frameCount = 0x10;
+    fb_info.frameCount = kFrameSlotRingCount; // + 1 extra slot, see kInitFrameSlotIndex
     fb_info.leftMargin = 1;
     fb_info.rightMargin = 1;
     fb_info.upperMargin = 1;
@@ -318,9 +318,9 @@ swtcon_dump_buffers() {
     void* ptr;
     size_t len;
   } bufs[] = {
-    { "LUT", fb->pLUT, 0x165800 },
-    { "gamma", sb->pGammaTable, 0x4400 },
-    { "statebuffer", sb->pStatebuffer, 0x503580 },
+    { "LUT", fb->pLUT, kLutBlobSize },
+    { "gamma", sb->pGammaTable, kGammaTableSize },
+    { "statebuffer", sb->pStatebuffer, kStatebufferSize },
   };
   for (auto& b : bufs) {
     uint32_t sum = 2166136261u;
