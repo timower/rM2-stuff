@@ -15,9 +15,9 @@
 // [rectY0,rectY1]:
 //   - fetches each of the group's 8 rows' packed LUT word ONCE (word_idx =
 //     phase/8, indexed using the row's own transition value - the raw
-//     stateDataPtr u16, used DIRECTLY as the LUT's (row*mode_width+col)
+//     transitionDataPtr u16, used DIRECTLY as the LUT's (row*mode_width+col)
 //     index, not split via >>5/&0x1f - the same formula as
-//     native_read_lut_packed_pixel, see WorkItem::stateDataPtr's comment);
+//     native_read_lut_packed_pixel, see WorkItem::transitionDataPtr's comment);
 //   - for every one of the 8 possible sub-phases (bit offsets 0-7) packed
 //     into that one word, extracts each row's 2-bit value and OR-accumulates
 //     it into a per-sub-phase 16-bit word at bit position (7-row)*2 - row 0
@@ -178,7 +178,7 @@ native_playback_kernel_plain(void** frame_slots, WorkItem* item, int frame_count
   int col_lo = chunk_width * chunk_index;
   int col_hi = (chunk_index != chunk_count - 1) ? (chunk_width - 1 + col_lo) : span;
 
-  const auto* lut = (const LUTEntry*)item->lut.ptr;
+  const auto* lut = item->lut.get();
   const uint16_t* lut_data = (const uint16_t*)lut->data;
   int mw = lut->mode_width;
   int word_idx = item->phase / 8;
@@ -188,8 +188,8 @@ native_playback_kernel_plain(void** frame_slots, WorkItem* item, int frame_count
   // 8x per group, i.e. up to num_groups*8 times per column).
   const size_t lut_word_base = (size_t)mw * mw * word_idx + word_idx;
 
-  const uint16_t* state = (const uint16_t*)item->stateDataPtr;
-  int stride = ((const RegionRows*)item->sp3.ptr)->stride;
+  const uint16_t* transitionData = (const uint16_t*)item->transitionDataPtr;
+  int stride = item->pixelTransitions->stride;
 
   for (int c = col_lo; c <= col_hi; c++) {
     int col = item->rectX0 + c;
@@ -209,29 +209,31 @@ native_playback_kernel_plain(void** frame_slots, WorkItem* item, int frame_count
     for (int g = 0; g < num_groups; g++, byte_off += 4) {
       int row_base = item->rectY0 + g * 8;
 
-      // stateDataPtr (state) is already rebased to THIS item's own rect
-      // origin (see WorkItem::stateDataPtr's comment / native_commit_item),
-      // so the index here must be item-rect-relative, not sp3-relative -
-      // indexing with (col-sp3->x0)/(row-sp3->y0) here would double-apply
-      // the rebase and run off the end of the sp3 buffer for any narrowed
-      // item (item rect always a subset of sp3's own, outward-8-aligned
-      // rect) - confirmed via AddressSanitizer, which caught a
-      // heap-buffer-overflow read here on the very first narrowed item.
+      // transitionDataPtr (transitionData) is already rebased to THIS item's
+      // own rect origin (see WorkItem::transitionDataPtr's comment /
+      // native_commit_item), so the index here must be item-rect-relative,
+      // not pixelTransitions-relative - indexing with
+      // (col-pixelTransitions->x0)/(row-pixelTransitions->y0) here would
+      // double-apply the rebase and run off the end of the pixelTransitions
+      // buffer for any narrowed item (item rect always a subset of
+      // pixelTransitions' own, outward-8-aligned rect) - confirmed via
+      // AddressSanitizer, which caught a heap-buffer-overflow read here on
+      // the very first narrowed item.
       uint16_t lut_words[8];
 #if SWTCON_PLAYBACK_KERNEL_NEON
-      // A group's 8 rows are contiguous in `state` (idx increases by exactly
-      // 1 per row - see the comment above), so all 8 transition values can
-      // be gathered with a single 128-bit load instead of 8 scalar ones -
-      // confirmed directly in the real aligned kernel's own case-8 handler
-      // (FUN_0004a234, 0x4d1c0: `vld1.16 {d6,d7},[r3]` loads exactly one
-      // group's 8 transitions at once, vs. this port's previous 8 separate
-      // `ldrh`-equivalent scalar reads). The subsequent per-lane extract
-      // (vgetq_lane_u16) is still scalar because the LUT lookup itself is a
-      // genuine data-dependent gather - this target's NEON has no gather
-      // instruction, and the real kernel doesn't have one either (see
-      // AGENTS.md's Phase 9 entry).
+      // A group's 8 rows are contiguous in `transitionData` (idx increases
+      // by exactly 1 per row - see the comment above), so all 8 transition
+      // values can be gathered with a single 128-bit load instead of 8
+      // scalar ones - confirmed directly in the real aligned kernel's own
+      // case-8 handler (FUN_0004a234, 0x4d1c0: `vld1.16 {d6,d7},[r3]` loads
+      // exactly one group's 8 transitions at once, vs. this port's previous
+      // 8 separate `ldrh`-equivalent scalar reads). The subsequent per-lane
+      // extract (vgetq_lane_u16) is still scalar because the LUT lookup
+      // itself is a genuine data-dependent gather - this target's NEON has
+      // no gather instruction, and the real kernel doesn't have one either
+      // (see AGENTS.md's Phase 9 entry).
       size_t idx0 = col_base + (size_t)(row_base - item->rectY0);
-      uint16x8_t transitions = vld1q_u16(&state[idx0]);
+      uint16x8_t transitions = vld1q_u16(&transitionData[idx0]);
       lut_words[0] = lut_data[lut_word_base + vgetq_lane_u16(transitions, 0)];
       lut_words[1] = lut_data[lut_word_base + vgetq_lane_u16(transitions, 1)];
       lut_words[2] = lut_data[lut_word_base + vgetq_lane_u16(transitions, 2)];
@@ -244,7 +246,7 @@ native_playback_kernel_plain(void** frame_slots, WorkItem* item, int frame_count
       for (int r = 0; r < 8; r++) {
         int row = row_base + r;
         size_t idx = col_base + (size_t)(row - item->rectY0);
-        uint16_t transition = state[idx];
+        uint16_t transition = transitionData[idx];
         lut_words[r] = lut_data[lut_word_base + transition];
       }
 #endif

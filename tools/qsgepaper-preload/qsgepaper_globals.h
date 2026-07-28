@@ -28,8 +28,14 @@
 #include <linux/fb.h>
 #include <pthread.h>
 #include <semaphore.h>
+#include <vector>
 
 #include "swtcon.h"
+
+// Forward-declared rather than #include "native_init.h" (which defines
+// ModeEntry) to avoid a header cycle - native_init.h itself includes this
+// file. A vector of pointers only needs the pointee declared, not complete.
+struct ModeEntry;
 
 // Helper to resolve a Ghidra address to a live pointer in the loaded
 // library, using the load bias swtcon_runtime_offset() computed at dlopen
@@ -63,86 +69,16 @@ struct Timespec64 {
 static_assert(sizeof(Timespec64) == 16, "Timespec64 must be two 64-bit fields");
 
 // --- Update queue / worker+display thread state -----------------------
-// Fully contiguous from g_list_processed_updates (0x66fd8) through the
-// accumulation list's flag (0x670d0). Written by swtcon_init (thread
-// startup), read/written by swtcon_update/lock/unlock_post/wait, and read
-// by swtcon_shutdown (drain + join).
-struct UpdateQueueGlobals {
-  ListHead listProcessedUpdates;             // 0x66fd8
-  int32_t processedUpdatesCount;             // 0x66fe0 g_nProcessedUpdatesCount
-  int32_t curFrame;                          // 0x66fe4 g_nCurFrame
-  int32_t targetFrame;                       // 0x66fe8 g_nTargetFrame
-  pthread_mutex_t workerCondMutex;           // 0x66fec
-  uint8_t _reserved_0x67004[0x67008 - 0x67004];
-  pthread_cond_t workerCond;                  // 0x67008
-  uint8_t flashRequested;                      // 0x67038 g_bFlashRequested (byte flag, not int32)
-  uint8_t _reserved_0x67039[3];
-  pthread_mutex_t displayTimingMutex;         // 0x6703c
-  uint8_t _reserved_0x67054[0x67058 - 0x67054];
-  Timespec64 lastPanTimestamp;                 // 0x67058 g_lastPanTimestamp - stamped alongside
-                                                // every nLastPannedFrame write, under displayTimingMutex
-  sem_t displayThreadSem;                      // 0x67068
-  int32_t timeVar;                              // 0x67078
-  int32_t workerThreadShutdown;                  // 0x6707c
-  uint8_t waveformStructRaw[12];                  // 0x67080 std::vector<ModeEntry*>
-  int32_t shutdownRequested;                       // 0x6708c
-  ListHead listIncomingUpdates;                     // 0x67090 (BatchNode list)
-  int32_t incomingBatchCount;                        // 0x67098 (unnamed in the
-                                                       // library; sits right
-                                                       // after the list head -
-                                                       // see native_build_update_batch)
-  pthread_mutex_t updateQueueMutex;                   // 0x6709c
-  pthread_t displayThread;                             // 0x670b4
-  pthread_t workerThread;                               // 0x670b8
-  void* dataBuffer;                                      // 0x670bc g_pDataBuffer
-  void* backBuffer;                                       // 0x670c0 g_pBackBuffer
-  ListHead accumList;                                      // 0x670c4 (WorkItemNode list)
-  int32_t accumCount;                                       // 0x670cc
-  int16_t accumFlag;                                         // 0x670d0
-};
-constexpr uintptr_t kUpdateQueueGlobalsAddr = 0x66fd8;
-#define QQ_OFFSETOF(field) (offsetof(UpdateQueueGlobals, field))
-#define QQ_ASSERT(field, addr) \
-  static_assert(QQ_OFFSETOF(field) == (addr) - kUpdateQueueGlobalsAddr, \
-                #field " must land at " #addr)
-QQ_ASSERT(listProcessedUpdates, 0x66fd8);
-QQ_ASSERT(processedUpdatesCount, 0x66fe0);
-QQ_ASSERT(curFrame, 0x66fe4);
-QQ_ASSERT(targetFrame, 0x66fe8);
-QQ_ASSERT(workerCondMutex, 0x66fec);
-QQ_ASSERT(workerCond, 0x67008);
-QQ_ASSERT(flashRequested, 0x67038);
-QQ_ASSERT(displayTimingMutex, 0x6703c);
-QQ_ASSERT(lastPanTimestamp, 0x67058);
-QQ_ASSERT(displayThreadSem, 0x67068);
-QQ_ASSERT(timeVar, 0x67078);
-QQ_ASSERT(workerThreadShutdown, 0x6707c);
-QQ_ASSERT(waveformStructRaw, 0x67080);
-QQ_ASSERT(shutdownRequested, 0x6708c);
-QQ_ASSERT(listIncomingUpdates, 0x67090);
-QQ_ASSERT(incomingBatchCount, 0x67098);
-QQ_ASSERT(updateQueueMutex, 0x6709c);
-QQ_ASSERT(displayThread, 0x670b4);
-QQ_ASSERT(workerThread, 0x670b8);
-QQ_ASSERT(dataBuffer, 0x670bc);
-QQ_ASSERT(backBuffer, 0x670c0);
-QQ_ASSERT(accumList, 0x670c4);
-QQ_ASSERT(accumCount, 0x670cc);
-QQ_ASSERT(accumFlag, 0x670d0);
-// Trailing size only has to be *at least* enough to cover every field we
-// use - the compiler may round the struct's overall size up further to
-// satisfy some member's (e.g. sem_t's) alignment, which is harmless since it
-// only adds padding after the last field we care about.
-static_assert(sizeof(UpdateQueueGlobals) >= 0x670d2 - kUpdateQueueGlobalsAddr,
-              "UpdateQueueGlobals layout drift");
-#undef QQ_ASSERT
-#undef QQ_OFFSETOF
-
-inline UpdateQueueGlobals*
-update_queue_globals() {
-  static UpdateQueueGlobals g{};
-  return &g;
-}
+// UpdateQueueGlobals and update_queue_globals() moved to native_update.h
+// (Step 4 of the shared_ptr/list cleanup) - three of its fields
+// (listProcessedUpdates/accumList/listIncomingUpdates) are now real
+// std::list<WorkItem>/std::list<Batch>, which need WorkItem/Batch complete
+// wherever the struct's implicit destructor gets instantiated (i.e.
+// wherever update_queue_globals()'s function body, defining the static
+// local instance, is compiled) - and WorkItem/Batch are only defined in
+// native_update.h, included by every file that actually calls
+// update_queue_globals() (swtcon.cpp, native_update.cpp, native_display.cpp)
+// but not by native_init.h/.cpp, which never needed this struct.
 
 // --- Frame-pacing cursor cluster ----------------------------------------
 // Contiguous, byte-verified via disassembly of worker_thread_func /
@@ -214,7 +150,8 @@ seq_counter_ptr() {
 // swtcon_architecture.md §6.2 step 1 / §6.4): 16 buckets, one per
 // frame-slot ring position, each SCREEN_WIDTH (0x57c) bytes, one byte per
 // column. advance_work_item_frames marks a newly-rendered frame's
-// [sp3.x0, sp3.x1] columns dirty in its ring-position's bucket;
+// [pixelTransitions.x0, pixelTransitions.x1] columns dirty in its
+// ring-position's bucket;
 // display_thread_func's stale-row cleanup drains + zeroes each bucket once
 // its ring position falls out of the live window.
 constexpr int32_t kDirtyGateRowBytes = 0x57c; // SCREEN_WIDTH

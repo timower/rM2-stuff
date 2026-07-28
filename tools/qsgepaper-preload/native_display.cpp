@@ -8,11 +8,13 @@
 #include <cstring>
 #include <ctime>
 #include <iostream>
+#include <iterator>
 #include <pthread.h>
 #include <semaphore.h>
 #include <sys/time.h>
 #include <thread>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 #include "native_init.h"
@@ -157,11 +159,11 @@ native_worker_thread_func(void*) {
     // those same slots and resets per-pixel state to neutral.
     if (queue->flashRequested != 0) {
       float temp = native_get_current_temperature();
-      SpRef lut_sp{};
+      std::shared_ptr<LUTEntry> lut_sp;
       native_select_waveform_lut(
         temp,
         &lut_sp,
-        (std::vector<ModeEntry*>*)(void*)queue->waveformStructRaw,
+        &queue->waveform,
         /*mode=*/0);
 
       if (native_update_lut_is_valid(lut_sp)) {
@@ -170,7 +172,7 @@ native_worker_thread_func(void*) {
           native_write_lut_pattern(native_frame_buffer_addr(i),
                                    kFlashPatterns[i]);
 
-        auto* lut = (const LUTEntry*)lut_sp.ptr;
+        auto* lut = lut_sp.get();
         native_pan_and_unblank((int)native_read_lut_packed_pixel(lut, 0, 0, 0));
         int phase_count =
           lut->size_kb; // doubles as this LUT's frame/phase count
@@ -185,7 +187,6 @@ native_worker_thread_func(void*) {
         native_reset_statebuffer_neutral();
       }
 
-      release_sp(lut_sp.ctrl);
       queue->flashRequested = 0;
     }
 
@@ -247,56 +248,22 @@ extern void* g_pStateBufferNative;
 constexpr int kScreenWidth = 1404;
 constexpr int kScreenHeight = 1872;
 
-// dispatch_processed_regions's sp3 control block: same vtable+refcounts+
-// RegionRows-shaped-body layout as native_dispatch_update_regions's
-// RegionRowsBlock (native_update.cpp), except the payload is uint16_t per
-// pixel (a packed old/new "transition" value, see native_commit_item below)
-// rather than a byte. Deliberately doesn't reuse the library's own vtable
-// for this allocation site: unlike RegionRowsBlock's simple PC-relative
-// `&PTR_LAB_000651ec` load, this one's vtable pointer is loaded through a
-// GOT-indirect double load in the disassembly - the same more-ambiguous
-// pattern AGENTS.md already flagged for native_make_empty_lut's allocator,
-// and not worth risking a silent release_sp mismatch over. Defines its own
-// tiny native vtable instead, same vt[2]/vt[3] dispose/destroy convention.
-struct Sp3Block {
-  void* vtable;
-  int32_t useCount;
-  int32_t weakCount;
-  RegionRows rr; // rr.dataPtr points at a uint16_t[] buffer, not uint8_t[]
-};
-static_assert(offsetof(Sp3Block, rr) == 0xc, "Sp3Block layout drift");
-static_assert(sizeof(Sp3Block) == 0x28, "Sp3Block layout drift");
-
-static void
-native_sp3_dispose(void* ctrl) {
-  delete[] (uint16_t*)((Sp3Block*)ctrl)->rr.dataPtr;
-}
-
-static void
-native_sp3_destroy(void* ctrl) {
-  ::operator delete(ctrl);
-}
-
-static void* kNativeSp3Vtable[4] = { nullptr,
-                                     nullptr,
-                                     (void*)native_sp3_dispose,
-                                     (void*)native_sp3_destroy };
-
 // Native reimplementation of the display-commit kernels FUN_0004f8f0
 // (item.sync==0, "incremental") / FUN_0004e680 (sync!=0, "force") - see
 // swtcon_architecture.md §6.3 for the confirmed per-pixel formula (derived
 // from FUN_0004e680's disassembly, which has no narrowing logic at all
 // unlike FUN_0004f8f0, then cross-checked byte-for-byte via
 // dispatch_processed_regions_probe.cpp reading back the real library's
-// g_pStateBuffer/item.sp3 contents). Runs over the item's FULL rect in one
-// pass rather than the library's 1-2 column chunks: chunking only splits
-// this same per-pixel computation into disjoint column ranges with no
-// shared mutable state across chunks, so it's provably invisible to the
-// output (same reasoning as native_render_update_kernel's chunking,
+// g_pStateBuffer/item.pixelTransitions contents). Runs over the item's FULL
+// rect in one pass rather than the library's 1-2 column chunks: chunking
+// only splits this same per-pixel computation into disjoint column ranges
+// with no shared mutable state across chunks, so it's provably invisible to
+// the output (same reasoning as native_render_update_kernel's chunking,
 // confirmed empirically here too - probe experiment 7).
 //
-// Also allocates item.sp3 fresh (releasing whatever it held before) - this
-// is that field's actual allocation site (previously unconfirmed).
+// Also allocates item.pixelTransitions fresh (releasing whatever it held
+// before) - this is that field's actual allocation site (previously
+// unconfirmed).
 //
 // Returns true if the item survives (rect updated in place to the
 // committed/narrowed result); false if it ends up degenerate ("incremental"
@@ -308,59 +275,64 @@ native_commit_item(WorkItem* item) {
   int cols = item->rectX1 - item->rectX0 + 1;
   int strideRows =
     (rows + 0xf) &
-    ~0xf; // round_up(rows, 16), same as regionRows/sp3 convention
+    ~0xf; // round_up(rows, 16), same as regionRows/pixelTransitions convention
 
-  auto* block = (Sp3Block*)::operator new(sizeof(Sp3Block));
-  block->vtable = kNativeSp3Vtable;
-  block->useCount = 1;
-  block->weakCount = 1;
-  block->rr.y0 = item->rectY0;
-  block->rr.x0 = item->rectX0;
-  block->rr.y1 = item->rectY1;
-  block->rr.x1 = item->rectX1;
-  block->rr.stride = strideRows;
-  block->rr.size = strideRows * cols * (int)sizeof(uint16_t);
-  auto* sp3Buf = new uint16_t[(size_t)strideRows * cols];
-  block->rr.dataPtr = (uint8_t*)sp3Buf;
+  auto* rr = new RegionRows{};
+  rr->y0 = item->rectY0;
+  rr->x0 = item->rectX0;
+  rr->y1 = item->rectY1;
+  rr->x1 = item->rectX1;
+  rr->stride = strideRows;
+  rr->size = strideRows * cols * (int)sizeof(uint16_t);
+  auto* transitionBuf = new uint16_t[(size_t)strideRows * cols];
+  rr->dataPtr = (uint8_t*)transitionBuf;
 
-  void* old_ctrl = item->sp3.ctrl;
-  item->sp3.ptr = &block->rr;
-  item->sp3.ctrl = block;
-  // Cache the sp3 pixel buffer into item.stateDataPtr (+0x44). This is NOT
-  // optional bookkeeping: the still-library playback kernels
-  // FUN_0004a140/FUN_0004a234 read their per-pixel state through item+0x44
-  // directly, not via sp3.ptr->dataPtr - so leaving it stale is what made
-  // wiring this function in SIGSEGV downstream.
+  // RegionRows::dataPtr is a plain non-owning pointer (see its comment in
+  // native_update.h) - this allocation actually owns the uint16_t buffer it
+  // just made, so free it (correctly typed) via a custom deleter on the
+  // shared_ptr rather than giving RegionRows itself an owning destructor.
+  item->pixelTransitions = std::shared_ptr<RegionRows>(rr, [](RegionRows* p) {
+    delete[] (uint16_t*)p->dataPtr;
+    delete p;
+  });
+  // Cache the pixelTransitions buffer into item.transitionDataPtr (+0x44).
+  // This is NOT optional bookkeeping: the still-library playback kernels
+  // FUN_0004a140/FUN_0004a234 read their per-pixel transitions through
+  // item+0x44 directly, not via pixelTransitions->dataPtr - so leaving it
+  // stale is what made wiring this function in SIGSEGV downstream.
   //
-  // Crucially, +0x44 is NOT the sp3 buffer BASE - it's that base REBASED to the
-  // item's (post-narrowing) rect origin within the buffer, exactly like `gap`
-  // rebases regionRows->dataPtr. The sp3 buffer is allocated for the seed rect
-  // (clamped outward to the 8-row NEON group, so sp3 y0/x0 can sit below the
-  // item's real y0/x0); the incremental path below then narrows item->rect to
-  // the changed-pixel bbox. The playback kernels iterate the NARROWED rect and
+  // Crucially, +0x44 is NOT the pixelTransitions buffer BASE - it's that base
+  // REBASED to the item's (post-narrowing) rect origin within the buffer,
+  // exactly like `pixelDataPtr` rebases regionRows->dataPtr. The
+  // pixelTransitions buffer is allocated for the seed rect (clamped outward
+  // to the 8-row NEON group, so its y0/x0 can sit below the item's real
+  // y0/x0); the incremental path below then narrows item->rect to the
+  // changed-pixel bbox. The playback kernels iterate the NARROWED rect and
   // index +0x44 with narrowed-relative coords, so +0x44 must skip the
-  // stride*(rectX0-sp3.x0)+(rectY0-sp3.y0) elements between the buffer origin
-  // and the narrowed rect. We seed it to the base here (correct for the force
-  // path, which never narrows, and for unsplit items where rect==sp3 rect); the
-  // incremental path recomputes it after narrowing. Empirically verified: the
-  // real library's +0x44 for a narrowed item was sp3.dataPtr + 0x670, matching
+  // stride*(rectX0-pixelTransitions.x0)+(rectY0-pixelTransitions.y0)
+  // elements between the buffer origin and the narrowed rect. We seed it to
+  // the base here (correct for the force path, which never narrows, and for
+  // unsplit items where rect==pixelTransitions rect); the incremental path
+  // recomputes it after narrowing. Empirically verified: the real library's
+  // +0x44 for a narrowed item was pixelTransitions.dataPtr + 0x670, matching
   // stride*(804-803)+(1072-1064) = 824 u16 = 0x670 (SWTCON_FRAME_LOG A/B).
-  item->stateDataPtr = block->rr.dataPtr;
-  release_sp(old_ctrl);
+  item->transitionDataPtr = rr->dataPtr;
 
-  // Read the new pixel through item.gap (the REBASED RegionRows::dataPtr,
-  // +0x08), NOT regionRows->dataPtr. For a split piece (native_piece_builder)
-  // the regionRows shared_ptr still points at the ORIGINAL region's struct
-  // (origin = old rect's x0/y0), and only `gap` is rebased to the piece's own
-  // origin - so indexing regionRows->dataPtr with piece-local coords reads from
-  // the wrong spot and leaves border seams. FUN_0004f8f0 uses param_1[2] (==
-  // item.gap) as the base with stride from regionRows->stride, exactly this.
-  // (For a whole, unsplit item gap == regionRows->dataPtr, which is why
-  // full-screen updates rendered fine before this fix.)
-  auto* regionRows = (RegionRows*)item->regionRows.ptr;
-  const uint8_t* gapBuf =
-    regionRows ? (const uint8_t*)(uintptr_t)(uint32_t)item->gap : nullptr;
-  int gapStride = regionRows ? regionRows->stride : 0;
+  // Read the new pixel through item.pixelDataPtr (the REBASED
+  // RegionRows::dataPtr, +0x08), NOT regionRows->dataPtr. For a split piece
+  // (native_piece_builder) the regionRows shared_ptr still points at the
+  // ORIGINAL region's struct (origin = old rect's x0/y0), and only
+  // `pixelDataPtr` is rebased to the piece's own origin - so indexing
+  // regionRows->dataPtr with piece-local coords reads from the wrong spot
+  // and leaves border seams. FUN_0004f8f0 uses param_1[2] (==
+  // item.pixelDataPtr) as the base with stride from regionRows->stride,
+  // exactly this. (For a whole, unsplit item pixelDataPtr ==
+  // regionRows->dataPtr, which is why full-screen updates rendered fine
+  // before this fix.)
+  auto* regionRows = item->regionRows.get();
+  const uint8_t* pixelBuf =
+    regionRows ? (const uint8_t*)(uintptr_t)(uint32_t)item->pixelDataPtr : nullptr;
+  int pixelStride = regionRows ? regionRows->stride : 0;
   uint16_t* state = (uint16_t*)g_pStateBufferNative;
   bool force = item->sync != 0;
 
@@ -373,13 +345,13 @@ native_commit_item(WorkItem* item) {
       for (int row = item->rectY0; row <= item->rectY1; row++) {
         int localRow = row - item->rectY0;
         uint16_t new_raw =
-          gapBuf ? gapBuf[(int64_t)localCol * gapStride + localRow] : 0;
+          pixelBuf ? pixelBuf[(int64_t)localCol * pixelStride + localRow] : 0;
         uint16_t old = state[(size_t)col * kScreenHeight + row];
         bool is_sentinel = new_raw == 0x20;
         uint16_t effective_new = is_sentinel ? old : new_raw;
         uint16_t packed =
           is_sentinel ? 0x0400 : (uint16_t)((old << 5) | effective_new);
-        sp3Buf[(size_t)strideRows * localCol + localRow] = packed;
+        transitionBuf[(size_t)strideRows * localCol + localRow] = packed;
         state[(size_t)col * kScreenHeight + row] = effective_new;
       }
     }
@@ -411,7 +383,7 @@ native_commit_item(WorkItem* item) {
         int localRow = row - item->rectY0;
         int lane = row - groupStart;
         uint16_t new_raw =
-          gapBuf ? gapBuf[(int64_t)localCol * gapStride + localRow] : 0;
+          pixelBuf ? pixelBuf[(int64_t)localCol * pixelStride + localRow] : 0;
         uint16_t old = state[(size_t)col * kScreenHeight + row];
         bool is_sentinel = new_raw == 0x20;
         bool unchanged = new_raw == old;
@@ -421,7 +393,7 @@ native_commit_item(WorkItem* item) {
         newState[lane] = effective_new;
         packedVal[lane] =
           skip ? 0x0400 : (uint16_t)((old << 5) | effective_new);
-        sp3Buf[(size_t)strideRows * localCol + localRow] = packedVal[lane];
+        transitionBuf[(size_t)strideRows * localCol + localRow] = packedVal[lane];
         if (!skip)
           groupChanged = true;
       }
@@ -445,13 +417,13 @@ native_commit_item(WorkItem* item) {
   item->rectY1 = outY1;
   item->rectX0 = outX0;
   item->rectX1 = outX1;
-  // Rebase +0x44 to the narrowed rect's origin within the (un-narrowed) sp3
-  // buffer - see the seeding comment above. block->rr.{x0,y0} still hold the
-  // seed origin the buffer was laid out with; sp3Buf is indexed with
-  // strideRows*(col-seedX0)+(row-seedY0), so the narrowed rect starts at
-  // strideRows*(outX0-seedX0)+(outY0-seedY0) into it.
-  item->stateDataPtr = sp3Buf + (size_t)strideRows * (outX0 - block->rr.x0) +
-                       (size_t)(outY0 - block->rr.y0);
+  // Rebase +0x44 to the narrowed rect's origin within the (un-narrowed)
+  // pixelTransitions buffer - see the seeding comment above. rr->{x0,y0}
+  // still hold the seed origin the buffer was laid out with; transitionBuf
+  // is indexed with strideRows*(col-seedX0)+(row-seedY0), so the narrowed
+  // rect starts at strideRows*(outX0-seedX0)+(outY0-seedY0) into it.
+  item->transitionDataPtr = transitionBuf + (size_t)strideRows * (outX0 - rr->x0) +
+                           (size_t)(outY0 - rr->y0);
   return true;
 }
 
@@ -464,47 +436,44 @@ native_commit_item(WorkItem* item) {
 // native_commit_item in a single full-rect pass (no thread pool - see that
 // function's comment for why chunking is provably invisible here), destroys
 // items that come back degenerate (either already-degenerate on entry, or
-// "incremental" with literally nothing changed) exactly like
-// native_destroy_item_node, and returns true iff the sub-list is non-empty
-// afterward.
+// "incremental" with literally nothing changed) via a plain std::list erase,
+// and returns true iff the sub-list is non-empty afterward.
 //
 // WIRED IN (this pass). The per-item algorithm is independently verified
 // byte-exact against the real library (dispatch_processed_regions_probe.cpp,
-// 7 passing experiments incl. sp3's exact (old<<5)|new packing and 0x0400
-// marker).
+// 7 passing experiments incl. pixelTransitions' exact (old<<5)|new packing
+// and 0x0400 marker).
 //
 // The "integration hazard" that previously kept this by-address - a
 // deterministic SIGSEGV inside the still-library playback kernel
-// FUN_0004a234 a few calls downstream - was a stale WorkItem.stateDataPtr
+// FUN_0004a234 a few calls downstream - was a stale WorkItem.transitionDataPtr
 // (+0x44), NOT anything about FUN_0004a234 itself: the real
-// dispatch_processed_regions caches sp3.ptr->dataPtr into item+0x44 right
-// after allocating sp3 (`node[0x13] = *piVar21`), and BOTH playback kernels
-// (FUN_0004a140/FUN_0004a234) read their per-pixel state through that cached
-// +0x44 pointer, not via sp3.ptr->dataPtr. native_commit_item now sets it
-// (see there); without it the kernels dereferenced a stale/null pointer.
-// That also explains why the earlier elimination log missed it: the
-// "downstream state identical" check enumerated frameCursor/frameAnchor/
-// phase/rect/sync/lutWidthMinus1 but not +0x44, and zero-filling sp3's
-// PAYLOAD couldn't help since the kernels never read sp3.ptr->dataPtr.
+// dispatch_processed_regions caches pixelTransitions.ptr->dataPtr into
+// item+0x44 right after allocating pixelTransitions (`node[0x13] =
+// *piVar21`), and BOTH playback kernels (FUN_0004a140/FUN_0004a234) read
+// their per-pixel transitions through that cached +0x44 pointer, not via
+// pixelTransitions.ptr->dataPtr. native_commit_item now sets it (see there);
+// without it the kernels dereferenced a stale/null pointer. That also
+// explains why the earlier elimination log missed it: the "downstream state
+// identical" check enumerated frameCursor/frameAnchor/phase/rect/sync/
+// lutWidthMinus1 but not +0x44, and zero-filling pixelTransitions' PAYLOAD
+// couldn't help since the kernels never read pixelTransitions.ptr->dataPtr.
 static bool
-native_dispatch_processed_regions_native(ListHead* sub_list) {
+native_dispatch_processed_regions_native(std::list<WorkItem>& sub_list) {
   bool any_survived = false;
-  auto* node = (WorkItemNode*)sub_list->next;
-  while ((void*)node != (void*)sub_list) {
-    auto* next = node->next;
-    WorkItem* item = &node->item;
+  for (auto it = sub_list.begin(); it != sub_list.end();) {
+    WorkItem& item = *it;
 
     bool degenerate_on_entry =
-      item->rectY1 < item->rectY0 || item->rectX1 < item->rectX0;
-    bool survives = !degenerate_on_entry && native_commit_item(item);
+      item.rectY1 < item.rectY0 || item.rectX1 < item.rectX0;
+    bool survives = !degenerate_on_entry && native_commit_item(&item);
 
     if (!survives) {
-      list_unhook(node);
-      native_destroy_item_node(node);
+      it = sub_list.erase(it);
     } else {
       any_survived = true;
+      ++it;
     }
-    node = next;
   }
   return any_survived;
 }
@@ -554,72 +523,45 @@ native_stale_row_cleanup() {
 // Mirrors display_thread_func's g_pListProcessedUpdates GC (§6.2 step 2):
 // tears down every processed item whose lifetime has expired
 // (curFrame >= frameAnchor+lutWidthMinus1), first scrubbing every other
-// processed item's intList of dependency entries pointing at the doomed
-// item (the matching teardown for the links build_overlap_dependency_list
-// builds - see §6.2a).
+// processed item's deps of entries pointing at the doomed item (the
+// matching teardown for the links build_overlap_dependency_list builds -
+// see §6.2a).
 static void
 native_gc_processed_updates() {
   auto* queue = update_queue_globals();
 
-  auto* node = (WorkItemNode*)queue->listProcessedUpdates.next;
-  while ((void*)node != &queue->listProcessedUpdates) {
-    auto* next = node->next;
-    WorkItem& item = node->item;
+  for (auto it = queue->listProcessedUpdates.begin();
+       it != queue->listProcessedUpdates.end();) {
+    WorkItem& item = *it;
 
     if (queue->curFrame >= item.frameAnchor + item.lutWidthMinus1) {
-      for (auto* other = (WorkItemNode*)queue->listProcessedUpdates.next;
-           (void*)other != &queue->listProcessedUpdates;
-           other = other->next) {
-        WorkItem& other_item = other->item;
-        for (auto* dep = (IntListNode*)other_item.intList.next;
-             (void*)dep != &other_item.intList;) {
-          auto* dep_next = dep->next;
-          if ((WorkItem*)(intptr_t)dep->value == &item) {
-            list_unhook(dep);
-            ::operator delete(dep);
-            other_item.intListCount--;
-          }
-          dep = dep_next;
-        }
+      for (auto& other : queue->listProcessedUpdates) {
+        auto& deps = other.deps;
+        deps.erase(std::remove(deps.begin(), deps.end(), &item), deps.end());
       }
 
-      queue->processedUpdatesCount--;
-      list_unhook(node);
-      native_destroy_item_node(node);
+      it = queue->listProcessedUpdates.erase(it);
+    } else {
+      ++it;
     }
-
-    node = next;
   }
 }
 
 // Mirrors build_overlap_dependency_list (0x3a838, CONFIRMED - see §6.2a):
-// for each item in `sub_list`, rebuilds its intList from scratch against
-// every still-active item in g_pListProcessedUpdates whose rect overlaps
-// and whose lifetime outlasts this item's own frameAnchor.
+// for each item in `sub_list`, rebuilds its deps from scratch against every
+// still-active item in g_pListProcessedUpdates whose rect overlaps and
+// whose lifetime outlasts this item's own frameAnchor.
 static void
-native_build_overlap_dependency_list(ListHead* sub_list) {
+native_build_overlap_dependency_list(std::list<WorkItem>& sub_list) {
   auto* queue = update_queue_globals();
 
-  for (auto* node = (WorkItemNode*)sub_list->next; (void*)node != sub_list;
-       node = node->next) {
-    WorkItem& item = node->item;
-
-    for (auto* dep = (IntListNode*)item.intList.next;
-         (void*)dep != &item.intList;) {
-      auto* dep_next = dep->next;
-      ::operator delete(dep);
-      dep = dep_next;
-    }
-    item.intList = { &item.intList, &item.intList };
-    item.intListCount = 0;
+  for (auto& item : sub_list) {
+    item.deps.clear();
 
     if (item.rectY0 > item.rectY1 || item.rectX0 > item.rectX1)
       continue; // degenerate item rect - no dependencies possible
 
-    for (auto* other_node = (WorkItemNode*)queue->listProcessedUpdates.next;
-         (void*)other_node != &queue->listProcessedUpdates;
-         other_node = other_node->next) {
-      WorkItem& other = other_node->item;
+    for (auto& other : queue->listProcessedUpdates) {
       if (other.rectY0 > other.rectY1 || other.rectX0 > other.rectX1)
         continue; // degenerate other rect
 
@@ -631,11 +573,7 @@ native_build_overlap_dependency_list(ListHead* sub_list) {
       if (item.frameAnchor >= other.frameAnchor + other.lutWidthMinus1)
         continue; // "other" won't outlive item - no need to track it
 
-      auto* dep = (IntListNode*)::operator new(sizeof(IntListNode));
-      dep->value =
-        (int32_t)(intptr_t)&other; // a WorkItem*, see IntListNode's comment
-      list_insert_before(&item.intList, dep);
-      item.intListCount++;
+      item.deps.push_back(&other);
     }
   }
 }
@@ -681,7 +619,7 @@ native_playback_kernel_dispatch(PlaybackKernelFn kernel_fn,
 
   int32_t new_phase = item->phase + frame_count;
   int32_t lut_width =
-    *(const int32_t*)item->lut.ptr; // full packed width, NOT lutWidthMinus1
+    *(const int32_t*)item->lut.get(); // full packed width, NOT lutWidthMinus1
   item->frameCursor += frame_count;
   item->phase = (int16_t)new_phase;
   if (lut_width <= new_phase) {
@@ -817,17 +755,12 @@ native_advance_work_item_frames(WorkItem* item) {
 
   int32_t budget = cursor->nFrameCleanupCursor - start_frame_cursor + 1;
 
-  bool int_list_empty = (item->intList.next == &item->intList);
+  bool int_list_empty = item->deps.empty();
   bool have_active_dep = false;
-  if (!int_list_empty) {
-    for (auto* dep = (IntListNode*)item->intList.next;
-         (void*)dep != &item->intList;
-         dep = dep->next) {
-      auto* other = (WorkItem*)(intptr_t)dep->value;
-      if (item->frameAnchor < other->frameAnchor + other->lutWidthMinus1) {
-        have_active_dep = true;
-        break;
-      }
+  for (auto* other : item->deps) {
+    if (item->frameAnchor < other->frameAnchor + other->lutWidthMinus1) {
+      have_active_dep = true;
+      break;
     }
   }
 
@@ -835,14 +768,11 @@ native_advance_work_item_frames(WorkItem* item) {
   if (have_active_dep || phase_mod8 != 0) {
     // "Plain" kernel path - when there's (or was) a dependency list to
     // consider, fold a tighter bound from every still-active, already-
-    // settled (its own intList empty) linked item before clamping.
+    // settled (its own deps empty) linked item before clamping.
     if (!int_list_empty) {
       int32_t bound = 0x7ffffffe;
-      for (auto* dep = (IntListNode*)item->intList.next;
-           (void*)dep != &item->intList;
-           dep = dep->next) {
-        auto* other = (WorkItem*)(intptr_t)dep->value;
-        bool other_settled = (other->intList.next == &other->intList) &&
+      for (auto* other : item->deps) {
+        bool other_settled = other->deps.empty() &&
                              (other->phase < other->lutWidthMinus1);
         if (other_settled)
           bound = std::min(bound, other->frameCursor - 1);
@@ -873,10 +803,10 @@ native_advance_work_item_frames(WorkItem* item) {
   // consumed the whole advance).
   if (dispatched && item->frameCursor - 1 >= start_frame_cursor) {
     uint8_t* dirty_gate = backbuffer_dirty_gate();
-    auto* sp3 = (const RegionRows*)item->sp3.ptr;
+    auto* transitions = item->pixelTransitions.get();
     for (int32_t f = start_frame_cursor; f != item->frameCursor; f++) {
       uint8_t* row = dirty_gate + (int64_t)(f % 16) * kDirtyGateRowBytes;
-      for (int32_t col = sp3->x0; col <= sp3->x1; col++)
+      for (int32_t col = transitions->x0; col <= transitions->x1; col++)
         row[col] = 1;
     }
   }
@@ -919,155 +849,132 @@ native_display_thread_func(void*) {
     // 2. g_pListProcessedUpdates GC.
     native_gc_processed_updates();
 
-    bool processed_empty =
-      (queue->listProcessedUpdates.next == &queue->listProcessedUpdates);
-    bool incoming_empty =
-      (queue->listIncomingUpdates.next == &queue->listIncomingUpdates);
+    bool processed_empty = queue->listProcessedUpdates.empty();
+    bool incoming_empty = queue->listIncomingUpdates.empty();
     if (processed_empty && incoming_empty && queue->shutdownRequested != 0)
       break;
 
     // 3-6. Incoming-batch intake, gate-check, dispatch, commit.
     if (!incoming_empty &&
         pthread_mutex_trylock(&queue->updateQueueMutex) == 0) {
-      auto* batch = (BatchNode*)queue->listIncomingUpdates.next;
-      while ((void*)batch != &queue->listIncomingUpdates) {
-        auto* next_batch = batch->next;
-
-        if (batch->subList.next == &batch->subList) {
-          // Empty sub-list - unhook and free immediately.
-          list_unhook(batch);
-          queue->incomingBatchCount--;
-          native_free_update_region_list(&batch->subList);
-          ::operator delete(batch);
-        } else {
-          native_build_overlap_dependency_list(&batch->subList);
-
-          // Gate-check "max lifetime" scan (now exact, not
-          // "[derived, not fully closed]" - a dependency is skipped only
-          // when NEITHER item requested Sync AND BOTH are FullRefresh,
-          // since a FullRefresh redraw makes waiting on another
-          // FullRefresh-only dependency's completion pointless).
-          int32_t max_lifetime = 0;
-          for (auto* item_node = (WorkItemNode*)batch->subList.next;
-               (void*)item_node != &batch->subList;
-               item_node = item_node->next) {
-            WorkItem& item = item_node->item;
-            int32_t item_max = 0;
-            for (auto* dep = (IntListNode*)item.intList.next;
-                 (void*)dep != &item.intList;
-                 dep = dep->next) {
-              auto* other = (WorkItem*)(intptr_t)dep->value;
-              bool skip = item.sync == 0 && other->sync == 0 &&
-                          item.fullRefresh != 0 && other->fullRefresh != 0;
-              if (!skip)
-                item_max = std::max(item_max,
-                                    other->frameAnchor + other->lutWidthMinus1);
-            }
-            max_lifetime = std::max(max_lifetime, item_max);
-          }
-
-          int32_t gate_target = std::max(max_lifetime, queue->curFrame);
-          if (cursor->nFrameCleanupCursor - gate_target > 6) {
-            bool dispatched = native_dispatch_processed_regions_native(&batch->subList);
-
-            if (dispatched) {
-              int32_t target;
-              if (!cursor->bWorkerThreadBusy ||
-                  queue->curFrame != queue->targetFrame) {
-                int64_t workload_sum = 0;
-                int32_t min_x0 = INT32_MAX;
-                for (auto* item_node = (WorkItemNode*)batch->subList.next;
-                     (void*)item_node != &batch->subList;
-                     item_node = item_node->next) {
-                  WorkItem& item = item_node->item;
-                  int32_t width = 0, height = 0;
-                  if (item.rectY0 <= item.rectY1 &&
-                      item.rectX0 <= item.rectX1) {
-                    height = item.rectY1 - item.rectY0 + 1;
-                    width = item.rectX1 - item.rectX0 + 1;
-                  }
-                  workload_sum += ((int64_t)width * height * 8) / 1000;
-                  min_x0 = std::min(min_x0, item.rectX0);
-                }
-                int32_t budget = (int32_t)workload_sum + 100;
-                int32_t pace_target =
-                  (int32_t)(((int64_t)min_x0 + 1) * 0x1d96 / 1000);
-
-                pthread_mutex_lock(&queue->displayTimingMutex);
-                struct timespec now;
-                clock_gettime(CLOCK_MONOTONIC_RAW, &now);
-                int32_t base_frame =
-                  (queue->curFrame - 1 == cursor->nLastPannedFrame)
-                    ? queue->curFrame
-                    : queue->curFrame - 1;
-                int64_t elapsed_us =
-                  (int64_t)(now.tv_sec - queue->lastPanTimestamp.tv_sec) *
-                    1000000 +
-                  (now.tv_nsec - queue->lastPanTimestamp.tv_nsec) / 1000;
-                pthread_mutex_unlock(&queue->displayTimingMutex);
-
-                if (elapsed_us > 11762) {
-                  elapsed_us = 0;
-                  base_frame += 1;
-                }
-
-                int32_t diff = pace_target - (int32_t)elapsed_us;
-                if (budget < diff)
-                  target = base_frame;
-                else if (budget - diff <= 11761)
-                  target = base_frame + 1;
-                else if (budget - diff <= 23523)
-                  target = base_frame + 2;
-                else
-                  target = queue->targetFrame;
-                target = std::min(target, queue->targetFrame);
-              } else {
-                target = queue->curFrame;
-              }
-
-              int32_t committed = std::max(max_lifetime, target);
-              for (auto* item_node = (WorkItemNode*)batch->subList.next;
-                   (void*)item_node != &batch->subList;
-                   item_node = item_node->next) {
-                item_node->item.frameCursor = committed;
-                item_node->item.frameAnchor = committed;
-              }
-
-              // Dependencies now reflect final frame numbers - rebuild.
-              native_build_overlap_dependency_list(&batch->subList);
-
-              for (auto* item_node = (WorkItemNode*)batch->subList.next;
-                   (void*)item_node != &batch->subList;
-                   item_node = item_node->next) {
-                native_advance_work_item_frames(&item_node->item);
-                auto* new_node =
-                  (WorkItemNode*)::operator new(sizeof(WorkItemNode));
-                native_update_item_copy(&new_node->item, &item_node->item);
-                list_insert_before(&queue->listProcessedUpdates, new_node);
-                queue->processedUpdatesCount++;
-              }
-            }
-
-            list_unhook(batch);
-            queue->incomingBatchCount--;
-            native_free_update_region_list(&batch->subList);
-            ::operator delete(batch);
-          }
-          // else: gate failed - leave this batch in place, retry next tick.
+      for (auto batch_it = queue->listIncomingUpdates.begin();
+           batch_it != queue->listIncomingUpdates.end();) {
+        if (batch_it->subList.empty()) {
+          // Empty sub-list - erase immediately.
+          batch_it = queue->listIncomingUpdates.erase(batch_it);
+          continue;
         }
 
-        batch = next_batch;
+        Batch& batch = *batch_it;
+        native_build_overlap_dependency_list(batch.subList);
+
+        // Gate-check "max lifetime" scan (now exact, not
+        // "[derived, not fully closed]" - a dependency is skipped only
+        // when NEITHER item requested Sync AND BOTH are FullRefresh,
+        // since a FullRefresh redraw makes waiting on another
+        // FullRefresh-only dependency's completion pointless).
+        int32_t max_lifetime = 0;
+        for (auto& item : batch.subList) {
+          int32_t item_max = 0;
+          for (auto* other : item.deps) {
+            bool skip = item.sync == 0 && other->sync == 0 &&
+                        item.fullRefresh != 0 && other->fullRefresh != 0;
+            if (!skip)
+              item_max = std::max(item_max,
+                                  other->frameAnchor + other->lutWidthMinus1);
+          }
+          max_lifetime = std::max(max_lifetime, item_max);
+        }
+
+        int32_t gate_target = std::max(max_lifetime, queue->curFrame);
+        if (cursor->nFrameCleanupCursor - gate_target > 6) {
+          bool dispatched = native_dispatch_processed_regions_native(batch.subList);
+
+          if (dispatched) {
+            int32_t target;
+            if (!cursor->bWorkerThreadBusy ||
+                queue->curFrame != queue->targetFrame) {
+              int64_t workload_sum = 0;
+              int32_t min_x0 = INT32_MAX;
+              for (auto& item : batch.subList) {
+                int32_t width = 0, height = 0;
+                if (item.rectY0 <= item.rectY1 &&
+                    item.rectX0 <= item.rectX1) {
+                  height = item.rectY1 - item.rectY0 + 1;
+                  width = item.rectX1 - item.rectX0 + 1;
+                }
+                workload_sum += ((int64_t)width * height * 8) / 1000;
+                min_x0 = std::min(min_x0, item.rectX0);
+              }
+              int32_t budget = (int32_t)workload_sum + 100;
+              int32_t pace_target =
+                (int32_t)(((int64_t)min_x0 + 1) * 0x1d96 / 1000);
+
+              pthread_mutex_lock(&queue->displayTimingMutex);
+              struct timespec now;
+              clock_gettime(CLOCK_MONOTONIC_RAW, &now);
+              int32_t base_frame =
+                (queue->curFrame - 1 == cursor->nLastPannedFrame)
+                  ? queue->curFrame
+                  : queue->curFrame - 1;
+              int64_t elapsed_us =
+                (int64_t)(now.tv_sec - queue->lastPanTimestamp.tv_sec) *
+                  1000000 +
+                (now.tv_nsec - queue->lastPanTimestamp.tv_nsec) / 1000;
+              pthread_mutex_unlock(&queue->displayTimingMutex);
+
+              if (elapsed_us > 11762) {
+                elapsed_us = 0;
+                base_frame += 1;
+              }
+
+              int32_t diff = pace_target - (int32_t)elapsed_us;
+              if (budget < diff)
+                target = base_frame;
+              else if (budget - diff <= 11761)
+                target = base_frame + 1;
+              else if (budget - diff <= 23523)
+                target = base_frame + 2;
+              else
+                target = queue->targetFrame;
+              target = std::min(target, queue->targetFrame);
+            } else {
+              target = queue->curFrame;
+            }
+
+            int32_t committed = std::max(max_lifetime, target);
+            for (auto& item : batch.subList) {
+              item.frameCursor = committed;
+              item.frameAnchor = committed;
+            }
+
+            // Dependencies now reflect final frame numbers - rebuild.
+            native_build_overlap_dependency_list(batch.subList);
+
+            // Move each surviving item onward into the processed list -
+            // batch.subList's own copies are moved-from (empty) afterward,
+            // so erasing the whole batch below is cheap and doesn't need a
+            // separate native_free_update_region_list-style pass.
+            for (auto& item : batch.subList) {
+              native_advance_work_item_frames(&item);
+              queue->listProcessedUpdates.push_back(std::move(item));
+            }
+          }
+
+          batch_it = queue->listIncomingUpdates.erase(batch_it);
+        } else {
+          // gate failed - leave this batch in place, retry next tick.
+          ++batch_it;
+        }
       }
       pthread_mutex_unlock(&queue->updateQueueMutex);
     }
 
     // 7. Bottom-of-loop sweep: keep playing back any processed item that
     // still has frames left, even if this tick didn't commit a new batch.
-    for (auto* node = (WorkItemNode*)queue->listProcessedUpdates.next;
-         (void*)node != &queue->listProcessedUpdates;
-         node = node->next) {
-      if (node->item.phase < node->item.lutWidthMinus1)
-        native_advance_work_item_frames(&node->item);
+    for (auto& item : queue->listProcessedUpdates) {
+      if (item.phase < item.lutWidthMinus1)
+        native_advance_work_item_frames(&item);
     }
   }
 

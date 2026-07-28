@@ -22,9 +22,9 @@
 //   2. LUT lookup indices: swtcon_architecture.md's current text guesses the
 //      kernel indexes the LUT "the same way read_lut_packed_pixel does" but
 //      leaves *which* (row,col) it passes as open. Working hypothesis this
-//      probe is built to test: item.stateDataPtr (+0x44) holds, per pixel,
+//      probe is built to test: item.transitionDataPtr (+0x44) holds, per pixel,
 //      the SAME packed `(oldState<<5)|newState` transition value that
-//      dispatch_processed_regions_probe.cpp already confirmed for sp3 - and
+//      dispatch_processed_regions_probe.cpp already confirmed for pixelTransitions - and
 //      LUTEntry::mode_width (16 or 32, see native_load_waveform) is exactly
 //      the bit-width of that packed field's oldState/newState halves. That
 //      strongly suggests the LUT is a classic waveform table indexed
@@ -38,6 +38,7 @@
 #include <cstring>
 #include <csignal>
 #include <dlfcn.h>
+#include <new>
 #include <sys/mman.h>
 #include <ucontext.h>
 #include <unistd.h>
@@ -187,16 +188,16 @@ lut_data_words(int mode_width, int bit_depth, int lut_width) {
 
 struct TestItem {
   WorkItemNode* node;
-  RegionRows sp3rr;
-  uint16_t* stateBuf;  // one u16 per pixel, column-major: stride*(col-x0)+(row-y0)
+  RegionRows transitionsRr;
+  uint16_t* transitionBuf;  // one u16 per pixel, column-major: stride*(col-x0)+(row-y0)
   LUTEntry lut;
 };
 
 // Builds a WorkItem covering [y0,y1]x[x0,x1] (inclusive), with a state
 // buffer (filled to `fill_transition`, packed as (old<<5)|new like
-// dispatch_processed_regions's sp3) and a synthetic LUT of the given shape.
-// No rebasing: sp3rr's origin equals the item's rect origin, so
-// stateDataPtr == the buffer base (offset 0) - keeps the first experiments
+// dispatch_processed_regions's pixelTransitions) and a synthetic LUT of the given shape.
+// No rebasing: transitionsRr's origin equals the item's rect origin, so
+// transitionDataPtr == the buffer base (offset 0) - keeps the first experiments
 // free of a second unverified variable.
 static void
 build_item(TestItem* ti, int y0, int x0, int y1, int x1, uint16_t fill_transition, int phase,
@@ -211,25 +212,27 @@ build_item(TestItem* ti, int y0, int x0, int y1, int x1, uint16_t fill_transitio
   // matching the "double free or corruption"/"invalid pointer" glibc errors
   // seen so far exactly). Guarding it turns that into an immediate,
   // localizing SIGSEGV instead.
-  ti->node = (WorkItemNode*)alloc_guarded(sizeof(WorkItemNode));
-  memset(ti->node, 0, sizeof(*ti->node));
+  // Placement-new (value-init), not memset: WorkItem now has non-trivial
+  // shared_ptr members that must actually be constructed, not just
+  // zero-filled, before being assigned into below.
+  ti->node = new (alloc_guarded(sizeof(WorkItemNode))) WorkItemNode();
   WorkItem* item = &ti->node->item;
 
   int rows = y1 - y0 + 1;
   int cols = x1 - x0 + 1;
   int strideRows = (rows + 15) & ~15;  // same rounding RegionRows uses elsewhere
-  size_t stateBytes = (size_t)strideRows * cols * sizeof(uint16_t);
-  ti->stateBuf = (uint16_t*)alloc_guarded(stateBytes);
+  size_t transitionBytes = (size_t)strideRows * cols * sizeof(uint16_t);
+  ti->transitionBuf = (uint16_t*)alloc_guarded(transitionBytes);
   for (int i = 0; i < strideRows * cols; i++)
-    ti->stateBuf[i] = fill_transition;
+    ti->transitionBuf[i] = fill_transition;
 
-  ti->sp3rr.dataPtr = (uint8_t*)ti->stateBuf;
-  ti->sp3rr.y0 = y0;
-  ti->sp3rr.x0 = x0;
-  ti->sp3rr.y1 = y1;
-  ti->sp3rr.x1 = x1;
-  ti->sp3rr.stride = strideRows;
-  ti->sp3rr.size = strideRows * cols * (int)sizeof(uint16_t);
+  ti->transitionsRr.dataPtr = (uint8_t*)ti->transitionBuf;
+  ti->transitionsRr.y0 = y0;
+  ti->transitionsRr.x0 = x0;
+  ti->transitionsRr.y1 = y1;
+  ti->transitionsRr.x1 = x1;
+  ti->transitionsRr.stride = strideRows;
+  ti->transitionsRr.size = strideRows * cols * (int)sizeof(uint16_t);
 
   size_t lut_words = lut_data_words(mode_width, bit_depth, lut_width);
   ti->lut.size_kb = lut_width;  // matches native_load_waveform: size_kb doubles as phase count
@@ -240,9 +243,7 @@ build_item(TestItem* ti, int y0, int x0, int y1, int x1, uint16_t fill_transitio
   ti->lut.data = alloc_guarded(lutBytes);
   memset(ti->lut.data, 0, lutBytes);
 
-  item->regionRows.ptr = nullptr;
-  item->regionRows.ctrl = nullptr;
-  item->gap = 0;
+  item->pixelDataPtr = 0;
   item->rectY0 = y0;
   item->rectX0 = x0;
   item->rectY1 = y1;
@@ -252,16 +253,11 @@ build_item(TestItem* ti, int y0, int x0, int y1, int x1, uint16_t fill_transitio
   item->frameAnchor = 0;
   item->phase = (int16_t)phase;
   item->lutWidthMinus1 = (int16_t)(lut_width - 1);
-  item->lut.ptr = &ti->lut;
-  item->lut.ctrl = nullptr;
+  item->lut = non_owning_sp(&ti->lut);
   item->mode = 0;
   item->temperature = 0;
-  item->sp3.ptr = &ti->sp3rr;
-  item->sp3.ctrl = nullptr;
-  item->stateDataPtr = ti->stateBuf;  // no rebase: sp3rr origin == rect origin
-  item->intList.next = &item->intList;
-  item->intList.prev = &item->intList;
-  item->intListCount = 0;
+  item->pixelTransitions = non_owning_sp(&ti->transitionsRr);
+  item->transitionDataPtr = ti->transitionBuf;  // no rebase: transitionsRr origin == rect origin
   item->sync = 0;
   item->fullRefresh = 0;
   item->pixelMode = 0;
@@ -269,7 +265,7 @@ build_item(TestItem* ti, int y0, int x0, int y1, int x1, uint16_t fill_transitio
 
 static void
 free_item(TestItem* ti) {
-  // node/stateBuf/lut.data are all guard-paged mmap regions now, not
+  // node/transitionBuf/lut.data are all guard-paged mmap regions now, not
   // malloc'd - leaking them for the lifetime of this short-lived probe
   // process is fine (a handful of experiments, not a long-running server).
   //
@@ -313,7 +309,7 @@ main() {
   g_runtime_offset = load_library();
   printf("Loaded library, runtime_offset=0x%lx\n", (unsigned long)g_runtime_offset);
 
-  // The first run of this probe (item.stateDataPtr/lut only, no global
+  // The first run of this probe (item.transitionDataPtr/lut only, no global
   // bridging) silently corrupted memory even with a 256KB guard on every
   // buffer - i.e. not a moderate stride overshoot off one of our own
   // buffers. dispatch_processed_regions_probe.cpp hit an analogous issue:
@@ -322,7 +318,7 @@ main() {
   // whatever a freshly dlopen'd library defaults to (very likely null).
   // Bridge the same globals defensively here in case FUN_0004a140 turns out
   // to read per-pixel state from g_pStateBuffer (absolute screen row/col)
-  // rather than item.stateDataPtr as swtcon_architecture.md's "[derived]"
+  // rather than item.transitionDataPtr as swtcon_architecture.md's "[derived]"
   // (i.e. unconfirmed) description currently guesses.
   if (native_init_statebuffer() != 0) {
     fprintf(stderr, "native_init_statebuffer failed\n");
@@ -362,7 +358,7 @@ main() {
   // Transition (0,0), mode_width=32/bit_depth=2/lutWidth=8 (typical
   // GC16-shaped LUT), LUT cell (row=0,col=0,phase=0) set to the max 2-bit
   // value (3) - the decompile also confirmed the LUT index formula matches
-  // native_read_lut_packed_pixel exactly, using the raw stateDataPtr u16
+  // native_read_lut_packed_pixel exactly, using the raw transitionDataPtr u16
   // value directly as `mw*row+col` (not a >>5/&0x1f split - numerically
   // identical only because mode_width=32 here).
   {
@@ -374,8 +370,8 @@ main() {
     write_lut_packed_pixel(&ti.lut, 0, 0, 0, 3);
     clear_slots();
 
-    printf("  node=%p stateBuf=%p lut.data=%p frame_slots(array)=%p frame_slots[0..7]=",
-           (void*)ti.node, (void*)ti.stateBuf, ti.lut.data, (void*)frame_slots);
+    printf("  node=%p transitionBuf=%p lut.data=%p frame_slots(array)=%p frame_slots[0..7]=",
+           (void*)ti.node, (void*)ti.transitionBuf, ti.lut.data, (void*)frame_slots);
     for (int i = 0; i < 8; i++)
       printf("%p ", frame_slots[i]);
     printf("\n");
@@ -435,7 +431,7 @@ main() {
     // pixel at (Y0,X0): transition (oldState=1,newState=2) -> packed (1<<5)|2 = 0x22
     // pixel at (Y0,X1): transition (oldState=5,newState=7) -> packed (5<<5)|7 = 0xa7
     auto cell = [&](int col, int row) -> uint16_t& {
-      return ti.stateBuf[(size_t)ti.sp3rr.stride * (col - ti.sp3rr.x0) + (row - ti.sp3rr.y0)];
+      return ti.transitionBuf[(size_t)ti.transitionsRr.stride * (col - ti.transitionsRr.x0) + (row - ti.transitionsRr.y0)];
     };
     cell(X0, Y0) = (1 << 5) | 2;
     cell(X1, Y0) = (5 << 5) | 7;
@@ -477,7 +473,7 @@ main() {
       // keeps the default fill transition 0, whose LUT cell is left
       // unmarked (0) - only row r should produce nonzero output.
       auto cell = [&](int col, int row) -> uint16_t& {
-        return ti.stateBuf[(size_t)ti.sp3rr.stride * (col - ti.sp3rr.x0) + (row - ti.sp3rr.y0)];
+        return ti.transitionBuf[(size_t)ti.transitionsRr.stride * (col - ti.transitionsRr.x0) + (row - ti.transitionsRr.y0)];
       };
       cell(X0, r) = (1 << 5) | 0;
       write_lut_packed_pixel(&ti.lut, /*row=*/1, /*col=*/0, /*phase=*/0, 3);
@@ -549,7 +545,7 @@ main() {
     build_item(&ti, 0, X0, 7, X0, /*fill_transition=*/0, /*phase=*/0, /*mode_width=*/32,
                /*bit_depth=*/2, /*lut_width=*/16);
     auto cell = [&](int col, int row) -> uint16_t& {
-      return ti.stateBuf[(size_t)ti.sp3rr.stride * (col - ti.sp3rr.x0) + (row - ti.sp3rr.y0)];
+      return ti.transitionBuf[(size_t)ti.transitionsRr.stride * (col - ti.transitionsRr.x0) + (row - ti.transitionsRr.y0)];
     };
     cell(X0, 0) = (1 << 5) | 0;  // row 0 only: transition (oldState=1,newState=0) = 32
     write_lut_packed_pixel(&ti.lut, /*row=*/1, /*col=*/0, /*phase=*/0, 1);  // bit-offset 0
@@ -602,7 +598,7 @@ main() {
     build_item(&ti, Y0, X0, Y1, X1, /*fill_transition=*/0, /*phase=*/0, /*mode_width=*/32,
                /*bit_depth=*/2, /*lut_width=*/8);
     auto cell = [&](int col, int row) -> uint16_t& {
-      return ti.stateBuf[(size_t)ti.sp3rr.stride * (col - ti.sp3rr.x0) + (row - ti.sp3rr.y0)];
+      return ti.transitionBuf[(size_t)ti.transitionsRr.stride * (col - ti.transitionsRr.x0) + (row - ti.transitionsRr.y0)];
     };
     // Deterministic pseudo-random transition per pixel (mw=32, so oldState/
     // newState each 0-31 - keep both in range so the transition value stays

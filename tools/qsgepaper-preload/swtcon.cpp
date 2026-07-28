@@ -36,10 +36,6 @@ typedef int (*init_func_t)(void* state_out, int zero);
 static void* libqsgepaper_handle = nullptr;
 static uintptr_t runtime_offset = 0;
 
-// Owns the waveform vector's backing allocation so swtcon_shutdown can free
-// it (Phase 7) - see the comment at its allocation site in swtcon_init.
-static std::vector<ModeEntry*>* g_nativeWaveformStruct = nullptr;
-
 static init_func_t qsgepaper_init = nullptr;
 
 // Library exports for A/B comparison against the native update
@@ -160,16 +156,13 @@ swtcon_init() {
     auto* sb = statebuffer_globals();
     auto* fb = framebuffer_globals();
 
-    // Phase 7: these three intrusive std::list sentinels used to come from
-    // the library's own .bss, already self-referencing by the time our code
-    // ran because the library's C++ static constructors initialized them at
-    // dlopen() time. Now that UpdateQueueGlobals is natively-owned storage
-    // (zero-initialized), nothing constructs them - so every empty-list
-    // check ("next == &head") and every list walk needs this explicit
-    // self-reference set up before anything else touches the queue.
-    queue->listProcessedUpdates = { &queue->listProcessedUpdates, &queue->listProcessedUpdates };
-    queue->listIncomingUpdates = { &queue->listIncomingUpdates, &queue->listIncomingUpdates };
-    queue->accumList = { &queue->accumList, &queue->accumList };
+    // Phase 4 cleanup (Step 4): listProcessedUpdates/listIncomingUpdates/
+    // accumList are real std::list<T> now (see native_update.h's
+    // UpdateQueueGlobals) - their own default constructor already produces
+    // a valid empty list, so the explicit self-referencing-sentinel setup
+    // this used to need (back when they were a hand-rolled ListHead that
+    // had to be manually made self-referencing before any empty-list check
+    // or list walk would work) is no longer necessary at all.
 
     queue->dataBuffer = g_pImageBufferNative;
     queue->backBuffer = g_pScreenBufferNative;
@@ -179,22 +172,11 @@ swtcon_init() {
 
     char* path1 = (char*)"/usr/share/remarkable/320_R467_AF4731_ED103TC2C6_VB3300-KCD_TC.wbf";
 
-    // Heap-allocated; torn down by swtcon_shutdown (Phase 7 - see
-    // g_nativeWaveformStruct's declaration). queue->waveformStructRaw below
-    // gets a byte-copy of this vector's {begin,end,cap} pointers so it aliases
-    // the exact same backing array - only the 12-byte vector object itself is
-    // a separate allocation, kept alive here so shutdown has something to
-    // free it through.
-    g_nativeWaveformStruct = new std::vector<ModeEntry*>();
     std::cout << "Calling native_load_waveform with path=" << path1 << std::endl;
-    if (!native_load_waveform(g_nativeWaveformStruct, path1)) {
+    if (!native_load_waveform(&queue->waveform, path1)) {
         std::cerr << "swtcon_init: failed to load waveform natively" << std::endl;
         return nullptr;
     }
-
-    // Sync vector structure to library memory layout
-    static_assert(sizeof(queue->waveformStructRaw) == sizeof(std::vector<ModeEntry*>), "");
-    memcpy(queue->waveformStructRaw, g_nativeWaveformStruct, sizeof(std::vector<ModeEntry*>));
 
     std::cout << "Initializing framebuffer..." << std::endl;
     FbInitParams fb_info = {};
@@ -297,7 +279,7 @@ swtcon_init() {
 // two byte-for-byte.
 void
 swtcon_dump_waveform() {
-  auto* vec = (std::vector<ModeEntry*>*)(void*)update_queue_globals()->waveformStructRaw;
+  auto* vec = &update_queue_globals()->waveform;
   std::cout << "=== waveform dump: " << vec->size() << " modes ===" << std::endl;
   for (size_t mi = 0; mi < vec->size(); mi++) {
     ModeEntry* m = (*vec)[mi];
@@ -383,8 +365,8 @@ swtcon_shutdown(int state_ptr_or_zero) {
 
   // wait for queues to empty
   while (queue->shutdownRequested == 0 &&
-         (queue->listIncomingUpdates.next != &queue->listIncomingUpdates ||
-          queue->listProcessedUpdates.next != &queue->listProcessedUpdates)) {
+         (!queue->listIncomingUpdates.empty() ||
+          !queue->listProcessedUpdates.empty())) {
     usleep(100);
   }
 
@@ -427,12 +409,9 @@ swtcon_shutdown(int state_ptr_or_zero) {
   // the production path. ModeEntry/LUTEntry already have correct native
   // destructors (see native_init.h), so freeing it here is just walking the
   // vector - not new reversing.
-  if (g_nativeWaveformStruct) {
-    for (auto* mode : *g_nativeWaveformStruct)
-      delete mode;
-    delete g_nativeWaveformStruct;
-    g_nativeWaveformStruct = nullptr;
-  }
+  for (auto* mode : queue->waveform)
+    delete mode;
+  queue->waveform.clear();
 
   std::cout << "swtcon_shutdown: complete." << std::endl;
 }

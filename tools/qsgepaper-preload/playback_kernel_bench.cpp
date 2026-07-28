@@ -7,7 +7,7 @@
 // a concrete before/after number, rather than only "the panel feels slower".
 //
 // Two things this tool measures, both against the same synthetic WorkItem/
-// state/LUT input:
+// transitions/LUT input:
 //   1. native_playback_kernel_plain's wall-clock cost across a matrix of
 //      rect sizes and frameCounts representative of real update traffic
 //      (see swtcon_architecture.md §6.4/§6.5 for where these shapes and the
@@ -135,8 +135,8 @@ lut_data_words(int mode_width, int bit_depth, int lut_width) {
 }
 
 // A self-contained synthetic WorkItem - only the fields
-// native_playback_kernel_plain actually reads (rect, phase, lut, sp3.stride,
-// stateDataPtr; see its definition in native_display.cpp) need to be valid,
+// native_playback_kernel_plain actually reads (rect, phase, lut, pixelTransitions.stride,
+// transitionDataPtr; see its definition in native_display.cpp) need to be valid,
 // so unlike playback_kernel_probe.cpp's build_item this needs no
 // WorkItemNode/regionRows/intList scaffolding.
 // LUTEntry (native_init.h) already frees `data` in its own destructor
@@ -147,8 +147,8 @@ lut_data_words(int mode_width, int bit_depth, int lut_width) {
 // alongside it is a double free, not a safety net.
 struct BenchItem {
   WorkItem item{};
-  RegionRows sp3rr{};
-  std::vector<uint16_t> state;
+  RegionRows transitionsRr{};
+  std::vector<uint16_t> transitions;
   LUTEntry lut{};
 };
 
@@ -166,19 +166,20 @@ build_item(BenchItem& bi, int y0, int x0, int y1, int x1, int mode_width, int bi
   };
 
   // Varied, not uniform: the kernel's LUT lookup index depends on the
-  // per-pixel state value, so a uniform fill would hit one LUT cache line
-  // over and over - not representative of a real, non-uniform screen update.
-  bi.state.assign((size_t)strideRows * cols, 0);
-  for (auto& v : bi.state)
+  // per-pixel transition value, so a uniform fill would hit one LUT cache
+  // line over and over - not representative of a real, non-uniform screen
+  // update.
+  bi.transitions.assign((size_t)strideRows * cols, 0);
+  for (auto& v : bi.transitions)
     v = (uint16_t)((next_rand() % mode_width) * mode_width + (next_rand() % mode_width));
 
-  bi.sp3rr.dataPtr = (uint8_t*)bi.state.data();
-  bi.sp3rr.y0 = y0;
-  bi.sp3rr.x0 = x0;
-  bi.sp3rr.y1 = y1;
-  bi.sp3rr.x1 = x1;
-  bi.sp3rr.stride = strideRows;
-  bi.sp3rr.size = strideRows * cols * (int)sizeof(uint16_t);
+  bi.transitionsRr.dataPtr = (uint8_t*)bi.transitions.data();
+  bi.transitionsRr.y0 = y0;
+  bi.transitionsRr.x0 = x0;
+  bi.transitionsRr.y1 = y1;
+  bi.transitionsRr.x1 = x1;
+  bi.transitionsRr.stride = strideRows;
+  bi.transitionsRr.size = strideRows * cols * (int)sizeof(uint16_t);
 
   size_t lut_words = lut_data_words(mode_width, bit_depth, lut_width);
   bi.lut.size_kb = lut_width; // size_kb doubles as phase count, see native_load_waveform
@@ -196,9 +197,9 @@ build_item(BenchItem& bi, int y0, int x0, int y1, int x1, int mode_width, int bi
   bi.item.rectX1 = x1;
   bi.item.phase = 0; // 8-aligned: lets the aligned kernel path be exercised too
   bi.item.lutWidthMinus1 = (int16_t)(lut_width - 1);
-  bi.item.lut.ptr = &bi.lut;
-  bi.item.sp3.ptr = &bi.sp3rr;
-  bi.item.stateDataPtr = bi.state.data(); // no rebase needed: state is item-rect-relative already
+  bi.item.lut = non_owning_sp(&bi.lut);
+  bi.item.pixelTransitions = non_owning_sp(&bi.transitionsRr);
+  bi.item.transitionDataPtr = bi.transitions.data(); // no rebase needed: already item-rect-relative
 }
 
 struct Result {

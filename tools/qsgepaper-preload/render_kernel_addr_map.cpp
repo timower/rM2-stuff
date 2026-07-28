@@ -86,8 +86,7 @@ main(int argc, char** argv) {
   };
   fill_range(0, N, B0);
 
-  WorkItem item;
-  memset(&item, 0, sizeof(item));
+  WorkItem item{};
   RegionRows rr;
   rr.dataPtr = output;
   rr.y0 = rectY0;
@@ -96,8 +95,8 @@ main(int argc, char** argv) {
   rr.x1 = rectX0 + RECT - 1;
   rr.stride = RECT;
   rr.size = RECT * RECT;
-  item.regionRows.ptr = &rr;
-  item.gap = (int32_t)(intptr_t)rr.dataPtr;
+  item.regionRows = non_owning_sp(&rr);
+  item.pixelDataPtr = (int32_t)(intptr_t)rr.dataPtr;
   item.rectY0 = rectY0;
   item.rectX0 = rectX0;
   item.rectY1 = rectY0 + RECT - 1;

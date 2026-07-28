@@ -14,19 +14,30 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <list>
+#include <memory>
+#include <pthread.h>
+#include <semaphore.h>
 #include <vector>
 
 #include "native_init.h" // ModeEntry
 #include "qsgepaper_globals.h"
 #include "swtcon.h"
 
-// A shared_ptr as the library inlines it: the aliased raw pointer plus the
-// control-block pointer (release_sp/retain_sp operate on `ctrl`).
-struct SpRef {
-  void* ptr;
-  void* ctrl;
-};
-static_assert(sizeof(SpRef) == 8, "SpRef must be two pointers");
+// Builds a non-owning std::shared_ptr<T> (get()==ptr, use_count()==0, no
+// control block) aliasing externally-owned storage - the shared_ptr
+// equivalent of the old SpRef{ptr, ctrl=nullptr} pattern the probe/bench
+// tools use to point a WorkItem's regionRows/lut/pixelTransitions at their own
+// stack/scratch test buffers without giving the shared_ptr any
+// ownership/refcounting responsibility over them (those buffers are often
+// guard-paged and must not be freed via this alias). Standard-sanctioned:
+// the aliasing constructor with an empty owning shared_ptr always produces
+// {ptr, ctrl=nullptr}.
+template<typename T>
+inline std::shared_ptr<T>
+non_owning_sp(T* ptr) {
+  return std::shared_ptr<T>(std::shared_ptr<void>(), ptr);
+}
 
 // A work-item rect in the library's native {y0,x0,y1,x1} field order (see
 // WorkItem below).
@@ -44,6 +55,16 @@ struct XYRect {
 // dispatch_update_regions's (0x4fff8) output, hung off a work item's
 // `regionRows` shared_ptr - the raw pointer half points directly at this
 // struct. Column-major: address(y,x) = dataPtr + stride*(x-x0) + (y-y0).
+//
+// `dataPtr` is a plain non-owning pointer - deliberately not a smart pointer
+// or an owning destructor here, since probe/bench tools construct bare
+// RegionRows values on the stack aliasing externally-owned (often
+// guard-paged) test buffers they must NOT have freed out from under them at
+// scope exit. The two real allocation sites that DO own their buffer
+// (native_dispatch_update_regions's regionRows, native_commit_item's
+// pixelTransitions, which stores uint16_t payload despite the uint8_t* type
+// - see its comment)
+// free it via a custom deleter on the owning shared_ptr instead.
 struct RegionRows {
   uint8_t* dataPtr;  // size = stride * (x1-x0+1)
   int32_t y0, x0, y1, x1;
@@ -52,25 +73,11 @@ struct RegionRows {
 };
 static_assert(sizeof(RegionRows) == 0x1c, "RegionRows layout drift");
 
-// A node of the work item's embedded std::list<int> at +0x48. Despite the
-// "int" in std::list<int>, `value` (confirmed via disassembly of
-// build_overlap_dependency_list, 0x3a838) actually holds a raw `WorkItem*`
-// pointing at another in-flight item this one's rendering depends on - not
-// a scalar id/count. Kept as int32_t here (same size on this 32-bit target)
-// rather than WorkItem* to avoid a circular type dependency; cast at each
-// use site instead.
-struct IntListNode {
-  IntListNode* next;
-  IntListNode* prev;
-  int32_t value; // actually a WorkItem* - see comment above
-};
-static_assert(sizeof(IntListNode) == 0xc, "IntListNode layout drift");
-
 // The library's internal "update work item", 0x5c bytes. Mirrors
 // update_item_ctor (0x3ffd0). Lives embedded at +8 inside a WorkItemNode.
 struct WorkItem {
-  SpRef regionRows;          // +0x00 shared_ptr<RegionRows> (dispatch_update_regions's output)
-  int32_t gap;                // +0x08 cached RegionRows::dataPtr, rebased to this item's rect origin (see native_piece_builder)
+  std::shared_ptr<RegionRows> regionRows; // +0x00 (dispatch_update_regions's output)
+  int32_t pixelDataPtr;        // +0x08 cached RegionRows::dataPtr (the newly-rendered per-pixel byte), rebased to this item's rect origin (see native_piece_builder). Stored as int32_t, not a real pointer type, to match the real library's ABI - dispatch_processed_regions_probe.cpp still calls the real by-address dispatch_processed_regions, whose commit kernels (FUN_0004f8f0/FUN_0004e680) read this field via WorkItem+0x08 (see native_commit_item's comment).
   int32_t rectY0;               // +0x0c
   int32_t rectX0;                // +0x10
   int32_t rectY1;                 // +0x14
@@ -80,14 +87,45 @@ struct WorkItem {
   int32_t frameAnchor;                // +0x24 [confirmed] frame this item's playback started on; frameAnchor+lutWidthMinus1 = last active frame
   int16_t phase;                       // +0x28 [confirmed] frames of this item's waveform already rendered; lutWidthMinus1-phase = frames remaining
   int16_t lutWidthMinus1;               // +0x2a
-  SpRef lut;                             // +0x2c shared_ptr<LUTEntry> (selected waveform LUT)
+  std::shared_ptr<LUTEntry> lut;          // +0x2c (selected waveform LUT)
   int16_t mode;                           // +0x34
   int16_t _pad0x36;
   float temperature;                       // +0x38
-  SpRef sp3;                                // +0x3c [confirmed] shared_ptr<RegionRows> - a second per-pixel state buffer distinct from regionRows; advance_work_item_frames reads sp3.ptr's x0/x1 directly (RegionRows' own offsets) to mark the backBuffer dirty-gate array, and the still-library display-commit kernels (FUN_0004f8f0/FUN_0004e680, §6.3) write into it - allocation site and the u16 payload's exact meaning remain unconfirmed
-  void* stateDataPtr;                        // +0x44 [confirmed] the u16 sp3 pixel buffer REBASED to the item's (post-narrowing) rect origin: sp3.ptr->dataPtr + stride*(rectX0-sp3.x0) + (rectY0-sp3.y0), the same rebasing as `gap` vs regionRows. The still-library playback kernels FUN_0004a140/FUN_0004a234 read/write per-pixel state through THIS pointer (item+0x44), NOT via sp3.ptr->dataPtr, and index it with narrowed-rect-relative coords - so it must be set (and rebased) whenever sp3 is (re)allocated. Setting it to the un-rebased buffer base leaves valid memory (no SIGSEGV) but reads state at the wrong offset for any narrowed/split item -> edge artifacts (native_commit_item, empirically A/B-verified via SWTCON_LIBDISPATCH). Leaving it stale/null -> SIGSEGV
-  ListHead intList;                           // +0x48 std::list<int> head (IntListNode)
-  int32_t intListCount;                        // +0x50
+  // +0x3c [confirmed] a second per-pixel buffer distinct from regionRows,
+  // holding a packed uint16_t "(oldState<<5)|newState" transition value per
+  // pixel (0x0400 as the "unchanged" sentinel - see native_commit_item),
+  // NOT a snapshot of screen state itself (that's the unrelated global
+  // g_pStateBufferNative/`state`, indexed screen-wide by column/row, not by
+  // item - don't confuse the two). advance_work_item_frames reads
+  // pixelTransitions->x0/x1 directly (RegionRows' own offsets) to mark the
+  // backBuffer dirty-gate array, and the still-library display-commit
+  // kernels (FUN_0004f8f0/FUN_0004e680, §6.3) write into it.
+  std::shared_ptr<RegionRows> pixelTransitions;
+  // +0x44 [confirmed] the u16 pixelTransitions buffer REBASED to the item's
+  // (post-narrowing) rect origin: pixelTransitions->dataPtr +
+  // stride*(rectX0-pixelTransitions.x0) + (rectY0-pixelTransitions.y0), the
+  // same rebasing as `pixelDataPtr` vs regionRows. The still-library
+  // playback kernels FUN_0004a140/FUN_0004a234 read/write per-pixel
+  // transitions through THIS pointer (item+0x44), NOT via
+  // pixelTransitions->dataPtr, and index it with narrowed-rect-relative
+  // coords - so it must be set (and rebased) whenever pixelTransitions is
+  // (re)allocated. Setting it to the un-rebased buffer base leaves valid
+  // memory (no SIGSEGV) but reads the wrong offset for any narrowed/split
+  // item -> edge artifacts (native_commit_item, empirically A/B-verified
+  // via SWTCON_LIBDISPATCH). Leaving it stale/null -> SIGSEGV
+  void* transitionDataPtr;
+  // +0x48, was originally the library's embedded std::list<int> (despite the
+  // "int", each element actually held a raw WorkItem* pointing at another
+  // in-flight item this one's rendering depends on - confirmed via
+  // disassembly of build_overlap_dependency_list, 0x3a838). Nothing by-address
+  // ever reads/writes this field (unlike regionRows/lut/pixelTransitions/
+  // transitionDataPtr) - it's built and consumed entirely by native code
+  // (native_advance_work_item_frames,
+  // native_build_overlap_dependency_list, native_gc_processed_updates) - so a
+  // plain std::vector<WorkItem*> of non-owning back-pointers is both simpler
+  // and, unlike the original std::list<int> mimicry, doesn't need to match
+  // any real ABI at all.
+  std::vector<WorkItem*> deps;                // +0x48
   uint8_t sync;                                 // +0x54
   uint8_t fullRefresh;                           // +0x55
   uint8_t _pad0x56[2];
@@ -95,7 +133,7 @@ struct WorkItem {
 };
 #define WI_ASSERT(field, off) \
   static_assert(offsetof(WorkItem, field) == (off), #field " must land at " #off)
-WI_ASSERT(gap, 0x08);
+WI_ASSERT(pixelDataPtr, 0x08);
 WI_ASSERT(rectY0, 0x0c);
 WI_ASSERT(rectX0, 0x10);
 WI_ASSERT(rectY1, 0x14);
@@ -108,15 +146,26 @@ WI_ASSERT(lutWidthMinus1, 0x2a);
 WI_ASSERT(lut, 0x2c);
 WI_ASSERT(mode, 0x34);
 WI_ASSERT(temperature, 0x38);
-WI_ASSERT(sp3, 0x3c);
-WI_ASSERT(stateDataPtr, 0x44);
-WI_ASSERT(intList, 0x48);
-WI_ASSERT(intListCount, 0x50);
+WI_ASSERT(pixelTransitions, 0x3c);
+WI_ASSERT(transitionDataPtr, 0x44);
+WI_ASSERT(deps, 0x48);
 WI_ASSERT(sync, 0x54);
 WI_ASSERT(fullRefresh, 0x55);
 WI_ASSERT(pixelMode, 0x58);
 #undef WI_ASSERT
 static_assert(sizeof(WorkItem) == 0x5c, "WorkItem layout drift");
+// std::shared_ptr<T> is always exactly {T* ptr; _Sp_counted_base* ctrl} (two
+// pointers) regardless of T - verified against this project's own toolchain
+// libstdc++ headers (bits/shared_ptr_base.h) - so swapping in real
+// shared_ptr fields here doesn't change any offset above. Guards against a
+// future libstdc++ ABI change silently growing WorkItem.
+static_assert(sizeof(std::shared_ptr<RegionRows>) == 8, "shared_ptr<T> must be two pointers");
+static_assert(sizeof(std::shared_ptr<LUTEntry>) == 8, "shared_ptr<T> must be two pointers");
+// deps's offset/size only need to hold sync/fullRefresh/pixelMode at their
+// asserted offsets above - no real ABI to match (see deps's own comment) -
+// but pin it anyway as a regression guard against a future libstdc++ vector
+// layout change.
+static_assert(sizeof(std::vector<WorkItem*>) == 0xc, "std::vector<WorkItem*> must be 3 pointers (12 bytes) on this 32-bit ARM target");
 
 // A work item's containing intrusive-list node - 100 bytes total, matching
 // every `operator_new(100)` / node+8 pattern in the library.
@@ -148,36 +197,106 @@ static_assert(sizeof(BatchNode) == 0x18, "BatchNode layout drift");
 
 // True if the worker thread has already claimed this batch (won't be
 // touched again by swtcon_update/unlock_post's subtract/enqueue paths).
+// BatchNode/this function are kept only for the probe tools (see below) -
+// production code uses Batch::claimed instead (see its comment).
 inline bool
 BatchNodeClaimed(const BatchNode* b) {
   return *((const uint8_t*)b + 0x15) != 0;
 }
 
+// The production equivalent of a claimed batch of work items
+// (build_update_batch's output) - BatchNode above is kept only for the
+// probe tools, which call the real by-address library functions directly
+// and need that exact byte layout; this codebase's own queues have no such
+// ABI constraint (see UpdateQueueGlobals's comment) so they use a real
+// std::list<WorkItem> instead of a hand-rolled intrusive list.
+struct Batch {
+  std::list<WorkItem> subList;
+  int16_t mode = 0;
+  // Mirrors BatchNodeClaimed's raw +0x15 byte read. Confirmed via grep that
+  // nothing in the native pipeline ever sets this - the still-library
+  // worker_thread_func's own batch-claiming logic was never ported/
+  // reversed, so this always reads false in practice. Kept as a named field
+  // purely to preserve that already-inert check's current behavior, not
+  // because the real claiming semantics are understood (see AGENTS.md's
+  // "out of scope" note on this).
+  bool claimed = false;
+};
+
+// --- Update queue / worker+display thread state -----------------------
+// Moved here (from qsgepaper_globals.h) because listProcessedUpdates/
+// accumList/listIncomingUpdates are real std::list<WorkItem>/std::list<Batch>
+// members, which need WorkItem/Batch complete wherever this struct's
+// implicit destructor gets instantiated - i.e. wherever
+// update_queue_globals()'s function body (defining the static local
+// instance below) is compiled. Every file that actually calls
+// update_queue_globals() (swtcon.cpp, native_update.cpp, native_display.cpp)
+// already includes this header; native_init.h/.cpp never needed this struct
+// (see qsgepaper_globals.h's own note at the old location).
+//
+// This struct is native-owned storage (Phase 7) with no by-address ABI
+// constraint of its own anymore, so - unlike WorkItem/RegionRows/BatchNode
+// above - its field offsets don't need to match any real library address.
+// The three list fields replacing a ListHead+int32-count pair are each
+// exactly 12 bytes on this 32-bit target (matching libstdc++'s
+// _List_node_header under _GLIBCXX_USE_CXX11_ABI=1: 2 pointers + a cached
+// size_t), i.e. the exact same size as what they replace - not that it
+// matters anymore, but worth noting this struct's shape didn't need to
+// change shape to make room. The old version's `_reserved_0xNNNNN[...]`
+// padding fields (there purely to preserve unreversed-library-.bss gaps at
+// their real addresses) are gone too, for the same reason: nothing pins
+// this struct to a real address anymore, so they'd just be dead bytes.
+struct UpdateQueueGlobals {
+  std::list<WorkItem> listProcessedUpdates;
+  int32_t curFrame;
+  int32_t targetFrame;
+  pthread_mutex_t workerCondMutex;
+  pthread_cond_t workerCond;
+  uint8_t flashRequested; // byte flag, not int32
+  pthread_mutex_t displayTimingMutex;
+  Timespec64 lastPanTimestamp; // stamped alongside every nLastPannedFrame
+                               // write, under displayTimingMutex
+  sem_t displayThreadSem;
+  int32_t timeVar;
+  int32_t workerThreadShutdown;
+  std::vector<ModeEntry*> waveform;
+  int32_t shutdownRequested;
+  std::list<Batch> listIncomingUpdates;
+  pthread_mutex_t updateQueueMutex;
+  pthread_t displayThread;
+  pthread_t workerThread;
+  void* dataBuffer;
+  void* backBuffer;
+  std::list<WorkItem> accumList;
+  int16_t accumFlag;
+};
+
+inline UpdateQueueGlobals*
+update_queue_globals() {
+  static UpdateQueueGlobals g{};
+  return &g;
+}
+
 // Shared internal primitives, also used by native_display.cpp (worker
-// thread's flash sequence: temperature/LUT selection + shared_ptr release;
-// display thread: list bookkeeping + work-item cloning/teardown, since
-// display_thread_func manipulates the exact same WorkItemNode/BatchNode
-// lists swtcon_update does) - see native_update.cpp for definitions.
-void release_sp(void* ctrl);
+// thread's flash sequence: temperature/LUT selection; display thread: list
+// bookkeeping + work-item cloning/teardown, since display_thread_func
+// manipulates the exact same lists swtcon_update does) - see
+// native_update.cpp for definitions.
 float native_get_current_temperature();
-void native_select_waveform_lut(float temp, SpRef* out, std::vector<ModeEntry*>* waveform, unsigned mode);
-bool native_update_lut_is_valid(const SpRef& lut);
+void native_select_waveform_lut(float temp, std::shared_ptr<LUTEntry>* out,
+                                std::vector<ModeEntry*>* waveform, unsigned mode);
+bool native_update_lut_is_valid(const std::shared_ptr<LUTEntry>& lut);
 
 // Inserts `node` immediately before `pos` in a circular intrusive list (see
 // native_update.cpp's definition for the full comment) - works for any
-// ListHead-shaped sentinel/node (WorkItemNode, BatchNode, IntListNode).
+// ListHead-shaped sentinel/node (WorkItemNode, BatchNode). Kept for the
+// probe tools (see BatchNode's comment); production code uses real
+// std::list<T> operations instead.
 void list_insert_before(void* pos, void* node);
 
 // Unhooks `node` from whatever circular intrusive list it's currently in.
+// Kept for the probe tools, same rationale as list_insert_before.
 void list_unhook(void* node);
-
-// Frees a single work-item list node: its embedded intList, its three
-// shared_ptrs (regionRows/lut/sp3), then the node itself.
-void native_destroy_item_node(WorkItemNode* node);
-
-// Destroys and frees every work-item node in a circular intrusive list
-// (native_destroy_item_node per node).
-void native_free_update_region_list(ListHead* list_head);
 
 // Deep-copies a work item's shared_ptrs/list/scalars, preserving the
 // source's rect and sequence id (see CloneWorkItemFieldsInto for the

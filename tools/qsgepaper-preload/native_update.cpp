@@ -2,9 +2,11 @@
 #include "native_init.h"
 #include "swtcon_libimpl.h"
 #include <cstring>
+#include <iterator>
 #include <pthread.h>
 #include <semaphore.h>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 // Library exports resolved once at dlopen time (see swtcon.cpp's load_lib),
@@ -13,44 +15,6 @@ extern void (*qsgepaper_lock)();
 extern void (*qsgepaper_update)(update_data*);
 extern void (*qsgepaper_unlock_post)();
 extern void (*qsgepaper_wait)();
-
-// Layout of a RegionRows shared_ptr control block: vtable ptr + refcounts +
-// the RegionRows payload itself (0x28 bytes total, RegionRows starting at
-// +0xc - see swtcon_architecture.md §5.1), matching the library's own
-// allocation exactly so the generic release_sp keeps working on it
-// unmodified. Shared by native_dispatch_update_regions (the allocator) and
-// the native vtable's dispose/destroy pair below.
-struct RegionRowsBlock {
-  void* vtable;
-  int32_t useCount;
-  int32_t weakCount;
-  RegionRows rr;
-};
-static_assert(offsetof(RegionRowsBlock, rr) == 0xc, "RegionRowsBlock layout drift");
-static_assert(sizeof(RegionRowsBlock) == 0x28, "RegionRowsBlock layout drift");
-
-// The shared_ptr control block's vtable for a RegionRows allocation
-// (native_dispatch_update_regions below). Formerly borrowed the library's own
-// `&PTR_LAB_000651ec` (a generic libstdc++ dispose/destroy pair for an
-// array-new'd byte buffer); now a tiny native vtable with that same
-// dispose=array-delete/destroy=delete convention (Phase 7 - same fix
-// native_make_empty_lut's kNativeLutVtable and native_display.cpp's
-// kNativeSp3Vtable already applied to their own allocation sites), so
-// release_sp/retain_sp keep working unmodified.
-static void
-native_region_rows_dispose(void* ctrl) {
-  ::operator delete[](((RegionRowsBlock*)ctrl)->rr.dataPtr);
-}
-
-static void
-native_region_rows_destroy(void* ctrl) {
-  ::operator delete(ctrl);
-}
-
-// vt[2]/vt[3] per release_sp's convention; vt[0]/vt[1] unused.
-static void* kNativeRegionRowsVtable[4] = { nullptr, nullptr,
-                                             (void*)native_region_rows_dispose,
-                                             (void*)native_region_rows_destroy };
 
 // --- Native swtcon_update / lock / unlock_post / wait ---
 //
@@ -68,41 +32,12 @@ static void* kNativeRegionRowsVtable[4] = { nullptr, nullptr,
 //                                     paths, e.g. worker_thread_func, also
 //                                     call the library's own copy)
 
-// Release a libstdc++ _Sp_counted_base* exactly like the inlined shared_ptr
-// destructor in queue_update: atomically drop the use-count, dispose on 0,
-// then drop the weak-count and destroy on 0. vtable[2]=_M_dispose,
-// vtable[3]=_M_destroy.
-void
-release_sp(void* ctrl_) {
-  if (!ctrl_)
-    return;
-  int* ctrl = (int*)ctrl_;
-  void** vt = *(void***)ctrl;
-  if (__atomic_fetch_sub(&ctrl[1], 1, __ATOMIC_ACQ_REL) == 1) {
-    ((void (*)(void*))vt[2])(ctrl);
-    if (__atomic_fetch_sub(&ctrl[2], 1, __ATOMIC_ACQ_REL) == 1) {
-      ((void (*)(void*))vt[3])(ctrl);
-    }
-  }
-}
-
-// Retain a libstdc++ _Sp_counted_base* by atomically incrementing its
-// use-count (ctrl+4), mirroring release_sp's decrement side. Used when a
-// shared_ptr is copied (not moved) into a new work item.
-static void
-retain_sp(void* ctrl_) {
-  if (!ctrl_)
-    return;
-  int* ctrl = (int*)ctrl_;
-  __atomic_fetch_add(&ctrl[1], 1, __ATOMIC_ACQ_REL);
-}
-
 // Inserts `node` immediately before `pos` in a circular intrusive list.
 // Works for any type whose first two members are next/prev pointers - i.e.
 // every list-head sentinel (ListHead) and every node type in this file
-// (WorkItemNode, BatchNode, IntListNode) - so `pos` may be a real node or
-// the sentinel itself (inserting-before-the-sentinel == append-at-tail).
-// Non-static: also used by native_display.cpp (see native_update.h).
+// (WorkItemNode, BatchNode) - so `pos` may be a real node or the sentinel
+// itself (inserting-before-the-sentinel == append-at-tail). Kept for the
+// probe tools only - production code uses real std::list<T> now (Step 4).
 void
 list_insert_before(void* pos, void* node) {
   void** p = (void**)pos;
@@ -115,7 +50,7 @@ list_insert_before(void* pos, void* node) {
 }
 
 // Unhooks `node` from whatever circular intrusive list it's currently in.
-// Non-static: also used by native_display.cpp (see native_update.h).
+// Kept for the probe tools only, same rationale as list_insert_before.
 void
 list_unhook(void* node) {
   void** n = (void**)node;
@@ -125,77 +60,31 @@ list_unhook(void* node) {
   ((void**)next)[1] = prev;
 }
 
-// Frees a single work-item list node: frees the embedded std::list<int> at
-// item.intList, releases the three shared_ptrs (regionRows, lut, sp3 - the
-// same trio release_sp handles in swtcon_update's inline work-item
-// destructor), then frees the node itself. Shared by
-// native_free_update_region_list (whole-list teardown) and
-// native_subtract_update_region (single-node removal when clipping).
-// Non-static: also used by native_display.cpp's GC of g_pListProcessedUpdates
-// (see native_update.h) - display_thread_func's node-teardown decompiles
-// identically to this function (intList free, then sp3/lut/regionRows
-// release, then operator delete, in that order).
-void
-native_destroy_item_node(WorkItemNode* node) {
-  WorkItem& item = node->item;
-  for (auto* n = (IntListNode*)item.intList.next; (void*)n != &item.intList;) {
-    auto* next = n->next;
-    ::operator delete(n);
-    n = next;
-  }
-  release_sp(item.sp3.ctrl);
-  release_sp(item.lut.ctrl);
-  release_sp(item.regionRows.ctrl);
-  ::operator delete(node);
-}
-
-// Native reimplementation of free_update_region_list (0x3e540): destroys and
-// frees every work-item node in a circular intrusive list (used for both the
-// pending-accumulation list and a claimed batch's region list).
-// Non-static: also used by native_display.cpp (see native_update.h).
-void
-native_free_update_region_list(ListHead* list_head) {
-  auto* node = (WorkItemNode*)list_head->next;
-  if ((void*)node == (void*)list_head)
-    return;
-  do {
-    auto* next = node->next;
-    native_destroy_item_node(node);
-    node = next;
-  } while ((void*)node != (void*)list_head);
-}
-
 // Deep-copies everything a work item needs cloned (retained shared_ptrs,
-// cloned embedded int-list, and every other scalar field verbatim) but does
-// NOT touch the rect or sequence id. Shared by native_update_item_copy
-// (which preserves the source's rect/seq id) and native_piece_builder
-// (which overwrites both with the split-off piece's own).
+// copied deps vector, and every other scalar field verbatim) but does NOT
+// touch the rect or sequence id. Shared by native_update_item_copy (which
+// preserves the source's rect/seq id) and native_piece_builder (which
+// overwrites both with the split-off piece's own).
 static void
 CloneWorkItemFieldsInto(WorkItem* dest, const WorkItem* src) {
-  // regionRows shared_ptr, gap, rect, seq id, unknowns, LUT-width shorts.
-  memcpy(dest, src, offsetof(WorkItem, lut));
-  retain_sp(dest->regionRows.ctrl);
+  // shared_ptr copy-assignment does its own retain (and releases whatever
+  // dest previously held) - no manual refcounting needed anymore.
+  dest->regionRows = src->regionRows;
 
-  dest->lut = src->lut; // shared_ptr<LUTEntry>
-  retain_sp(dest->lut.ctrl);
+  // pixelDataPtr, rect, seq id, frameCursor/frameAnchor, phase, LUT-width
+  // shorts - every scalar field between regionRows and lut.
+  memcpy(&dest->pixelDataPtr, &src->pixelDataPtr, offsetof(WorkItem, lut) - offsetof(WorkItem, pixelDataPtr));
+
+  dest->lut = src->lut;
 
   // mode, pad, temperature.
-  memcpy(&dest->mode, &src->mode, offsetof(WorkItem, sp3) - offsetof(WorkItem, mode));
+  memcpy(&dest->mode, &src->mode, offsetof(WorkItem, pixelTransitions) - offsetof(WorkItem, mode));
 
-  dest->sp3 = src->sp3;
-  retain_sp(dest->sp3.ctrl);
+  dest->pixelTransitions = src->pixelTransitions;
 
-  dest->stateDataPtr = src->stateDataPtr; // +0x44 cached sp3 buffer ptr (see WorkItem def)
+  dest->transitionDataPtr = src->transitionDataPtr; // +0x44 cached pixelTransitions buffer ptr (see WorkItem def)
 
-  dest->intList = { &dest->intList, &dest->intList };
-  int count = 0;
-  for (auto* n = (IntListNode*)src->intList.next; (const void*)n != &src->intList; n = n->next) {
-    auto* node = (IntListNode*)::operator new(sizeof(IntListNode));
-    node->value = n->value;
-    list_insert_before(&dest->intList, node);
-    count++;
-  }
-  dest->intListCount = count;
+  dest->deps = src->deps;
 
   // sync, fullRefresh, pad, pixelMode.
   memcpy(&dest->sync, &src->sync, sizeof(WorkItem) - offsetof(WorkItem, sync));
@@ -215,64 +104,37 @@ native_update_item_copy(WorkItem* dest, const WorkItem* src) {
 // sites (native_update_item_ctor's placeholder, native_select_waveform_lut's
 // out-of-range-mode fallback) always pass all-zero fields - immediately
 // released and replaced before anything reads them - so this only needs to
-// build a valid, empty, ref-counted LUTEntry.
-//
-// Deliberately does NOT reuse the library's own vtable pointer for this
-// block (unlike native_dispatch_update_regions's RegionRows block, which
-// copies `&PTR_LAB_000651ec` directly): 0x408a8's own vtable pointer is
-// computed through a GOT-indirect load-then-+8 sequence, a different and
-// more ambiguous addressing pattern than the RegionRows allocator's simple
-// address-of, and not worth the risk of silently mismatching release_sp's
-// vt[2]/vt[3] convention. Instead this defines its own tiny native vtable
-// with that exact same convention, so release_sp/retain_sp keep working
-// unmodified while dispose/destroy are fully our own code.
-struct LutBlock {
-  void* vtable;
-  int32_t useCount;
-  int32_t weakCount;
-  LUTEntry* entry;
-};
-static_assert(sizeof(LutBlock) == 0x10, "LutBlock layout drift");
-
+// build a valid, empty, ref-counted LUTEntry. LUTEntry's own destructor
+// (native_init.h/.cpp) already frees `.data`, so a plain make_shared is
+// enough - no custom deleter needed here (unlike RegionRows's dataPtr).
 static void
-native_lut_dispose(void* ctrl) {
-  delete ((LutBlock*)ctrl)->entry;
-}
-
-static void
-native_lut_destroy(void* ctrl) {
-  ::operator delete(ctrl);
-}
-
-// vt[2]/vt[3] per release_sp's convention; vt[0]/vt[1] unused (no RTTI/
-// offset-to-top slots to fill in for a purely native vtable).
-static void* kNativeLutVtable[4] = { nullptr, nullptr, (void*)native_lut_dispose,
-                                      (void*)native_lut_destroy };
-
-static void
-native_make_empty_lut(SpRef* out) {
-  auto* entry = new LUTEntry{};
-  auto* block = (LutBlock*)::operator new(sizeof(LutBlock));
-  block->vtable = kNativeLutVtable;
-  block->useCount = 1;
-  block->weakCount = 1;
-  block->entry = entry;
-  out->ptr = entry;
-  out->ctrl = block;
+native_make_empty_lut(std::shared_ptr<LUTEntry>* out) {
+  *out = std::make_shared<LUTEntry>();
 }
 
 // Native reimplementation of update_item_ctor (0x3ffd0): zero-initialises the
 // work item to a degenerate/empty rect {y0=0,x0=0,y1=-1,x1=-1}, a 25C default
-// temperature, pixel_mode=5, and an empty self-referencing intrusive list
-// head. Stamps the same global sequence counter the library itself uses
-// (kSeqCounterAddr) so IDs stay unique.
+// temperature, pixel_mode=5, and an empty deps list. Stamps the same global
+// sequence counter the library itself uses (kSeqCounterAddr) so IDs stay
+// unique.
 static WorkItem*
 native_update_item_ctor(WorkItem* item) {
-  memset(item, 0, sizeof(WorkItem));
+  // Zero every scalar/POD field. The three shared_ptr fields (regionRows,
+  // lut, pixelTransitions) and `deps` are already valid,
+  // default-constructed-empty objects as soon as `*item` exists (the
+  // caller's `WorkItem item;` local, or a WorkItemNode's own constructor) -
+  // memset'ing over a live shared_ptr/vector would bypass its assignment
+  // operator, so those spans are skipped here rather than blitted over
+  // directly.
+  memset(&item->pixelDataPtr, 0, offsetof(WorkItem, lut) - offsetof(WorkItem, pixelDataPtr));
+  memset(&item->mode, 0, offsetof(WorkItem, pixelTransitions) - offsetof(WorkItem, mode));
+  memset(&item->transitionDataPtr, 0, offsetof(WorkItem, deps) - offsetof(WorkItem, transitionDataPtr));
+  memset(&item->sync, 0, sizeof(WorkItem) - offsetof(WorkItem, sync));
+
   item->rectY1 = -1;
   item->rectX1 = -1;
   item->temperature = 25.0f;
-  item->intList = { &item->intList, &item->intList };
+  item->deps.clear();
   item->pixelMode = 5;
 
   native_make_empty_lut(&item->lut);
@@ -327,11 +189,12 @@ native_get_current_temperature() {
 // Native reimplementation of FUN_000400a8, the piece-builder used internally
 // by subtract_update_region: clones `src` (via CloneWorkItemFieldsInto) but
 // overwrites the rect with `piece_rect`, stamps a fresh sequence id, and
-// re-bases the cached data-pointer field (`gap`) to the piece's new origin.
-// `gap` is a pointer into the RegionRows buffer dispatch_update_regions
-// (0x4fff8) allocates and hangs off `regionRows`; re-basing by
-// stride*(piece.x0-src.x0) + (piece.y0-src.y0) keeps it pointing at the
-// pixel data for the piece's own top-left corner (see RegionRows).
+// re-bases the cached data-pointer field (`pixelDataPtr`) to the piece's new
+// origin. `pixelDataPtr` is a pointer into the RegionRows buffer
+// dispatch_update_regions (0x4fff8) allocates and hangs off `regionRows`;
+// re-basing by stride*(piece.x0-src.x0) + (piece.y0-src.y0) keeps it
+// pointing at the pixel data for the piece's own top-left corner (see
+// RegionRows).
 static WorkItem*
 native_piece_builder(WorkItem* dest, const WorkItem* src, const Rect& piece_rect) {
   CloneWorkItemFieldsInto(dest, src);
@@ -346,9 +209,8 @@ native_piece_builder(WorkItem* dest, const WorkItem* src, const Rect& piece_rect
   dest->rectX1 = piece_rect.x1;
   dest->seqId = ++(*seq_counter);
 
-  if (dest->regionRows.ptr) {
-    auto* region_rows = (const RegionRows*)dest->regionRows.ptr;
-    dest->gap += region_rows->stride * (piece_rect.x0 - src_x0) + (piece_rect.y0 - src_y0);
+  if (dest->regionRows) {
+    dest->pixelDataPtr += dest->regionRows->stride * (piece_rect.x0 - src_x0) + (piece_rect.y0 - src_y0);
   }
 
   return dest;
@@ -415,11 +277,11 @@ native_render_kernel_formula(int case_, uint16_t src, bool back_active, uint8_t 
 
 // Native reimplementation of render_update_kernel (0x4e7b8). `dataBuffer`
 // and `backBuffer` are the full-screen working buffers (queue->dataBuffer /
-// queue->backBuffer); item->regionRows.ptr must already point at a RegionRows
+// queue->backBuffer); item->regionRows must already point at a RegionRows
 // sized for item's own rect (native_dispatch_update_regions's job).
 static void
 native_render_update_kernel(WorkItem* item, const uint16_t* dataBuffer, const uint8_t* backBuffer) {
-  auto* rr = (RegionRows*)item->regionRows.ptr;
+  auto* rr = item->regionRows.get();
   if (!rr->dataPtr)
     return;
   const uint8_t* gammaTable = (const uint8_t*)g_pGammaTableNative;
@@ -441,39 +303,37 @@ native_render_update_kernel(WorkItem* item, const uint16_t* dataBuffer, const ui
 }
 
 // Native reimplementation of dispatch_update_regions (0x4fff8): allocates the
-// item's RegionRows blob (releasing whatever it had before) and fills it via
-// native_render_update_kernel. Byte layout of the allocation exactly matches
-// the library's own (vtable ptr + refcounts + RegionRows, 0x28 bytes total,
-// RegionRows starting at +0xc - see swtcon_architecture.md §5.1) so the
-// existing generic release_sp keeps working on it unmodified.
+// item's RegionRows blob (releasing whatever it had before, via ordinary
+// shared_ptr assignment) and fills it via native_render_update_kernel.
 void
 native_dispatch_update_regions(WorkItem* item, void* dataBuffer, void* backBuffer) {
-  auto* block = (RegionRowsBlock*)::operator new(sizeof(RegionRowsBlock));
-  block->vtable = kNativeRegionRowsVtable;
-  block->useCount = 1;
-  block->weakCount = 1;
-  block->rr.y0 = item->rectY0;
-  block->rr.x0 = item->rectX0;
-  block->rr.y1 = item->rectY1;
-  block->rr.x1 = item->rectX1;
-  block->rr.dataPtr = nullptr;
-  block->rr.stride = 0;
-  block->rr.size = 0;
+  auto* rr = new RegionRows{};
+  rr->y0 = item->rectY0;
+  rr->x0 = item->rectX0;
+  rr->y1 = item->rectY1;
+  rr->x1 = item->rectX1;
+  rr->dataPtr = nullptr;
+  rr->stride = 0;
+  rr->size = 0;
 
   if (item->rectY0 <= item->rectY1 && item->rectX0 <= item->rectX1) {
     int32_t stride = ((item->rectY1 - item->rectY0) + 0x10) & ~0xf; // round_up(height, 16)
     int32_t size = stride * (item->rectX1 - item->rectX0 + 1);
-    block->rr.stride = stride;
-    block->rr.size = size;
+    rr->stride = stride;
+    rr->size = size;
     if (size != 0)
-      block->rr.dataPtr = (uint8_t*)::operator new[](size);
+      rr->dataPtr = new uint8_t[size];
   }
 
-  void* old_ctrl = item->regionRows.ctrl;
-  item->regionRows.ptr = &block->rr;
-  item->regionRows.ctrl = block;
-  release_sp(old_ctrl);
-  item->gap = (int32_t)(intptr_t)block->rr.dataPtr;
+  // RegionRows::dataPtr is a plain non-owning pointer (see its comment in
+  // native_update.h) - this is the one site that actually owns the buffer it
+  // just allocated, so free it explicitly via a custom deleter rather than
+  // giving RegionRows itself an owning destructor.
+  item->regionRows = std::shared_ptr<RegionRows>(rr, [](RegionRows* p) {
+    delete[] p->dataPtr;
+    delete p;
+  });
+  item->pixelDataPtr = (int32_t)(intptr_t)rr->dataPtr;
 
   if (item->rectY0 <= item->rectY1 && item->rectX0 <= item->rectX1)
     native_render_update_kernel(item, (const uint16_t*)dataBuffer, (const uint8_t*)backBuffer);
@@ -481,117 +341,92 @@ native_dispatch_update_regions(WorkItem* item, void* dataBuffer, void* backBuffe
 
 // Native reimplementation of subtract_update_region (0x3be10): clips the
 // newly-queued item's rect out of every overlapping region in `list` (either
-// the pending accumulation list, or an unclaimed batch's region list).
-// `count` is that same list's own item counter (accumCount for the
-// accumulation list, or a BatchNode's own `count` field for a batch's
-// sub-list).
+// the pending accumulation list, or an unclaimed batch's sub-list).
 //
 // Algorithm (verified against the disassembly - the decompiled pseudocode
-// here is misleading, see AGENTS.md): per node, skip on no AABB overlap;
-// otherwise compute the intersection ("cut") rect. If cut == the node's own
-// rect, the node is removed outright. Otherwise up to four leftover
+// here is misleading, see AGENTS.md): per item, skip on no AABB overlap;
+// otherwise compute the intersection ("cut") rect. If cut == the item's own
+// rect, the item is removed outright. Otherwise up to four leftover
 // axis-aligned strips are emitted (left, top, bottom, right - each only if
 // non-empty), each cloned from the old item via native_piece_builder, and the
-// old node is replaced by them.
+// old item is replaced by them (in the same position, preserving order).
 static void
-native_subtract_update_region(ListHead* list, int32_t* count, const WorkItem* new_item) {
+native_subtract_update_region(std::list<WorkItem>& list, const WorkItem* new_item) {
   Rect n{ new_item->rectY0, new_item->rectX0, new_item->rectY1, new_item->rectX1 };
   if (n.y1 < n.y0 || n.x1 < n.x0)
     return; // degenerate new rect - nothing to subtract
 
-  auto* node = (WorkItemNode*)list->next;
-  while ((void*)node != (void*)list) {
-    auto* next = node->next;
-    WorkItem& old = node->item;
+  for (auto it = list.begin(); it != list.end();) {
+    WorkItem& old = *it;
     Rect o{ old.rectY0, old.rectX0, old.rectY1, old.rectX1 };
 
     bool degenerate_old = o.y1 < o.y0 || o.x1 < o.x0;
     bool no_overlap = n.x1 < o.x0 || o.x1 < n.x0 || n.y1 < o.y0 || o.y1 < n.y0;
 
-    if (!degenerate_old && !no_overlap) {
-      Rect cut;
-      cut.y0 = n.y0 > o.y0 ? n.y0 : o.y0;
-      cut.x0 = n.x0 > o.x0 ? n.x0 : o.x0;
-      cut.y1 = n.y1 < o.y1 ? n.y1 : o.y1;
-      cut.x1 = n.x1 < o.x1 ? n.x1 : o.x1;
-
-      Rect pieces[4];
-      int piece_count = 0;
-      alignas(16) WorkItem tmp;
-
-      bool full_containment = cut.y0 == o.y0 && cut.x0 == o.x0 && cut.y1 == o.y1 && cut.x1 == o.x1;
-
-      if (!full_containment) {
-        native_update_item_copy(&tmp, &old); // preserve LUT/mode/temp/flags
-
-        if (o.x0 < cut.x0) pieces[piece_count++] = { o.y0, o.x0, o.y1, cut.x0 - 1 };
-        if (o.y0 < cut.y0) pieces[piece_count++] = { o.y0, cut.x0, cut.y0 - 1, cut.x1 };
-        if (cut.y1 < o.y1) pieces[piece_count++] = { cut.y1 + 1, cut.x0, o.y1, cut.x1 };
-        if (cut.x1 < o.x1) pieces[piece_count++] = { o.y0, cut.x1 + 1, o.y1, o.x1 };
-      }
-
-      // Unhook and free the old node.
-      list_unhook(node);
-      native_destroy_item_node(node);
-      (*count)--;
-
-      for (int i = 0; i < piece_count; i++) {
-        auto* new_node = (WorkItemNode*)::operator new(sizeof(WorkItemNode));
-        native_piece_builder(&new_node->item, &tmp, pieces[i]);
-        // Insert at the tail of the run of pieces just inserted (i.e.
-        // immediately before `next`, in the old node's place).
-        list_insert_before(next, new_node);
-        (*count)++;
-      }
-
-      if (piece_count > 0) {
-        // Release the temp copy's own shared_ptrs/list now that every piece
-        // has retained/cloned what it needs.
-        for (auto* n2 = (IntListNode*)tmp.intList.next; (void*)n2 != &tmp.intList;) {
-          auto* nx = n2->next;
-          ::operator delete(n2);
-          n2 = nx;
-        }
-        release_sp(tmp.sp3.ctrl);
-        release_sp(tmp.lut.ctrl);
-        release_sp(tmp.regionRows.ctrl);
-      }
+    if (degenerate_old || no_overlap) {
+      ++it;
+      continue;
     }
 
-    node = next;
+    Rect cut;
+    cut.y0 = n.y0 > o.y0 ? n.y0 : o.y0;
+    cut.x0 = n.x0 > o.x0 ? n.x0 : o.x0;
+    cut.y1 = n.y1 < o.y1 ? n.y1 : o.y1;
+    cut.x1 = n.x1 < o.x1 ? n.x1 : o.x1;
+
+    Rect pieces[4];
+    int piece_count = 0;
+    WorkItem tmp;
+
+    bool full_containment = cut.y0 == o.y0 && cut.x0 == o.x0 && cut.y1 == o.y1 && cut.x1 == o.x1;
+
+    if (!full_containment) {
+      native_update_item_copy(&tmp, &old); // preserve LUT/mode/temp/flags
+
+      if (o.x0 < cut.x0) pieces[piece_count++] = { o.y0, o.x0, o.y1, cut.x0 - 1 };
+      if (o.y0 < cut.y0) pieces[piece_count++] = { o.y0, cut.x0, cut.y0 - 1, cut.x1 };
+      if (cut.y1 < o.y1) pieces[piece_count++] = { cut.y1 + 1, cut.x0, o.y1, cut.x1 };
+      if (cut.x1 < o.x1) pieces[piece_count++] = { o.y0, cut.x1 + 1, o.y1, o.x1 };
+    }
+
+    // Erase the old element; `insert_pos` is what followed it (the
+    // original `next`), matching the original's "insert every piece
+    // immediately before `next`" - std::list::insert never invalidates
+    // insert_pos, so all pieces land in order right before it.
+    auto insert_pos = list.erase(it);
+
+    for (int i = 0; i < piece_count; i++) {
+      WorkItem piece;
+      native_piece_builder(&piece, &tmp, pieces[i]);
+      list.insert(insert_pos, std::move(piece));
+    }
+    // tmp's shared_ptr fields and deps vector release/free themselves
+    // automatically when tmp goes out of scope below - no manual cleanup
+    // needed anymore, regardless of piece_count.
+
+    it = insert_pos;
   }
 }
 
-// Native reimplementation of build_update_batch (0x3ea98): clones `accum`'s
-// list into a fresh batch node (sub-list + count + mode copied from
-// `accum_flag`), deep-copying each item via native_update_item_copy, then
-// hooks the batch node into `incoming` immediately before `pos` (which may
-// be a real BatchNode or the `incoming` sentinel itself) and bumps
-// `incoming_count`.
-static BatchNode*
-native_build_update_batch(ListHead* incoming, int32_t* incoming_count, void* pos,
-                           ListHead* accum, int16_t accum_flag) {
-  auto* batch = (BatchNode*)::operator new(sizeof(BatchNode));
-  batch->subList = { &batch->subList, &batch->subList };
+// Native reimplementation of build_update_batch (0x3ea98): moves `accum`'s
+// items into a fresh batch's sub-list (mode copied from `accum_flag`), then
+// hooks the batch into `incoming` immediately before `pos`. `accum`'s own
+// items are left moved-from (empty) - the caller (swtcon_unlock_post) clears
+// `accum` right after, matching the original's separate
+// native_free_update_region_list call except without the redundant
+// retain-then-release round trip a copy would need (accum's originals are
+// getting destroyed either way, so moving is strictly cheaper and
+// behaviorally identical - see native_subtract_update_region's similar
+// move-based erase for the same reasoning applied elsewhere in this file).
+static void
+native_build_update_batch(std::list<Batch>& incoming, std::list<Batch>::iterator pos,
+                          std::list<WorkItem>& accum, int16_t accum_flag) {
+  Batch batch;
+  for (auto& item : accum)
+    batch.subList.push_back(std::move(item));
+  batch.mode = accum_flag;
 
-  int count = 0;
-  auto* src = (WorkItemNode*)accum->next;
-  while ((void*)src != (void*)accum) {
-    auto* next = src->next;
-    auto* node = (WorkItemNode*)::operator new(sizeof(WorkItemNode));
-    native_update_item_copy(&node->item, &src->item);
-    list_insert_before(&batch->subList, node);
-    count++;
-    src = next;
-  }
-  batch->count = count;
-  batch->mode = accum_flag;
-
-  list_insert_before(pos, batch);
-  (*incoming_count)++;
-
-  (void)incoming;
-  return batch;
+  incoming.insert(pos, std::move(batch));
 }
 
 // Native reimplementation of select_waveform_lut (0x4535c): picks the LUT
@@ -605,7 +440,8 @@ native_build_update_batch(ListHead* incoming, int32_t* incoming_count, void* pos
 // native_update_item_ctor uses) if `mode` is out of range or its ModeEntry
 // has no LUTs at all.
 void
-native_select_waveform_lut(float temp, SpRef* out, std::vector<ModeEntry*>* waveform, unsigned mode) {
+native_select_waveform_lut(float temp, std::shared_ptr<LUTEntry>* out,
+                           std::vector<ModeEntry*>* waveform, unsigned mode) {
   if (mode < waveform->size()) {
     ModeEntry* m = (*waveform)[mode];
     auto& luts = m->luts;
@@ -616,8 +452,7 @@ native_select_waveform_lut(float temp, SpRef* out, std::vector<ModeEntry*>* wave
           break;
         selected = i;
       }
-      *out = reinterpret_cast<SpRef&>(luts[selected]); // shared_ptr<LUTEntry> == SpRef (see SpRef's comment)
-      retain_sp(out->ctrl);
+      *out = luts[selected];
       return;
     }
   }
@@ -629,8 +464,8 @@ native_select_waveform_lut(float temp, SpRef* out, std::vector<ModeEntry*>* wave
 // the LUT select_waveform_lut just picked - non-null pixel data, and
 // positive size_kb/bit_depth/mode_width.
 bool
-native_update_lut_is_valid(const SpRef& lut) {
-  auto* entry = (const LUTEntry*)lut.ptr;
+native_update_lut_is_valid(const std::shared_ptr<LUTEntry>& lut) {
+  auto* entry = lut.get();
   if (!entry->data)
     return false;
   if (entry->size_kb > 0 && entry->bit_depth > 0)
@@ -686,33 +521,28 @@ swtcon_update(update_data* data) {
 
     native_dispatch_update_regions(&item, queue->dataBuffer, queue->backBuffer);
 
-    // Select the LUT and move the returned shared_ptr into the item,
-    // releasing whatever was there (empty after the ctor).
-    SpRef selected{};
-    native_select_waveform_lut(temp, &selected, (std::vector<ModeEntry*>*)(void*)queue->waveformStructRaw,
+    // Select the LUT and move the returned shared_ptr into the item -
+    // assignment releases whatever was there before (empty after the ctor).
+    std::shared_ptr<LUTEntry> selected;
+    native_select_waveform_lut(temp, &selected, &queue->waveform,
                                 (unsigned)(int)item.mode);
-    release_sp(item.lut.ctrl);
     item.lut = selected;
 
     if (native_update_lut_is_valid(item.lut)) {
-      auto* lut = (const int32_t*)item.lut.ptr;
+      auto* lut = (const int32_t*)item.lut.get();
       item.lutWidthMinus1 = (int16_t)(lut[0] - 1); // packed LUT width - 1
 
       // Clip this rectangle out of the pending accumulation regions and out of
       // every not-yet-locked batch already queued for the worker.
-      native_subtract_update_region(&queue->accumList, &queue->accumCount, &item);
-      for (auto* b = (BatchNode*)queue->listIncomingUpdates.next;
-           (void*)b != &queue->listIncomingUpdates; b = b->next) {
-        if (!BatchNodeClaimed(b))
-          native_subtract_update_region(&b->subList, &b->count, &item);
+      native_subtract_update_region(queue->accumList, &item);
+      for (auto& b : queue->listIncomingUpdates) {
+        if (!b.claimed)
+          native_subtract_update_region(b.subList, &item);
       }
 
-      // Enqueue: 100-byte list node, deep-copy the item into node+8, hook it at
-      // the tail of the accumulation list, bump the count.
-      auto* node = (WorkItemNode*)::operator new(sizeof(WorkItemNode));
-      native_update_item_copy(&node->item, &item);
-      list_insert_before(&queue->accumList, node);
-      queue->accumCount++;
+      // Enqueue at the tail of the accumulation list. `item` isn't touched
+      // again below, so move rather than deep-copy.
+      queue->accumList.push_back(std::move(item));
     } else {
       seq = -1;
     }
@@ -720,16 +550,9 @@ swtcon_update(update_data* data) {
     seq = -1;
   }
 
-  // Work-item destructor (inlined tail of queue_update): free the embedded
-  // std::list<int>, then release the three shared_ptrs.
-  for (auto* n = (IntListNode*)item.intList.next; (void*)n != &item.intList;) {
-    auto* nx = n->next;
-    ::operator delete(n);
-    n = nx;
-  }
-  release_sp(item.sp3.ctrl);
-  release_sp(item.lut.ctrl);
-  release_sp(item.regionRows.ctrl);
+  // Work-item destructor (inlined tail of queue_update): the three
+  // shared_ptrs and `deps` release/free themselves automatically when
+  // `item` goes out of scope below.
   (void)seq;
 }
 
@@ -741,25 +564,21 @@ swtcon_unlock_post() {
   }
   auto* queue = update_queue_globals();
 
-  // Find the insertion point: walk backwards from the head, skipping batches
-  // already claimed by the worker, so this batch is queued after them but
-  // before any pending ones.
-  void* first = queue->listIncomingUpdates.next;
-  void* pos = &queue->listIncomingUpdates;
-  while (pos != first) {
-    void* prev = ((void**)pos)[1];
-    if (!BatchNodeClaimed((BatchNode*)prev))
+  // Find the insertion point: walk backwards from the tail, skipping
+  // batches already claimed by the worker, so this batch is queued after
+  // them but before any pending ones.
+  auto pos = queue->listIncomingUpdates.end();
+  while (pos != queue->listIncomingUpdates.begin()) {
+    auto prev = std::prev(pos);
+    if (!prev->claimed)
       break;
     pos = prev;
   }
 
-  // Clone the accumulated regions into a fresh batch node hooked before
-  // `pos`, then free the originals and reset the accumulation list to empty.
-  native_build_update_batch(&queue->listIncomingUpdates, &queue->incomingBatchCount, pos,
-                             &queue->accumList, queue->accumFlag);
-  native_free_update_region_list(&queue->accumList);
-  queue->accumList = { &queue->accumList, &queue->accumList };
-  queue->accumCount = 0;
+  // Move the accumulated regions into a fresh batch hooked before `pos`,
+  // then clear whatever's left of the (now moved-from) originals.
+  native_build_update_batch(queue->listIncomingUpdates, pos, queue->accumList, queue->accumFlag);
+  queue->accumList.clear();
   queue->accumFlag = 0;
 
   pthread_mutex_unlock(&queue->updateQueueMutex);
@@ -774,8 +593,7 @@ swtcon_wait() {
   }
   // WaitForUpdate: spin until shutdown or the batch queue drains.
   auto* queue = update_queue_globals();
-  while (queue->shutdownRequested == 0 &&
-         queue->listIncomingUpdates.next != &queue->listIncomingUpdates) {
+  while (queue->shutdownRequested == 0 && !queue->listIncomingUpdates.empty()) {
     usleep(100);
   }
 }

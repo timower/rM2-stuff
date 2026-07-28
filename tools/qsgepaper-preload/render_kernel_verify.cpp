@@ -203,8 +203,7 @@ main(int argc, char** argv) {
       for (int i = 0; i < W * H; i++)
         dataBuffer[i] = src;
 
-      WorkItem item;
-      memset(&item, 0, sizeof(item));
+      WorkItem item{};
       RegionRows rr;
       rr.dataPtr = output;
       rr.y0 = 0;
@@ -215,9 +214,8 @@ main(int argc, char** argv) {
       rr.size = RECT * RECT;
       memset(output, 0xcc, RECT * RECT); // poison, to catch unwritten bytes
 
-      item.regionRows.ptr = &rr;
-      item.regionRows.ctrl = nullptr;
-      item.gap = (int32_t)(intptr_t)rr.dataPtr;
+      item.regionRows = non_owning_sp(&rr);
+      item.pixelDataPtr = (int32_t)(intptr_t)rr.dataPtr;
       item.rectY0 = 0;
       item.rectX0 = 0;
       item.rectY1 = RECT - 1;

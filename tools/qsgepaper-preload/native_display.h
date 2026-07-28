@@ -14,7 +14,7 @@
 // "integration hazard" (a deterministic crash in the still-library
 // playback kernel 0x4a234, formerly mislabeled "overlap-aware" - see
 // native_dispatch_aligned_kernel's comment in native_display.cpp for why)
-// was a stale WorkItem.stateDataPtr (+0x44), not anything about 0x4a234
+// was a stale WorkItem.transitionDataPtr (+0x44), not anything about 0x4a234
 // itself - see native_commit_item and swtcon_architecture.md §6.2 step 4.
 // Both worker-side playback kernels are native now too
 // (native_playback_kernel_plain below backs both the "plain" and "aligned"

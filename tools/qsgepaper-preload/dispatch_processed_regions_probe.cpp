@@ -11,7 +11,7 @@
 //
 // This does NOT need dispatch_update_regions/render_update_kernel at all:
 // dispatch_processed_regions's commit kernels (FUN_0004f8f0/FUN_0004e680)
-// read their "new" pixel value straight out of item.gap/item.regionRows (a
+// read their "new" pixel value straight out of item.pixelDataPtr/item.regionRows (a
 // plain byte buffer we control directly) and compare it against
 // g_pStateBuffer (the library's own global, bridged to our own allocation
 // via statebuffer_globals(), same trick render_kernel_verify.cpp uses for
@@ -22,6 +22,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
+#include <new>
 #include <ucontext.h>
 
 #include "native_init.h"
@@ -91,50 +92,54 @@ state_cell(int abs_col, int abs_row) {
 struct TestItem {
   WorkItemNode* node;
   RegionRows rr;
-  uint8_t* gapBuf; // regionRows payload: byte per pixel, column-major, stride rows_rounded16
+  uint8_t* pixelBuf; // regionRows payload: byte per pixel, column-major, stride rows_rounded16
 };
 
 // Builds one non-degenerate WorkItem covering [y0,y1]x[x0,x1] (inclusive),
-// with regionRows/gap pointing at a freshly allocated buffer filled with
-// `gapFill`, and sync/pixelMode as given. Leaves regionRows.ctrl/lut/sp3
-// null (release_sp on null is a safe no-op, exercised if this item ends up
-// destroyed).
+// with regionRows/pixelDataPtr pointing at a freshly allocated buffer filled with
+// `pixelFill`, and sync/pixelMode as given. Leaves regionRows non-owning and
+// lut/pixelTransitions empty (destroying an empty shared_ptr is a safe no-op, exercised
+// if this item ends up destroyed).
 static void
-build_item(TestItem* ti, int y0, int x0, int y1, int x1, uint8_t sync, uint8_t gapFill) {
-  ti->node = (WorkItemNode*)malloc(sizeof(WorkItemNode));
-  memset(ti->node, 0, sizeof(*ti->node));
+build_item(TestItem* ti, int y0, int x0, int y1, int x1, uint8_t sync, uint8_t pixelFill) {
+  // node is malloc'd (matching the library's own operator_new(100)
+  // convention) and placement-new-constructed rather than memset - WorkItem
+  // now has non-trivial shared_ptr members that must actually be
+  // constructed. The real dispatch_processed_regions frees a destroyed
+  // item via a plain (non-virtual) `operator delete`, never running our
+  // WorkItemNode destructor - harmless here since regionRows/lut/pixelTransitions are
+  // always left non-owning (ctrl==nullptr) in this probe, so there's
+  // nothing for a skipped destructor to leak.
+  ti->node = new (malloc(sizeof(WorkItemNode))) WorkItemNode();
   WorkItem* item = &ti->node->item;
 
   // A degenerate rect (y1<y0 or x1<x0, used to test the destroy path) never
-  // gets its regionRows/gap buffer read by dispatch_processed_regions - the
+  // gets its regionRows/pixelDataPtr buffer read by dispatch_processed_regions - the
   // degenerate check on the rect fields alone short-circuits before any
   // pixel access - so skip the buffer allocation entirely rather than feed
   // malloc a negative-turned-huge size (rows/cols would be <=0).
   bool degenerate = y1 < y0 || x1 < x0;
   if (degenerate) {
-    ti->gapBuf = nullptr;
+    ti->pixelBuf = nullptr;
     memset(&ti->rr, 0, sizeof(ti->rr));
-    item->regionRows.ptr = &ti->rr;
-    item->regionRows.ctrl = nullptr;
-    item->gap = 0;
+    item->regionRows = non_owning_sp(&ti->rr);
+    item->pixelDataPtr = 0;
     item->rectY0 = y0;
     item->rectX0 = x0;
     item->rectY1 = y1;
     item->rectX1 = x1;
     item->sync = sync;
     item->pixelMode = 0;
-    item->intList.next = &item->intList;
-    item->intList.prev = &item->intList;
     return;
   }
 
   int rows = y1 - y0 + 1;
   int cols = x1 - x0 + 1;
   int strideRows = (rows + 15) & ~15;
-  ti->gapBuf = (uint8_t*)malloc((size_t)strideRows * cols);
-  memset(ti->gapBuf, gapFill, (size_t)strideRows * cols);
+  ti->pixelBuf = (uint8_t*)malloc((size_t)strideRows * cols);
+  memset(ti->pixelBuf, pixelFill, (size_t)strideRows * cols);
 
-  ti->rr.dataPtr = ti->gapBuf;
+  ti->rr.dataPtr = ti->pixelBuf;
   ti->rr.y0 = y0;
   ti->rr.x0 = x0;
   ti->rr.y1 = y1;
@@ -142,20 +147,15 @@ build_item(TestItem* ti, int y0, int x0, int y1, int x1, uint8_t sync, uint8_t g
   ti->rr.stride = strideRows;
   ti->rr.size = strideRows * cols;
 
-  item->regionRows.ptr = &ti->rr;
-  item->regionRows.ctrl = nullptr;
-  item->gap = (int32_t)(intptr_t)ti->gapBuf;
+  item->regionRows = non_owning_sp(&ti->rr);
+  item->pixelDataPtr = (int32_t)(intptr_t)ti->pixelBuf;
   item->rectY0 = y0;
   item->rectX0 = x0;
   item->rectY1 = y1;
   item->rectX1 = x1;
   item->sync = sync;
   item->pixelMode = 0;
-  // An empty circular list is self-referencing (next==prev==&head), NOT
-  // null - the destroy path (hit whenever an item ends up degenerate)
-  // walks this unconditionally expecting that sentinel shape.
-  item->intList.next = &item->intList;
-  item->intList.prev = &item->intList;
+  // item->deps is already empty from WorkItemNode's own construction above.
 }
 
 // Fills the (col,row) cell of the real g_pStateBuffer for every pixel in
@@ -177,15 +177,15 @@ print_item(const char* label, TestItem* ti, ListHead* subList, bool ret) {
     return;
   }
   WorkItem* item = &ti->node->item;
-  printf("%-28s ret=%d listEmpty=%d rect=[y0=%d x0=%d y1=%d x1=%d] sp3.ptr=%p sp3.ctrl=%p\n", label,
+  printf("%-28s ret=%d listEmpty=%d rect=[y0=%d x0=%d y1=%d x1=%d] pixelTransitions.ptr=%p pixelTransitions.use_count=%ld\n", label,
          (int)ret, (int)empty, item->rectY0, item->rectX0, item->rectY1, item->rectX1,
-         item->sp3.ptr, item->sp3.ctrl);
-  if (item->sp3.ptr) {
-    // sp3.ptr aliases into the RegionRows-shaped control block at its
-    // dataPtr field - print the embedded rect/stride/size the same way
+         (void*)item->pixelTransitions.get(), (long)item->pixelTransitions.use_count());
+  if (item->pixelTransitions) {
+    // pixelTransitions aliases into the RegionRows-shaped control block at its dataPtr
+    // field - print the embedded rect/stride/size the same way
     // FUN_0004f8f0 itself reads them.
-    RegionRows* embedded = (RegionRows*)item->sp3.ptr;
-    printf("    sp3 as RegionRows: dataPtr=%p y0=%d x0=%d y1=%d x1=%d stride=%d size=%d\n",
+    auto* embedded = item->pixelTransitions.get();
+    printf("    pixelTransitions as RegionRows: dataPtr=%p y0=%d x0=%d y1=%d x1=%d stride=%d size=%d\n",
            embedded->dataPtr, embedded->y0, embedded->x0, embedded->y1, embedded->x1,
            embedded->stride, embedded->size);
   }
@@ -233,7 +233,7 @@ main() {
 
   const int Y0 = 100, X0 = 200, Y1 = 139, X1 = 209; // 40 rows x 10 cols (<29 -> chunkCount=1)
 
-  // --- Experiment 1: sync=0, EVERY pixel already matches state (gap==state
+  // --- Experiment 1: sync=0, EVERY pixel already matches state (pixelDataPtr==state
   // as u16) - does the item survive with its FULL original rect, or does it
   // come back degenerate/get destroyed?
   {
@@ -244,8 +244,8 @@ main() {
     batch.count = 1;
 
     TestItem ti;
-    build_item(&ti, Y0, X0, Y1, X1, /*sync=*/0, /*gapFill=*/5);
-    fill_state(Y0, X0, Y1, X1, 5); // state == gap everywhere: nothing "changed"
+    build_item(&ti, Y0, X0, Y1, X1, /*sync=*/0, /*pixelFill=*/5);
+    fill_state(Y0, X0, Y1, X1, 5); // state == pixelDataPtr everywhere: nothing "changed"
     list_insert_before(&batch.subList, ti.node);
 
     printf("  calling dispatch_processed_regions...\n");
@@ -253,7 +253,7 @@ main() {
     print_item("exp1 sync0-all-unchanged", &ti, &batch.subList, ret);
   }
 
-  // --- Experiment 2: sync=0, EVERY pixel differs (gap != state) - sanity
+  // --- Experiment 2: sync=0, EVERY pixel differs (pixelDataPtr != state) - sanity
   // check, should definitely survive with the full rect.
   {
     BatchNode batch;
@@ -263,8 +263,8 @@ main() {
     batch.count = 1;
 
     TestItem ti;
-    build_item(&ti, Y0, X0, Y1, X1, /*sync=*/0, /*gapFill=*/5);
-    fill_state(Y0, X0, Y1, X1, 9); // state != gap everywhere: everything "changed"
+    build_item(&ti, Y0, X0, Y1, X1, /*sync=*/0, /*pixelFill=*/5);
+    fill_state(Y0, X0, Y1, X1, 9); // state != pixelDataPtr everywhere: everything "changed"
     list_insert_before(&batch.subList, ti.node);
 
     printf("  calling dispatch_processed_regions...\n");
@@ -282,7 +282,7 @@ main() {
     batch.count = 1;
 
     TestItem ti;
-    build_item(&ti, Y0, X0, Y1, X1, /*sync=*/0, /*gapFill=*/5);
+    build_item(&ti, Y0, X0, Y1, X1, /*sync=*/0, /*pixelFill=*/5);
     fill_state(Y0, X0, Y1, X1, 5);
     *state_cell(X0 + 5, Y0 + 20) = 9; // single differing pixel: col=X0+5, row=Y0+20
     list_insert_before(&batch.subList, ti.node);
@@ -302,15 +302,15 @@ main() {
     printf("    g_pStateBuffer after: changed-pixel=0x%04x neighbor(unchanged,same group)=0x%04x\n",
            stateAfterChanged, stateAfterNeighbor);
     if (batch.subList.next != &batch.subList) {
-      RegionRows* sp3rr = (RegionRows*)ti.node->item.sp3.ptr;
-      // sp3 buffer is column-major, u16/pixel, stride in u16 units - index =
+      RegionRows* transitionsRr = ti.node->item.pixelTransitions.get();
+      // pixelTransitions buffer is column-major, u16/pixel, stride in u16 units - index =
       // stride*(col-x0) + (row-y0), matching FUN_0004f8f0's own addressing.
-      auto sp3_cell = [&](int col, int row) -> uint16_t {
-        uint16_t* base = (uint16_t*)sp3rr->dataPtr;
-        return base[(size_t)sp3rr->stride * (col - sp3rr->x0) + (row - sp3rr->y0)];
+      auto transition_cell = [&](int col, int row) -> uint16_t {
+        uint16_t* base = (uint16_t*)transitionsRr->dataPtr;
+        return base[(size_t)transitionsRr->stride * (col - transitionsRr->x0) + (row - transitionsRr->y0)];
       };
-      printf("    sp3 buffer: changed-pixel=0x%04x neighbor(unchanged,same group)=0x%04x\n",
-             sp3_cell(X0 + 5, Y0 + 20), sp3_cell(X0 + 5, Y0 + 21));
+      printf("    pixelTransitions buffer: changed-pixel=0x%04x neighbor(unchanged,same group)=0x%04x\n",
+             transition_cell(X0 + 5, Y0 + 20), transition_cell(X0 + 5, Y0 + 21));
     }
   }
 
@@ -325,8 +325,8 @@ main() {
     batch.count = 1;
 
     TestItem ti;
-    build_item(&ti, Y0, X0, Y1, X1, /*sync=*/1, /*gapFill=*/5);
-    fill_state(Y0, X0, Y1, X1, 9); // old state=9, new (gap)=5 - distinguishable in the packed value
+    build_item(&ti, Y0, X0, Y1, X1, /*sync=*/1, /*pixelFill=*/5);
+    fill_state(Y0, X0, Y1, X1, 9); // old state=9, new (pixelDataPtr)=5 - distinguishable in the packed value
     list_insert_before(&batch.subList, ti.node);
 
     printf("  calling dispatch_processed_regions...\n");
@@ -334,12 +334,12 @@ main() {
     print_item("exp4 sync1-force-all-match", &ti, &batch.subList, ret);
     if (batch.subList.next != &batch.subList) {
       uint16_t stateAfter = *state_cell(X0 + 5, Y0 + 20);
-      RegionRows* sp3rr = (RegionRows*)ti.node->item.sp3.ptr;
-      uint16_t* base = (uint16_t*)sp3rr->dataPtr;
-      uint16_t sp3After = base[(size_t)sp3rr->stride * (5) + (20)];
-      printf("    g_pStateBuffer after=0x%04x sp3 after=0x%04x (old=9 new=5; force packs "
+      RegionRows* transitionsRr = ti.node->item.pixelTransitions.get();
+      uint16_t* base = (uint16_t*)transitionsRr->dataPtr;
+      uint16_t transitionAfter = base[(size_t)transitionsRr->stride * (5) + (20)];
+      printf("    g_pStateBuffer after=0x%04x transitions after=0x%04x (old=9 new=5; force packs "
              "(newState<<5)|newState if formula holds)\n",
-             stateAfter, sp3After);
+             stateAfter, transitionAfter);
     }
   }
 
@@ -354,7 +354,7 @@ main() {
     batch.count = 1;
 
     TestItem ti;
-    build_item(&ti, /*y0=*/50, /*x0=*/50, /*y1=*/10, /*x1=*/60, /*sync=*/0, /*gapFill=*/5);
+    build_item(&ti, /*y0=*/50, /*x0=*/50, /*y1=*/10, /*x1=*/60, /*sync=*/0, /*pixelFill=*/5);
     list_insert_before(&batch.subList, ti.node);
 
     printf("  calling dispatch_processed_regions...\n");
@@ -375,9 +375,9 @@ main() {
     batch.count = 2;
 
     TestItem tiA, tiB;
-    build_item(&tiA, Y0, X0, Y1, X1, /*sync=*/0, /*gapFill=*/5);
+    build_item(&tiA, Y0, X0, Y1, X1, /*sync=*/0, /*pixelFill=*/5);
     fill_state(Y0, X0, Y1, X1, 5); // A: all unchanged
-    build_item(&tiB, Y0 + 500, X0 + 500, Y1 + 500, X1 + 500, /*sync=*/0, /*gapFill=*/5);
+    build_item(&tiB, Y0 + 500, X0 + 500, Y1 + 500, X1 + 500, /*sync=*/0, /*pixelFill=*/5);
     fill_state(Y0 + 500, X0 + 500, Y1 + 500, X1 + 500, 9); // B: all changed, far away
 
     list_insert_before(&batch.subList, tiA.node);
@@ -422,7 +422,7 @@ main() {
 
     int wideX1 = X0 + 39; // 40 cols: >= 29 -> chunkCount=2
     TestItem ti;
-    build_item(&ti, Y0, X0, Y1, wideX1, /*sync=*/0, /*gapFill=*/5);
+    build_item(&ti, Y0, X0, Y1, wideX1, /*sync=*/0, /*pixelFill=*/5);
     fill_state(Y0, X0, Y1, wideX1, 5);
     list_insert_before(&batch.subList, ti.node);
 
