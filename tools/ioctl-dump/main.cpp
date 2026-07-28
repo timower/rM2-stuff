@@ -1,3 +1,4 @@
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -65,14 +66,55 @@ pan_capture_stream() {
   return f;
 }
 
+// Undeduped companion to SWTCON_PAN_CAPTURE: logs every single pan-triggering
+// ioctl (including repeats of unchanged content) with a monotonic timestamp,
+// gated on SWTCON_PAN_CAPTURE_ALL=<path> so it's opt-in and doesn't disturb
+// ab_compare.sh's existing deduped/ordered comparison. Purpose: the deduped
+// stream only records *what* got shown, never *when* or *how often* - it
+// can't see a kernel that's slow enough to make the worker thread emit
+// fewer distinct frames per unit time, or fall into its "catch-up" loop
+// (worker_thread_func step 10, display.cpp) more or less often. Note this
+// mock's FBIOPAN_DISPLAY/FBIOPUT_VSCREENINFO handlers return immediately -
+// unlike real hardware (which blocks each pan for ~kPanelFrameTickUs,
+// vsync-paced - see CLAUDE.md's Phase 9 pan_timing.h note), so intervals
+// measured here reflect this process's own thread scheduling/compute time,
+// not a real fixed hardware tick; still meaningful for comparing two
+// implementations against each other on identical (emulated) hardware.
+std::ofstream*
+pan_capture_all_stream() {
+  static std::ofstream* f = [] () -> std::ofstream* {
+    const char* path = getenv("SWTCON_PAN_CAPTURE_ALL");
+    if (!path)
+      return nullptr;
+    return new std::ofstream(path, std::ios::out | std::ios::trunc);
+  }();
+  return f;
+}
+
 void
 capture_display(uint32_t offset, uint32_t idx) {
-  auto* f = pan_capture_stream();
-  if (!f || !globalMem)
+  if (!globalMem)
     return;
 
   size_t byte_off = (size_t)offset * line_length;
   uint32_t hash = fnv1a((const uint8_t*)globalMem + byte_off, frame_slot_bytes);
+
+  if (auto* fa = pan_capture_all_stream()) {
+    static const auto t0 = std::chrono::steady_clock::now();
+    static uint64_t raw_seq = 0;
+    auto us = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - t0)
+                .count();
+    *fa << "PAN seq=" << raw_seq++ << " t_us=" << us << " idx=" << idx
+        << " yoffset=0x" << std::hex << offset << std::dec
+        << " hash=" << std::hex << std::setw(8) << std::setfill('0') << hash
+        << std::dec << "\n";
+    fa->flush();
+  }
+
+  auto* f = pan_capture_stream();
+  if (!f)
+    return;
 
   // The ring slot index doesn't matter to the physical panel at all - it's
   // just which memory address this particular display change happened to
