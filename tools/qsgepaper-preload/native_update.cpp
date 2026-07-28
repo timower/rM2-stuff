@@ -86,7 +86,7 @@ CloneWorkItemFieldsInto(WorkItem* dest, const WorkItem* src) {
 
   dest->deps = src->deps;
 
-  // sync, fullRefresh, pad, pixelMode.
+  // sync, fastDraw, pad, pixelMode.
   memcpy(&dest->sync, &src->sync, sizeof(WorkItem) - offsetof(WorkItem, sync));
 }
 
@@ -512,10 +512,10 @@ swtcon_update(update_data* data) {
     int flags = data->flags;
     item.pixelMode = data->pixel_mode;
     item.mode = (int16_t)data->update_mode;
-    item.sync = (uint8_t)(flags & 1);        // Sync
-    item.fullRefresh = (uint8_t)((flags >> 1) & 1); // FullRefresh
+    item.sync = (uint8_t)((flags & Sync) != 0);
+    item.fastDraw = (uint8_t)((flags & FastDraw) != 0);
     float temp = native_get_current_temperature();
-    if (flags & 8) // FastDraw: caller supplies an explicit temperature
+    if (flags & ExplicitTemperature) // caller supplies an explicit temperature
       temp = (float)data->zero;
     item.temperature = temp;
 

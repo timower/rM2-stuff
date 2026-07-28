@@ -259,7 +259,7 @@ build_item(TestItem* ti, int y0, int x0, int y1, int x1, uint16_t fill_transitio
   item->pixelTransitions = non_owning_sp(&ti->transitionsRr);
   item->transitionDataPtr = ti->transitionBuf;  // no rebase: transitionsRr origin == rect origin
   item->sync = 0;
-  item->fullRefresh = 0;
+  item->fastDraw = 0;
   item->pixelMode = 0;
 }
 

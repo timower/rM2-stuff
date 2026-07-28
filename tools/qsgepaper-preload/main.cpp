@@ -55,11 +55,10 @@ enum UpdateMode {
     FAST = 4,
 };
 
-enum UpdateFlags {
-    Sync = 1 << 0,
-    FullRefresh = 1 << 1,
-    FastDraw = 1 << 2,
-};
+// UpdateFlags (Sync/FastDraw/ExplicitTemperature) lives in swtcon.h, shared
+// with native_update.cpp's swtcon_update - see that header for why, and for
+// why bit 1 is FastDraw rather than the "FullRefresh" this project
+// originally (and wrongly) called it.
 
 #define TIME(x)                                                                \
   do {                                                                         \
@@ -121,7 +120,7 @@ int main(int argc, char** argv) {
           }
         }
 
-        update_data req1 = { 0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, FullRefresh | Sync, HQ, 0, 9 };
+        update_data req1 = { 0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, FastDraw | Sync, HQ, 0, 9 };
         TIME(do_update(req1));
         std::cout << "Done" << std::endl;
         getchar();
@@ -139,7 +138,7 @@ int main(int argc, char** argv) {
             }
           }
         }
-        update_data req2 = { 0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, FullRefresh | Sync, MEDIUM, 0, 6 };
+        update_data req2 = { 0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, FastDraw | Sync, MEDIUM, 0, 6 };
         TIME(do_update(req2));
         std::cout << "Done" << std::endl;
         getchar();
@@ -151,7 +150,7 @@ int main(int argc, char** argv) {
           for (int x = 0; x < SCREEN_WIDTH; x++)
             image[SCREEN_WIDTH * y + x] = 0xFFFF;
 
-        update_data req3 = { 0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, FullRefresh | Sync, HQ, 0, 9 };
+        update_data req3 = { 0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, FastDraw | Sync, HQ, 0, 9 };
         TIME(do_update(req3));
         std::cout << "Done" << std::endl;
         getchar();
@@ -283,7 +282,7 @@ int main(int argc, char** argv) {
 
         if (should_run(9)) {
         std::cout << "Overlap: in-flight active dependency (both items "
-                     "FullRefresh, neither Sync) forcing the second item "
+                     "FastDraw, neither Sync) forcing the second item "
                      "onto the 'plain' playback kernel (0x4a140) instead of "
                      "'overlap' (0x4a234) for as long as the dependency is "
                      "active - the branch never hit by any test above. "
@@ -295,10 +294,10 @@ int main(int argc, char** argv) {
                      "in swtcon-ab-test)." << std::endl;
         fill_rect(0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, 0xFFFF);
         fill_rect(300, 300, 1600, 1300, 0x0);
-        submit_nowait({ rect_req(300, 300, 1600, 1300, HQ, 9, FullRefresh) });
+        submit_nowait({ rect_req(300, 300, 1600, 1300, HQ, 9, FastDraw) });
         usleep(300000);
         fill_rect(700, 700, 1200, 1000, 0x8410);
-        submit_nowait({ rect_req(700, 700, 1200, 1000, HQ, 9, FullRefresh) });
+        submit_nowait({ rect_req(700, 700, 1200, 1000, HQ, 9, FastDraw) });
         swtcon_wait();
         std::cout << "Done" << std::endl;
         getchar();

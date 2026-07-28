@@ -826,7 +826,7 @@ native_advance_work_item_frames(WorkItem* item) {
 
 // Mirrors display_thread_func (0x3d2ac) - see swtcon_architecture.md §6.2
 // for the prose write-up of every step below (re-verified/corrected against
-// fresh decompilation this pass, notably: the sync/fullRefresh gate filter
+// fresh decompilation this pass, notably: the sync/fastDraw gate filter
 // in step 3 is now exact rather than "[derived, not fully closed]", and the
 // updateQueueMutex is held across the ENTIRE intake+dispatch+commit
 // sequence for every batch this tick - not dropped before the heavy
@@ -864,17 +864,23 @@ native_display_thread_func(void*) {
         Batch& batch = *batch_it;
         native_build_overlap_dependency_list(batch.subList);
 
-        // Gate-check "max lifetime" scan (now exact, not
-        // "[derived, not fully closed]" - a dependency is skipped only
-        // when NEITHER item requested Sync AND BOTH are FullRefresh,
-        // since a FullRefresh redraw makes waiting on another
-        // FullRefresh-only dependency's completion pointless).
+        // Gate-check "max lifetime" scan (exact condition, not
+        // "[derived, not fully closed]" - a dependency is skipped exactly
+        // when NEITHER item requested Sync AND BOTH have FastDraw set. This
+        // bit was misnamed "FullRefresh" until this pass (see swtcon.h's
+        // UpdateFlags comment for the full evidence trail); the old
+        // "a full refresh redraws the whole area anyway" rationale for this
+        // skip condition doesn't hold under the corrected name and isn't
+        // replaced with a new confirmed one here - the condition itself is
+        // exact (byte-verified against the disassembly), but WHY it's
+        // specifically "both FastDraw" that skips the dependency wait is an
+        // open question, not an established fact.
         int32_t max_lifetime = 0;
         for (auto& item : batch.subList) {
           int32_t item_max = 0;
           for (auto* other : item.deps) {
             bool skip = item.sync == 0 && other->sync == 0 &&
-                        item.fullRefresh != 0 && other->fullRefresh != 0;
+                        item.fastDraw != 0 && other->fastDraw != 0;
             if (!skip)
               item_max =
                 std::max(item_max, other->frameAnchor + other->lutWidthMinus1);

@@ -159,7 +159,7 @@ struct WorkItem {
   // any real ABI at all.
   std::vector<WorkItem*> deps;                // +0x48
   uint8_t sync;                                 // +0x54
-  uint8_t fullRefresh;                           // +0x55
+  uint8_t fastDraw;                              // +0x55 (update_data's FastDraw flag - see swtcon.h)
   uint8_t _pad0x56[2];
   int32_t pixelMode;                              // +0x58
 };
@@ -182,7 +182,7 @@ WI_ASSERT(pixelTransitions, 0x3c);
 WI_ASSERT(transitionDataPtr, 0x44);
 WI_ASSERT(deps, 0x48);
 WI_ASSERT(sync, 0x54);
-WI_ASSERT(fullRefresh, 0x55);
+WI_ASSERT(fastDraw, 0x55);
 WI_ASSERT(pixelMode, 0x58);
 #undef WI_ASSERT
 static_assert(sizeof(WorkItem) == 0x5c, "WorkItem layout drift");
@@ -193,7 +193,7 @@ static_assert(sizeof(WorkItem) == 0x5c, "WorkItem layout drift");
 // future libstdc++ ABI change silently growing WorkItem.
 static_assert(sizeof(std::shared_ptr<RegionRows>) == 8, "shared_ptr<T> must be two pointers");
 static_assert(sizeof(std::shared_ptr<LUTEntry>) == 8, "shared_ptr<T> must be two pointers");
-// deps's offset/size only need to hold sync/fullRefresh/pixelMode at their
+// deps's offset/size only need to hold sync/fastDraw/pixelMode at their
 // asserted offsets above - no real ABI to match (see deps's own comment) -
 // but pin it anyway as a regression guard against a future libstdc++ vector
 // layout change.
