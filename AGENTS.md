@@ -156,7 +156,9 @@ Compare two runs externally, at the ioctl level, via
 `libioctl-dump.so`'s `SWTCON_PAN_CAPTURE=<path>` (hashes the framebuffer
 content on every `FBIOPAN_DISPLAY` call, deduped against the immediately
 preceding pan - ring slot index doesn't matter, only the sequence of
-actually-displayed content) and `pan-capture-compare`:
+actually-displayed content) and `pan-capture-compare`. The easiest way to run
+this is `tools/qsgepaper-preload/ab_compare.sh <ssh-target> [test-case]`,
+which handles the upload/run/compare sequence below automatically:
 
 ```bash
 scp build/dev/tools/qsgepaper-preload/qsgepaper-test \
@@ -170,15 +172,27 @@ ssh RemEmu 'cd /home/root && \
 
 **Important caveat, confirmed empirically:** what's panned is per-phase e-ink
 drive signal, not settled pixel state, and both real-time frame pacing and
-legitimate cross-slot content repetition (e.g. during blank/priming) make
-positional/count comparison meaningless (a raw native-vs-library diff showed
-4x different pan counts purely from wall-clock speed differences). Even after
-dedup, `pan-capture-compare` only compares the *set* of distinct content
-hashes ever displayed, ignoring order/slot/count - a coarse smoke test ("did
-this crash or diverge wildly"), not a byte-exact correctness oracle. A
-control run (two independent library-only runs) showed ~5% of hashes unique
-to one side as the real-time-jitter noise floor; a native-vs-library run
-showed ~65% unique to one side or the other - a real signal worth
-investigating further, not yet root-caused (a natural next step for
-`native_playback_kernel_plain`'s still-unexplained real-hardware artifact
-from Phase 9's fifth pass, above).
+legitimate cross-slot content repetition (e.g. during blank/priming) make a
+positional/count comparison meaningless *across a whole-suite run* - a raw
+native-vs-library diff of the whole ten-test suite showed 4x different pan
+counts purely from wall-clock speed differences. That's only true at
+whole-suite granularity, though: `main.cpp`'s test-case-number argument lets
+each of the ten tests be run and captured in isolation, and *within one
+isolated test case* the two runs do produce the same ordered sequence of
+displayed content (confirmed: nine of ten test cases match position-for-
+position). So `pan-capture-compare` does an **ordered** (positional) hash
+compare - hash at position i in one capture vs. position i in the other -
+rather than the set-of-distinct-hashes compare it used to do; a raw
+whole-suite capture is no longer a supported input; only isolate-and-compare
+per test case as `ab_compare.sh` does.
+
+`ab_compare.sh` runs every test case except case 8 ("burst of un-synced
+overlapping updates") by default - it deliberately submits updates with no
+`swtcon_wait()` between them, racing the worker thread by design, so it is
+known-flaky under any A/B comparison and not a real regression signal (21
+native-only + 12 library-only hashes out of 45/36 total, entirely explained
+by real-time interleaving noise - see the Phase 8 entry above). Pass "8"
+explicitly to `ab_compare.sh` to check it anyway. Every other test case is
+expected to match exactly; a mismatch there is a real signal worth
+investigating (a natural next step for `native_playback_kernel_plain`'s
+still-unexplained real-hardware artifact from Phase 9's fifth pass, above).

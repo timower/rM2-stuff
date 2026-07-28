@@ -5,19 +5,27 @@
 # pan-capture-compare, runs qsgepaper-test once per implementation with
 # SWTCON_PAN_CAPTURE set, then diffs the two captured display sequences. See
 # AGENTS.md's "A/B comparison (SWTCON_LIBIMPL + pan-capture)" section for the
-# technique and its caveats - this is a coarse smoke test on the *set* of
-# distinct content ever displayed, not a byte-exact correctness oracle.
+# technique and its caveats.
+#
+# pan-capture-compare does an ORDERED (positional) hash compare, which only
+# holds up when comparing a single, isolated test case - a whole-suite run's
+# frame count varies with real-time pacing (see main.cpp/pan_capture_compare
+# comments). So by default (no test-case argument), this script runs every
+# test case *individually* (its own pair of captures each), skipping test
+# case 8 ("burst of un-synced overlapping updates") - it deliberately races
+# the worker thread with no swtcon_wait() between submissions, so it is
+# known-flaky under any A/B comparison and not a real regression signal (see
+# CLAUDE.md's Phase 9 notes). Pass "8" explicitly to test it anyway.
 #
 # Usage: tools/qsgepaper-preload/ab_compare.sh <ssh-target> [test-case]
 #
 #   <ssh-target>  ssh destination for the device/emulator (e.g. "RemEmu"),
 #                 passed straight through to ssh/scp.
-#   [test-case]   optional, forwarded to qsgepaper-test as its test-case
-#                 argument (see main.cpp): omit to run every test, "0" to
-#                 run init only, "N" (>=1) to run just test case N - handy
-#                 for isolating one test instead of comparing the whole
-#                 suite at once (e.g. to rule out known-racy tests like
-#                 case 8, "burst of un-synced overlapping updates").
+#   [test-case]   optional. Omit to run every test case except the known-
+#                 flaky case 8, comparing each in isolation and reporting a
+#                 pass/fail summary. "0" runs init only. "N" (1-10) runs and
+#                 compares just that one test case (including "8", if you
+#                 want to see its known flakiness).
 #
 # Requires build/dev to already contain qsgepaper-test, libioctl-dump.so and
 # pan-capture-compare - run `ninja -C build/dev` first.
@@ -47,17 +55,55 @@ for f in "$QSGEPAPER_TEST" "$LIBIOCTL_DUMP" "$PAN_CAPTURE_COMPARE"; do
 done
 
 REMOTE_DIR="/home/root"
-NATIVE_CAPTURE="/tmp/ab_compare_native.txt"
-LIB_CAPTURE="/tmp/ab_compare_lib.txt"
 
 echo "Uploading test binaries to ${TARGET}:${REMOTE_DIR} ..." >&2
 scp "$QSGEPAPER_TEST" "$LIBIOCTL_DUMP" "$PAN_CAPTURE_COMPARE" "${TARGET}:${REMOTE_DIR}/"
 
-echo "Running native implementation ..." >&2
-ssh "$TARGET" "cd ${REMOTE_DIR} && yes '' | SWTCON_PAN_CAPTURE=${NATIVE_CAPTURE} LD_PRELOAD=./libioctl-dump.so ./qsgepaper-test ${TEST_CASE} >/dev/null"
+# Runs one test case's native-vs-library capture and compare. Sets $RUN_ONE_RC
+# to pan-capture-compare's exit status explicitly (rather than relying on
+# the calling context's set -e/if-test interaction, which differs across
+# /bin/sh implementations) - upload and both capture runs are still expected
+# to hard-fail the whole script via set -e if they error out for real.
+run_one() {
+  case_arg="$1"
+  native_capture="/tmp/ab_compare_native_${case_arg:-all}.txt"
+  lib_capture="/tmp/ab_compare_lib_${case_arg:-all}.txt"
 
-echo "Running library implementation (SWTCON_LIBIMPL=1) ..." >&2
-ssh "$TARGET" "cd ${REMOTE_DIR} && yes '' | SWTCON_LIBIMPL=1 SWTCON_PAN_CAPTURE=${LIB_CAPTURE} LD_PRELOAD=./libioctl-dump.so ./qsgepaper-test ${TEST_CASE} >/dev/null"
+  echo "-- test case ${case_arg:-all (whole suite)} --" >&2
+  echo "Running native implementation ..." >&2
+  ssh "$TARGET" "cd ${REMOTE_DIR} && yes '' | SWTCON_PAN_CAPTURE=${native_capture} LD_PRELOAD=./libioctl-dump.so ./qsgepaper-test ${case_arg} >/dev/null"
 
-echo "Comparing captured display sequences ..." >&2
-ssh "$TARGET" "cd ${REMOTE_DIR} && ./pan-capture-compare ${NATIVE_CAPTURE} ${LIB_CAPTURE}"
+  echo "Running library implementation (SWTCON_LIBIMPL=1) ..." >&2
+  ssh "$TARGET" "cd ${REMOTE_DIR} && yes '' | SWTCON_LIBIMPL=1 SWTCON_PAN_CAPTURE=${lib_capture} LD_PRELOAD=./libioctl-dump.so ./qsgepaper-test ${case_arg} >/dev/null"
+
+  echo "Comparing captured display sequences ..." >&2
+  RUN_ONE_RC=0
+  ssh "$TARGET" "cd ${REMOTE_DIR} && ./pan-capture-compare ${native_capture} ${lib_capture}" || RUN_ONE_RC=$?
+}
+
+if [ -n "$TEST_CASE" ]; then
+  run_one "$TEST_CASE"
+  exit "$RUN_ONE_RC"
+fi
+
+# No test case given: run every case except the known-flaky case 8, and
+# report a pass/fail summary across all of them.
+FAILED=""
+for n in 1 2 3 4 5 6 7 9 10; do
+  run_one "$n"
+  if [ "$RUN_ONE_RC" -eq 0 ]; then
+    echo "case $n: MATCH" >&2
+  else
+    echo "case $n: MISMATCH" >&2
+    FAILED="$FAILED $n"
+  fi
+done
+
+echo >&2
+if [ -z "$FAILED" ]; then
+  echo "All test cases matched (case 8 skipped - known flaky, pass it explicitly to check anyway)." >&2
+  exit 0
+else
+  echo "Mismatched test case(s):$FAILED" >&2
+  exit 1
+fi

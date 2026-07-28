@@ -3,39 +3,37 @@
 // native and once with SWTCON_LIBIMPL=1 (each writing its own capture file),
 // then compare here.
 //
-// Comparison is by SET of distinct content hashes, not position or count.
-// A positional/count-based diff was tried first and doesn't work: the panel
-// pans continuously at a fixed real-time cadence regardless of content (see
-// main.cpp's capture_pan comment), so even after deduping idle repeats, the
-// *number* of transient waveform frames a run produces varies with how fast
-// that run's process happens to run relative to the panel's frame-pacing
-// clock (confirmed empirically: 677 vs. 355 deduped records for an
-// identical test, native vs. library) - this project's own AGENTS.md already
-// documents this class of real-time jitter for the internal PLAY capture.
-// Slot index isn't a stable sync key either - multiple ring slots
-// legitimately carry identical content during priming/blank fills. What
-// should hold regardless of timing is: every distinct frame content that
-// got displayed in one run also got displayed somewhere in the other run.
+// Comparison is ORDERED: hash at position i in capture A is compared against
+// the hash at position i in capture B, in sequence order. This assumes both
+// captures come from a single, isolated test case (see
+// tools/qsgepaper-preload/ab_compare.sh, which runs and diffs one test case
+// at a time by default) - real-time frame pacing and cross-test interleaving
+// can still shift how many transient waveform frames a *whole-suite* run
+// produces (documented previously as 677 vs. 355 deduped records for an
+// identical full-suite run, native vs. library), which would make a
+// positional compare noisy garbage for that case. Per isolated test case,
+// the two runs are expected to produce the same ordered sequence of
+// displayed content.
 //
-// Exit code: 0 = same set of distinct hashes, 1 = a hash present in one run
-// never appeared in the other, 2 = I/O error.
+// Exit code: 0 = identical ordered sequence, 1 = a length or positional
+// mismatch, 2 = I/O error.
 
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
-#include <iterator>
-#include <set>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace {
 
-std::set<uint32_t>
+std::vector<uint32_t>
 read_hashes(const char* path) {
   std::ifstream f(path);
-  std::set<uint32_t> hashes;
+  std::vector<uint32_t> hashes;
   std::string line;
   while (std::getline(f, line)) {
     auto pos = line.find("hash=");
@@ -43,21 +41,9 @@ read_hashes(const char* path) {
       continue;
     uint32_t h = 0;
     std::istringstream(line.substr(pos + 5)) >> std::hex >> h;
-    hashes.insert(h);
+    hashes.push_back(h);
   }
   return hashes;
-}
-
-void
-print_missing(const char* label, const std::set<uint32_t>& missing) {
-  size_t shown = 0;
-  for (uint32_t h : missing) {
-    if (shown++ >= 20) {
-      std::cout << "  ... (" << missing.size() - 20 << " more)\n";
-      break;
-    }
-    std::cout << "  " << label << ": hash=" << std::hex << h << std::dec << "\n";
-  }
 }
 
 } // namespace
@@ -75,31 +61,42 @@ main(int argc, char** argv) {
     return 2;
   }
 
-  std::set<uint32_t> a = read_hashes(argv[1]);
-  std::set<uint32_t> b = read_hashes(argv[2]);
+  std::vector<uint32_t> a = read_hashes(argv[1]);
+  std::vector<uint32_t> b = read_hashes(argv[2]);
 
-  std::set<uint32_t> only_a, only_b;
-  std::set_difference(a.begin(), a.end(), b.begin(), b.end(),
-                       std::inserter(only_a, only_a.end()));
-  std::set_difference(b.begin(), b.end(), a.begin(), a.end(),
-                       std::inserter(only_b, only_b.end()));
+  std::cout << argv[1] << ": " << a.size() << " frame hashes\n";
+  std::cout << argv[2] << ": " << b.size() << " frame hashes\n";
 
-  std::cout << argv[1] << ": " << a.size() << " distinct frame hashes\n";
-  std::cout << argv[2] << ": " << b.size() << " distinct frame hashes\n";
+  size_t n = std::min(a.size(), b.size());
+  size_t mismatches = 0;
+  size_t shown = 0;
+  for (size_t i = 0; i < n; i++) {
+    if (a[i] == b[i])
+      continue;
+    mismatches++;
+    if (shown++ < 20) {
+      std::cout << "  seq=" << i << ": hash=" << std::hex << std::setfill('0')
+                << std::setw(8) << a[i] << " vs hash=" << std::setw(8) << b[i]
+                << std::dec << "\n";
+    }
+  }
+  if (shown < mismatches)
+    std::cout << "  ... (" << mismatches - shown << " more mismatches)\n";
 
-  if (only_a.empty() && only_b.empty()) {
-    std::cout << "MATCH: same set of distinct frame content (" << a.size()
+  bool length_mismatch = a.size() != b.size();
+  if (length_mismatch) {
+    std::cout << "length mismatch: " << argv[1] << " has " << a.size()
+              << ", " << argv[2] << " has " << b.size() << "\n";
+  }
+
+  if (mismatches == 0 && !length_mismatch) {
+    std::cout << "MATCH: identical ordered sequence (" << a.size()
               << " hashes)\n";
     return 0;
   }
 
-  if (!only_a.empty()) {
-    std::cout << only_a.size() << " hash(es) only in " << argv[1] << ":\n";
-    print_missing("only_a", only_a);
-  }
-  if (!only_b.empty()) {
-    std::cout << only_b.size() << " hash(es) only in " << argv[2] << ":\n";
-    print_missing("only_b", only_b);
-  }
+  std::cout << "MISMATCH: " << mismatches << " of " << n
+            << " compared positions differ" << (length_mismatch ? "; plus a length mismatch" : "")
+            << "\n";
   return 1;
 }
