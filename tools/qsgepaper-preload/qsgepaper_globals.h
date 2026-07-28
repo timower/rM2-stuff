@@ -32,16 +32,16 @@
 
 #include "swtcon.h"
 
-// Forward-declared rather than #include "native_init.h" (which defines
-// ModeEntry) to avoid a header cycle - native_init.h itself includes this
+// Forward-declared rather than #include "init.h" (which defines
+// ModeEntry) to avoid a header cycle - init.h itself includes this
 // file. A vector of pointers only needs the pointee declared, not complete.
 struct ModeEntry;
 
 // The panel's native resolution - every full-screen buffer/rect bound in
 // this codebase derives from these two. Shared here (rather than each
-// production file keeping its own copy) since native_update.cpp and
-// native_display.cpp both need it and drift between copies would be a real
-// correctness risk, not just cosmetic - see e.g. native_clamp_update_rect's
+// production file keeping its own copy) since update.cpp and
+// display.cpp both need it and drift between copies would be a real
+// correctness risk, not just cosmetic - see e.g. clamp_update_rect's
 // reflection formula. The handful of standalone black-box probe/bench tools
 // (playback_kernel_bench.cpp etc.) intentionally keep their own local copy
 // instead, matching their own independence from the production headers.
@@ -57,17 +57,17 @@ constexpr int32_t kFrameSlotRingCount = 16;
 
 // The one extra frame slot beyond the kFrameSlotRingCount real ones (index
 // == kFrameSlotRingCount since slots are 0-based) - used only to prime the
-// panel controller (native_prime_display) and during the startup flash
+// panel controller (prime_display) and during the startup flash
 // sequence, never part of the normal playback ring.
 constexpr int32_t kInitFrameSlotIndex = kFrameSlotRingCount;
 
 // The panel's own per-frame-tick pacing period, in microseconds - sizes
-// display_thread_func's frame-pacing target formula (native_display.cpp)
+// display_thread_func's frame-pacing target formula (display.cpp)
 // and is the only concrete real-time deadline in this codebase to check
 // kernel/dispatch performance against (see playback_kernel_bench.cpp).
 constexpr double kPanelFrameTickUs = 11761.0;
 
-// display_thread_func's pacing-target formula (native_display.cpp) scales
+// display_thread_func's pacing-target formula (display.cpp) scales
 // the batch's leftmost column by this factor (then /1000) to get a target
 // elapsed-time budget - an empirically reversed constant (byte-verified
 // against the real disassembly, not derived from any other constant here)
@@ -106,16 +106,16 @@ struct Timespec64 {
 static_assert(sizeof(Timespec64) == 16, "Timespec64 must be two 64-bit fields");
 
 // --- Update queue / worker+display thread state -----------------------
-// UpdateQueueGlobals and update_queue_globals() moved to native_update.h
+// UpdateQueueGlobals and update_queue_globals() moved to update.h
 // (Step 4 of the shared_ptr/list cleanup) - three of its fields
 // (listProcessedUpdates/accumList/listIncomingUpdates) are now real
 // std::list<WorkItem>/std::list<Batch>, which need WorkItem/Batch complete
 // wherever the struct's implicit destructor gets instantiated (i.e.
 // wherever update_queue_globals()'s function body, defining the static
 // local instance, is compiled) - and WorkItem/Batch are only defined in
-// native_update.h, included by every file that actually calls
-// update_queue_globals() (swtcon.cpp, native_update.cpp, native_display.cpp)
-// but not by native_init.h/.cpp, which never needed this struct.
+// update.h, included by every file that actually calls
+// update_queue_globals() (swtcon.cpp, update.cpp, display.cpp)
+// but not by init.h/.cpp, which never needed this struct.
 
 // --- Frame-pacing cursor cluster ----------------------------------------
 // Contiguous, byte-verified via disassembly of worker_thread_func /
@@ -146,9 +146,9 @@ frame_cursor_globals() {
 // Formerly resolve_ptr<T*>(fixed_addr) into the library's own .bss/.data
 // (g_nPidFd 0x66dec, g_flCachedTemperature 0x66e20, g_dwTemperatureMutex
 // 0x6d180, the work-item sequence id counter 0x6d178) - now natively-owned
-// storage (Phase 7). g_nPidFd's slot is unused: native_create_pid_file
-// (native_init.cpp) already writes the real fd into its own native
-// g_nPidFdNative global instead, so native_unlock_pid_file reads that
+// storage (Phase 7). g_nPidFd's slot is unused: create_pid_file
+// (init.cpp) already writes the real fd into its own native
+// g_nPidFdNative global instead, so unlock_pid_file reads that
 // directly rather than through here.
 
 // NOT zero-initialized in the real library: g_flCachedTemperature's initial
@@ -194,7 +194,7 @@ seq_counter_ptr() {
 constexpr int32_t kDirtyGateRowBytes = kScreenWidth;
 constexpr int32_t kDirtyGateBucketCount = kFrameSlotRingCount;
 
-// native_stale_row_cleanup (native_display.cpp) computes `bucket = i % 16`
+// stale_row_cleanup (display.cpp) computes `bucket = i % 16`
 // for `i` as low as nFrameCleanupCursor-15, which is negative during the
 // first ~15 display-thread ticks after startup (C++ `%` keeps the sign of
 // the dividend) - a real quirk in the original library, transcribed
@@ -215,7 +215,7 @@ backbuffer_dirty_gate() {
 
 // --- Persisted statebuffer + gamma table --------------------------------
 // Fully contiguous, all three pointers/size wired together at init
-// (swtcon_init) and torn down together (native_free_statebuffer).
+// (swtcon_init) and torn down together (free_statebuffer).
 struct StatebufferGlobals {
   void* pStatebuffer;   // 0x6d1d0
   void* pGammaTable;    // 0x6d1d4

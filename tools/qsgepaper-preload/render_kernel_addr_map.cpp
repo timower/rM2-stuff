@@ -1,4 +1,4 @@
-// Empirically maps render_update_kernel's (0x4e7b8) input-pixel -> output-
+// Empirically maps lib_render_update_kernel's (0x4e7b8) input-pixel -> output-
 // byte addressing/rotation, which render_kernel_verify.cpp deliberately
 // sidesteps (see its header comment). Rather than hand-decoding the ARM
 // pointer arithmetic (chunked, 8-wide-NEON, 180-deg-rotated), this uses a
@@ -16,8 +16,8 @@
 #include <cstring>
 #include <dlfcn.h>
 
-#include "native_init.h"
-#include "native_update.h"
+#include "init.h"
+#include "update.h"
 
 #define INSTANCE_ADDR 0x35de0
 #define RENDER_UPDATE_KERNEL_ADDR 0x4e7b8
@@ -56,11 +56,11 @@ load_library() {
 int
 main(int argc, char** argv) {
   g_runtime_offset = load_library();
-  auto render_update_kernel =
+  auto lib_render_update_kernel =
     (RenderKernelFn)(g_runtime_offset + RENDER_UPDATE_KERNEL_ADDR);
 
-  if (native_init_statebuffer() != 0) {
-    fprintf(stderr, "native_init_statebuffer failed\n");
+  if (init_statebuffer() != 0) {
+    fprintf(stderr, "init_statebuffer failed\n");
     return 1;
   }
   statebuffer_globals()->pGammaTable = g_pGammaTableNative;
@@ -116,7 +116,7 @@ main(int argc, char** argv) {
 
   auto run_kernel_check = [&](int target_offset) -> bool {
     memset(output, 0xcc, RECT * RECT);
-    render_update_kernel(&item, dataBuffer, backBuffer, 0, 1);
+    lib_render_update_kernel(&item, dataBuffer, backBuffer, 0, 1);
     return output[target_offset] == 0x1e;
   };
 
@@ -189,7 +189,7 @@ main(int argc, char** argv) {
       fill_gamma_range(0, GN, 0x00);
       fill_gamma_range(lo, mid, 0xff);
       memset(output, 0xcc, RECT * RECT);
-      render_update_kernel(&item, dataBuffer, backBuffer, 0, 1);
+      lib_render_update_kernel(&item, dataBuffer, backBuffer, 0, 1);
       bool marked = output[target_offset] == 0x3c;
       if (marked)
         hi = mid;
@@ -216,7 +216,7 @@ main(int argc, char** argv) {
   backBuffer[flat0] = 0xff;
   item.pixelMode = 7;
   memset(output, 0xcc, RECT * RECT);
-  render_update_kernel(&item, dataBuffer, backBuffer, 0, 1);
+  lib_render_update_kernel(&item, dataBuffer, backBuffer, 0, 1);
   printf("predicted backBuffer flat_idx=%lld (src_y=%lld src_x=%lld): output[0]=0x%02x "
          "(0x20=gated/inactive, anything else=confirmed active)\n",
          (long long)flat0, (long long)src_y0, (long long)src_x0, output[0]);

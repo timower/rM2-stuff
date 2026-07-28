@@ -1,4 +1,4 @@
-#include "native_init.h"
+#include "init.h"
 #include "statebuffer_table.h"
 #include <iostream>
 #include <fstream>
@@ -40,7 +40,7 @@ void* g_pLUTAddrNative = nullptr;
 
 // The library's pan/display code reads the *global* g_fbVarScreeninfo (0x6d3a0)
 // and g_fbFixScreeninfo (0x6d35c) — pan_to_frame just rewrites yoffset in that
-// global and re-issues FBIOPAN_DISPLAY. So native_init_framebuffer must fill
+// global and re-issues FBIOPAN_DISPLAY. So init_framebuffer must fill
 // these (not locals); swtcon_init copies them into the library globals. If the
 // global vinfo is left zeroed the pan ioctl gets yres=0/xres=0 and the driver
 // rejects it ("Pan failed"), which is why the panel never refreshes on hardware.
@@ -51,7 +51,7 @@ LUTEntry::~LUTEntry() {
     if (data) free(data); // Using free() since malloc() was used
 }
 
-int native_create_pid_file() {
+int create_pid_file() {
     int fd = open("/tmp/epd.lock", O_RDWR | O_CREAT, 0666);
     if (fd == -1) {
         std::cerr << "unable to open lock file: /tmp/epd.lock" << std::endl;
@@ -66,7 +66,7 @@ int native_create_pid_file() {
     return -1;
 }
 
-int native_init_statebuffer() {
+int init_statebuffer() {
     size_t sz = kStatebufferSize;
 
     // g_pDataBuffer: 16-bit image working buffer, returned to the caller.
@@ -109,7 +109,7 @@ int native_init_statebuffer() {
     return 0;
 }
 
-int native_init_framebuffer(const FbInitParams& fb_info) {
+int init_framebuffer(const FbInitParams& fb_info) {
     const char* file = "/dev/fb0";
     g_nFbFdNative = open(file, O_RDWR);
     if (g_nFbFdNative < 0) {
@@ -177,7 +177,7 @@ int native_init_framebuffer(const FbInitParams& fb_info) {
 // Mirrors FUN_00053a30 exactly (constants read from its disassembly — the vector
 // decompilation of the immediates is misleading). vmov/vorr .i32 immediates are
 // byte-position encoded: #0x410000 == 0x00410000, #0x20000 == 0x00020000, etc.
-void native_init_lut_sub(uint32_t* param_1, int param_2) {
+void init_lut_sub(uint32_t* param_1, int param_2) {
     uint32_t* puVar3 = param_1;
     uint32_t* puVar5 = param_1 + 0x104;
     while (puVar3 != puVar5) {
@@ -221,11 +221,11 @@ void native_init_lut_sub(uint32_t* param_1, int param_2) {
 
 // Mirrors FUN_00053ac4 exactly: fills a 0x165800-byte LUT-shaped blob (one
 // full frame slot's worth) with the fixed dither pattern, parameterized only
-// by the third native_init_lut_sub call's pattern argument - `native_init_lut`
+// by the third init_lut_sub call's pattern argument - `init_lut`
 // passes 0 there (the real waveform LUT); the worker thread's flash sequence
 // (write_flash_prime_pattern @0x53c04, wrapping this same function) passes a
 // dynamic 16-bit pattern instead. Shared so both callers can't drift apart.
-static void native_fill_lut_pattern(void* dest, int pattern) {
+static void fill_lut_pattern(void* dest, int pattern) {
     uint32_t* buf = (uint32_t*)dest;
 
     // vmov.i32 #0x430000 == 0x00430000 (byte-position immediate, not 0x43000000).
@@ -244,9 +244,9 @@ static void native_fill_lut_pattern(void* dest, int pattern) {
     // The middle call passes -1: in FUN_00053ac4 r1 is set to 0xffffffff before
     // the first call and NOT reloaded before the second; only the third uses the
     // real param.
-    native_init_lut_sub(buf + 0x104, -1);
-    native_init_lut_sub(buf + 0x208, -1);
-    native_init_lut_sub(buf + 0x30c, pattern);
+    init_lut_sub(buf + 0x104, -1);
+    init_lut_sub(buf + 0x208, -1);
+    init_lut_sub(buf + 0x30c, pattern);
 
     uint32_t* puVar2 = buf + 0x410;
     while (puVar2 != buf + 0x59600) {
@@ -255,24 +255,24 @@ static void native_fill_lut_pattern(void* dest, int pattern) {
     }
 }
 
-int native_init_lut() {
+int init_lut() {
     size_t sz = kLutBlobSize;
     g_pLUTAddrNative = malloc(sz);
     if (!g_pLUTAddrNative) return -1;
-    native_fill_lut_pattern(g_pLUTAddrNative, 0);
+    fill_lut_pattern(g_pLUTAddrNative, 0);
     return 0;
 }
 
 // Mirrors write_flash_prime_pattern (0x53c04, wraps FUN_00053ac4): writes the
-// same dither-fill algorithm as native_init_lut, but into an already-existing
+// same dither-fill algorithm as init_lut, but into an already-existing
 // frame-slot-sized buffer and with a caller-supplied pattern rather than the
 // real waveform LUT's fixed 0. Used by the worker thread's flash sequence to
 // prime frame slots 0-2 with a checkerboard pattern.
-void native_write_lut_pattern(void* dest, int pattern) {
-    native_fill_lut_pattern(dest, pattern);
+void write_lut_pattern(void* dest, int pattern) {
+    fill_lut_pattern(dest, pattern);
 }
 
-bool native_load_waveform(std::vector<ModeEntry*>* waveform_struct, const char* path) {
+bool load_waveform(std::vector<ModeEntry*>* waveform_struct, const char* path) {
     std::ifstream file(path, std::ios::binary);
     if (!file) {
         std::cerr << "wfb: unable to open file: " << path << std::endl;
@@ -438,7 +438,7 @@ bool native_load_waveform(std::vector<ModeEntry*>* waveform_struct, const char* 
 // .../temp0 exists (mirroring the original's __stat64_time64 check) before
 // returning that path. Keeps scanning past entries that don't match or whose
 // temp0 is missing; returns false with *out_path cleared if none match.
-bool native_find_temperature_hwmon_path(std::string* out_path) {
+bool find_temperature_hwmon_path(std::string* out_path) {
     out_path->clear();
 
     DIR* dir = opendir("/sys/class/hwmon");
@@ -478,7 +478,7 @@ bool native_find_temperature_hwmon_path(std::string* out_path) {
 
 // Mirrors read_temperature_raw (0x46644): reads a hwmon sysfs value file and
 // strtol-parses the leading integer.
-bool native_read_temperature_raw(const char* path, int* out_value) {
+bool read_temperature_raw(const char* path, int* out_value) {
     FILE* f = fopen64(path, "r");
     if (!f) {
         std::cerr << "temperature_hwmon: unable to open temperature file: " << path << std::endl;
@@ -512,13 +512,13 @@ bool native_read_temperature_raw(const char* path, int* out_value) {
     return true;
 }
 
-// Path discovered once by native_init_temperature_sensor and reused by every
-// subsequent native_refresh_temperature_cache call.
+// Path discovered once by init_temperature_sensor and reused by every
+// subsequent refresh_temperature_cache call.
 static std::string g_hwmonTempPathNative;
 
-void native_refresh_temperature_cache() {
+void refresh_temperature_cache() {
     int raw_value;
-    if (!native_read_temperature_raw(g_hwmonTempPathNative.c_str(), &raw_value))
+    if (!read_temperature_raw(g_hwmonTempPathNative.c_str(), &raw_value))
         return;
 
     pthread_mutex_t* mutex = temperature_mutex();
@@ -528,30 +528,30 @@ void native_refresh_temperature_cache() {
     pthread_mutex_unlock(mutex);
 }
 
-void native_init_temperature_sensor() {
-    if (native_find_temperature_hwmon_path(&g_hwmonTempPathNative)) {
+void init_temperature_sensor() {
+    if (find_temperature_hwmon_path(&g_hwmonTempPathNative)) {
         std::cout << "temperature_hwmon: found temperature path: "
                   << g_hwmonTempPathNative << std::endl;
     } else {
         std::cerr << "temperature_hwmon: failed to find path" << std::endl;
     }
-    native_refresh_temperature_cache();
+    refresh_temperature_cache();
 }
 
-void* native_frame_buffer_addr(int frame_idx) {
+void* frame_buffer_addr(int frame_idx) {
     return (uint8_t*)g_pFbAddrNative + (size_t)g_nFbSizeXNative * frame_idx;
 }
 
-void native_upload_lut_to_frame_slot(void* dest) {
+void upload_lut_to_frame_slot(void* dest) {
     memcpy(dest, g_pLUTAddrNative, kLutBlobSize);
 }
 
 // Mirrors reset_statebuffer_neutral (0x4fbe0): reapplies the same
-// kNeutralStateWord-per-pixel fill native_init_statebuffer used at
+// kNeutralStateWord-per-pixel fill init_statebuffer used at
 // allocation time, over the already-allocated statebuffer. Called by the
 // worker thread after its flash sequence to reset per-pixel state to
 // neutral.
-void native_reset_statebuffer_neutral() {
+void reset_statebuffer_neutral() {
     auto* sb = statebuffer_globals();
     size_t sz = kStatebufferSize;
     uint32_t* sp = (uint32_t*)sb->pStatebuffer;
@@ -560,10 +560,10 @@ void native_reset_statebuffer_neutral() {
 }
 
 // Mirrors read_lut_packed_pixel (0x40c58): generic bit-unpacking read of one
-// packed pixel from a LUTEntry - the read-side inverse of native_load_waveform's
+// packed pixel from a LUTEntry - the read-side inverse of load_waveform's
 // packing loop above (which hardcodes bit_depth=2; this generalizes to any
 // bit_depth). `phase` selects which of the LUT's packed planes to read from.
-unsigned native_read_lut_packed_pixel(const LUTEntry* lut, int row, int col, int phase) {
+unsigned read_lut_packed_pixel(const LUTEntry* lut, int row, int col, int phase) {
     int pixels_per_word = 16 / lut->bit_depth;
     int word_idx = phase / pixels_per_word;
     int bit_off = phase - pixels_per_word * word_idx;
@@ -573,7 +573,7 @@ unsigned native_read_lut_packed_pixel(const LUTEntry* lut, int row, int col, int
     return (raw >> (lut->bit_depth * bit_off)) & ((1u << lut->bit_depth) - 1);
 }
 
-int native_pan_and_unblank(int frame_idx) {
+int pan_and_unblank(int frame_idx) {
     auto* fb = framebuffer_globals();
     auto* vinfo = &fb->fbVar;
 
@@ -603,10 +603,10 @@ int native_pan_and_unblank(int frame_idx) {
 }
 
 // Mirrors pan_to_frame (unconditional pan, no unblank/retry - unlike
-// native_pan_and_unblank, which also flips the panel on and retries FBIOBLANK
+// pan_and_unblank, which also flips the panel on and retries FBIOBLANK
 // up to 5 times): sets fbVar.yoffset and issues FBIOPAN_DISPLAY once, logging
 // "Pan failed" on error and otherwise doing nothing else.
-void native_pan_to_frame(int frame_idx) {
+void pan_to_frame(int frame_idx) {
     auto* fb = framebuffer_globals();
     auto* vinfo = &fb->fbVar;
     vinfo->yoffset = frame_idx * vinfo->yres;
@@ -615,21 +615,21 @@ void native_pan_to_frame(int frame_idx) {
     }
 }
 
-void native_prime_display() {
-    if (native_is_fb_blanked() == 0) {
-        native_refresh_temperature_cache();
+void prime_display() {
+    if (is_fb_blanked() == 0) {
+        refresh_temperature_cache();
         return;
     }
-    native_pan_and_unblank(kInitFrameSlotIndex);
-    native_refresh_temperature_cache();
-    native_blank_fb();
+    pan_and_unblank(kInitFrameSlotIndex);
+    refresh_temperature_cache();
+    blank_fb();
 }
 
-int native_is_fb_blanked() {
+int is_fb_blanked() {
     return framebuffer_globals()->nIsFbBlanked;
 }
 
-void native_blank_fb() {
+void blank_fb() {
     auto* fb = framebuffer_globals();
     if (fb->nIsFbBlanked == 0) {
         fb->nIsFbBlanked = 1;
@@ -639,7 +639,7 @@ void native_blank_fb() {
     }
 }
 
-void native_save_statebuffer(int state_ptr_or_zero) {
+void save_statebuffer(int state_ptr_or_zero) {
     auto* sb = statebuffer_globals();
     char* filename = (char*)state_ptr_or_zero;
     FILE* f = fopen64(filename, "w");
@@ -649,7 +649,7 @@ void native_save_statebuffer(int state_ptr_or_zero) {
     }
 }
 
-void native_free_statebuffer() {
+void free_statebuffer() {
     auto* sb = statebuffer_globals();
     free(sb->pStatebuffer);
     if (sb->pGammaTable != nullptr) {
@@ -657,7 +657,7 @@ void native_free_statebuffer() {
     }
 }
 
-void native_close_fb() {
+void close_fb() {
     auto* fb = framebuffer_globals();
     munmap(fb->pFbMmap, (size_t)fb->nFbSizeX * fb->nFbSizeY);
     fb->pFbMmap = nullptr;
@@ -665,14 +665,14 @@ void native_close_fb() {
     fb->nFbFd = -1;
 }
 
-void native_free_LUT() {
+void free_LUT() {
     auto* fb = framebuffer_globals();
     if (fb->pLUT != nullptr) {
         ::operator delete(fb->pLUT);
     }
 }
 
-void native_unlock_pid_file() {
+void unlock_pid_file() {
     if (g_nPidFdNative > -1) {
         if (flock(g_nPidFdNative, LOCK_UN) == -1) {
             std::cerr << "unable to unlock exclusive lock" << std::endl;

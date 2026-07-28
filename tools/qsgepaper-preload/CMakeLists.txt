@@ -3,17 +3,17 @@ project(qsgepaper-preload CXX ASM)
 
 # The project's "release" preset ships MinSizeRel (-Os, optimize for code
 # size) - a reasonable default for the binary as a whole, but a bad fit for
-# native_playback_kernel.cpp specifically: it's a tight, compute-bound,
+# playback_kernel_intrinsics.cpp specifically: it's a tight, compute-bound,
 # per-pixel hot loop (see AGENTS.md's Phase 9) where -Os measurably leaves
 # performance on the table (loop unrolling/scheduling -Os intentionally
 # skips). Override just this one file to -O3 regardless of the overall
 # build type - a later flag wins over the build type's -Os/-Og/etc, so this
 # doesn't need to touch CMAKE_BUILD_TYPE or affect the rest of the binary's
 # size.
-set_source_files_properties(native_playback_kernel.cpp PROPERTIES COMPILE_OPTIONS "-O3")
+set_source_files_properties(playback_kernel_intrinsics.cpp PROPERTIES COMPILE_OPTIONS "-O3")
 
-add_executable(qsgepaper-test main.cpp swtcon.cpp native_init.cpp native_update.cpp native_display.cpp
-                               native_playback_kernel.cpp ./playback_kernel.s ./playback_kernel_aligned.s)
+add_executable(qsgepaper-test main.cpp swtcon.cpp init.cpp update.cpp display.cpp
+                               playback_kernel_intrinsics.cpp ./playback_kernel.s ./playback_kernel_aligned.s)
 target_link_libraries(qsgepaper-test dl)
 
 # libqsgepaper.so was built against the C++11 std::string SSO ABI
@@ -26,41 +26,41 @@ target_compile_definitions(qsgepaper-test PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
 
 # A/B verification tool for render_update_kernel (still-library, Phase 6) -
 # see render_kernel_verify.cpp's header comment.
-add_executable(render-kernel-verify render_kernel_verify.cpp native_init.cpp)
+add_executable(render-kernel-verify render_kernel_verify.cpp init.cpp)
 target_link_libraries(render-kernel-verify dl)
 target_compile_definitions(render-kernel-verify PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
 
 # Empirical input->output addressing mapper for render_update_kernel (Phase 6
 # porting work) - see render_kernel_addr_map.cpp's header comment.
-add_executable(render-kernel-addr-map render_kernel_addr_map.cpp native_init.cpp)
+add_executable(render-kernel-addr-map render_kernel_addr_map.cpp init.cpp)
 target_link_libraries(render-kernel-addr-map dl)
 target_compile_definitions(render-kernel-addr-map PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
 
 # Empirical probe for dispatch_processed_regions (still-library, the last
 # remaining by-address call in the native port) - see
 # dispatch_processed_regions_probe.cpp's header comment.
-add_executable(dispatch-processed-regions-probe dispatch_processed_regions_probe.cpp native_init.cpp native_update.cpp)
+add_executable(dispatch-processed-regions-probe dispatch_processed_regions_probe.cpp init.cpp update.cpp)
 target_link_libraries(dispatch-processed-regions-probe dl)
 target_compile_definitions(dispatch-processed-regions-probe PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
 
 # Empirical probe for the two worker-side playback kernels (still-library,
 # the last remaining by-address calls in the pipeline) - see
 # playback_kernel_probe.cpp's header comment.
-add_executable(playback-kernel-probe playback_kernel_probe.cpp native_init.cpp native_update.cpp)
+add_executable(playback-kernel-probe playback_kernel_probe.cpp init.cpp update.cpp)
 target_link_libraries(playback-kernel-probe dl)
 target_compile_definitions(playback-kernel-probe PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
 
-# Microbenchmark for native_playback_kernel_plain (native_playback_kernel.cpp),
+# Microbenchmark for playback_kernel_plain_intrinsics (playback_kernel_intrinsics.cpp),
 # the native port of the two worker-side playback kernels - measures its
 # compute cost in isolation and, where the library is available, against the
 # real NEON FUN_0004a140/FUN_0004a234 - see playback_kernel_bench.cpp's header
-# comment. Links native_display.cpp (for the surrounding dispatch code) and
-# native_playback_kernel.cpp (the kernel itself); deliberately does NOT link
+# comment. Links display.cpp (for the surrounding dispatch code) and
+# playback_kernel_intrinsics.cpp (the kernel itself); deliberately does NOT link
 # swtcon.cpp - it defines its own minimal swtcon_runtime_offset(), same as
 # playback_kernel_probe.cpp, to dlopen the library independently rather than
 # through swtcon.cpp's production load_lib() path.
-add_executable(playback-kernel-bench playback_kernel_bench.cpp native_init.cpp native_update.cpp
-                                      native_display.cpp native_playback_kernel.cpp
+add_executable(playback-kernel-bench playback_kernel_bench.cpp init.cpp update.cpp
+                                      display.cpp playback_kernel_intrinsics.cpp
                                       ./playback_kernel.s ./playback_kernel_aligned.s)
 target_link_libraries(playback-kernel-bench dl)
 target_compile_definitions(playback-kernel-bench PRIVATE _GLIBCXX_USE_CXX11_ABI=1)

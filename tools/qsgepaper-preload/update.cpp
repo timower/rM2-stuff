@@ -1,5 +1,5 @@
-#include "native_update.h"
-#include "native_init.h"
+#include "update.h"
+#include "init.h"
 #include "swtcon_libimpl.h"
 #include <cstring>
 #include <iterator>
@@ -22,7 +22,7 @@ extern void (*qsgepaper_wait)();
 // unlock_and_post_swap / UnlockAndPostSwapMutex (0x3dd90) and WaitForUpdate
 // (0x3b644). The native code owns the control flow, work-item field packing
 // and the intrusive std::list / std::shared_ptr book-keeping (see WorkItem,
-// WorkItemNode, BatchNode and RegionRows in native_update.h for the wire
+// WorkItemNode, BatchNode and RegionRows in update.h for the wire
 // formats). Remaining library leaf routines (to be reversed in later
 // steps):
 //   0x1ec58 _M_hook                 - std::__detail::_List_node_base::_M_hook
@@ -62,8 +62,8 @@ list_unhook(void* node) {
 
 // Deep-copies everything a work item needs cloned (retained shared_ptrs,
 // copied deps vector, and every other scalar field verbatim) but does NOT
-// touch the rect or sequence id. Shared by native_update_item_copy (which
-// preserves the source's rect/seq id) and native_piece_builder (which
+// touch the rect or sequence id. Shared by update_item_copy (which
+// preserves the source's rect/seq id) and piece_builder (which
 // overwrites both with the split-off piece's own).
 static void
 CloneWorkItemFieldsInto(WorkItem* dest, const WorkItem* src) {
@@ -91,9 +91,9 @@ CloneWorkItemFieldsInto(WorkItem* dest, const WorkItem* src) {
 }
 
 // Native reimplementation of update_item_copy (0x3e850).
-// Non-static: also used by native_display.cpp (see native_update.h).
+// Non-static: also used by display.cpp (see update.h).
 WorkItem*
-native_update_item_copy(WorkItem* dest, const WorkItem* src) {
+update_item_copy(WorkItem* dest, const WorkItem* src) {
   CloneWorkItemFieldsInto(dest, src);
   return dest;
 }
@@ -101,14 +101,14 @@ native_update_item_copy(WorkItem* dest, const WorkItem* src) {
 // Native reimplementation of the anonymous LUTEntry+shared_ptr allocator at
 // 0x408a8 (confirmed signature via disassembly: r0=out_sp, r1=size_kb,
 // r2=mode_width, r3=bit_depth, s0=temperature per AAPCS-VFP). Both real call
-// sites (native_update_item_ctor's placeholder, native_select_waveform_lut's
+// sites (update_item_ctor's placeholder, select_waveform_lut's
 // out-of-range-mode fallback) always pass all-zero fields - immediately
 // released and replaced before anything reads them - so this only needs to
 // build a valid, empty, ref-counted LUTEntry. LUTEntry's own destructor
-// (native_init.h/.cpp) already frees `.data`, so a plain make_shared is
+// (init.h/.cpp) already frees `.data`, so a plain make_shared is
 // enough - no custom deleter needed here (unlike RegionRows's dataPtr).
 static void
-native_make_empty_lut(std::shared_ptr<LUTEntry>* out) {
+make_empty_lut(std::shared_ptr<LUTEntry>* out) {
   *out = std::make_shared<LUTEntry>();
 }
 
@@ -118,7 +118,7 @@ native_make_empty_lut(std::shared_ptr<LUTEntry>* out) {
 // sequence counter the library itself uses (kSeqCounterAddr) so IDs stay
 // unique.
 static WorkItem*
-native_update_item_ctor(WorkItem* item) {
+update_item_ctor(WorkItem* item) {
   // Zero every scalar/POD field. The three shared_ptr fields (regionRows,
   // lut, pixelTransitions) and `deps` are already valid,
   // default-constructed-empty objects as soon as `*item` exists (the
@@ -137,7 +137,7 @@ native_update_item_ctor(WorkItem* item) {
   item->deps.clear();
   item->pixelMode = 5;
 
-  native_make_empty_lut(&item->lut);
+  make_empty_lut(&item->lut);
 
   int* seq_counter = seq_counter_ptr();
   item->seqId = ++(*seq_counter);
@@ -156,7 +156,7 @@ native_update_item_ctor(WorkItem* item) {
 // blocks (down for y0, up for y1) to match the 8-row-aligned render/dispatch
 // kernels. Output order is {y0,x0,y1,x1}.
 static Rect
-native_clamp_update_rect(const XYRect& in) {
+clamp_update_rect(const XYRect& in) {
   constexpr int32_t kMaxY = kScreenHeight - 1;
   constexpr int32_t kMaxX = kScreenWidth - 1;
 
@@ -178,7 +178,7 @@ native_clamp_update_rect(const XYRect& in) {
 // Phase 5 hasn't reimplemented that thread natively yet, so we read its
 // output directly instead of re-polling hwmon ourselves.
 float
-native_get_current_temperature() {
+get_current_temperature() {
   pthread_mutex_t* mutex = temperature_mutex();
   float* cached_temp = cached_temperature_ptr();
   pthread_mutex_lock(mutex);
@@ -197,7 +197,7 @@ native_get_current_temperature() {
 // pointing at the pixel data for the piece's own top-left corner (see
 // RegionRows).
 static WorkItem*
-native_piece_builder(WorkItem* dest, const WorkItem* src, const Rect& piece_rect) {
+piece_builder(WorkItem* dest, const WorkItem* src, const Rect& piece_rect) {
   CloneWorkItemFieldsInto(dest, src);
 
   int32_t src_y0 = src->rectY0;
@@ -226,7 +226,7 @@ native_piece_builder(WorkItem* dest, const WorkItem* src, const Rect& piece_rect
 // every output byte is a pure function of exactly one dataBuffer/backBuffer
 // pixel and one gamma-table cell, read through a 180-degree rotation of the
 // whole framebuffer relative to the update rect's own coordinate space (the
-// same reflection native_clamp_update_rect already documents on the rect
+// same reflection clamp_update_rect already documents on the rect
 // itself). dispatch_update_regions's two-way thread-pool chunking (for rects
 // wider than 98 columns) only ever splits this same computation into two
 // disjoint column ranges - it changes nothing about which output byte reads
@@ -238,7 +238,7 @@ extern void* g_pGammaTableNative;
 // g_anPixelModeDispatchTable - confirmed by reading the table's bytes
 // directly out of the loaded library (Ghidra address 0x596b8).
 static int
-native_render_kernel_case(int pixel_mode, int mode) {
+render_kernel_case(int pixel_mode, int mode) {
   if (pixel_mode == 5) {
     static const int kTable[7] = { 6, 9, 9, 9, 9, 6, 8 };
     unsigned idx = (unsigned)(mode - 1);
@@ -253,7 +253,7 @@ native_render_kernel_case(int pixel_mode, int mode) {
 // bitfield extraction, gamma-table add, and div-by-125-then-scale sequences
 // were read directly off the umull/lsr reciprocal-division idiom).
 static uint8_t
-native_render_kernel_formula(int case_, uint16_t src, bool back_active, uint8_t gamma) {
+render_kernel_formula(int case_, uint16_t src, bool back_active, uint8_t gamma) {
   unsigned lo5 = src & 0x1f;
   unsigned mid6 = (src >> 5) & 0x3f;
   unsigned hi5 = src >> 11;
@@ -277,14 +277,14 @@ native_render_kernel_formula(int case_, uint16_t src, bool back_active, uint8_t 
 // Native reimplementation of render_update_kernel (0x4e7b8). `dataBuffer`
 // and `backBuffer` are the full-screen working buffers (queue->dataBuffer /
 // queue->backBuffer); item->regionRows must already point at a RegionRows
-// sized for item's own rect (native_dispatch_update_regions's job).
+// sized for item's own rect (dispatch_update_regions's job).
 static void
-native_render_update_kernel(WorkItem* item, const uint16_t* dataBuffer, const uint8_t* backBuffer) {
+render_update_kernel(WorkItem* item, const uint16_t* dataBuffer, const uint8_t* backBuffer) {
   auto* rr = item->regionRows.get();
   if (!rr->dataPtr)
     return;
   const uint8_t* gammaTable = (const uint8_t*)g_pGammaTableNative;
-  int case_ = native_render_kernel_case(item->pixelMode, item->mode);
+  int case_ = render_kernel_case(item->pixelMode, item->mode);
 
   for (int32_t y_screen = item->rectY0; y_screen <= item->rectY1; y_screen++) {
     int row = y_screen - item->rectY0;
@@ -295,7 +295,7 @@ native_render_update_kernel(WorkItem* item, const uint16_t* dataBuffer, const ui
       int srcIdx = src_y * kScreenWidth + src_x;
       uint8_t gamma = gammaTable[(src_x & 0x7f) + (src_y & 0x7f) * 0x88];
       uint8_t out =
-        native_render_kernel_formula(case_, dataBuffer[srcIdx], backBuffer[srcIdx] != 0, gamma);
+        render_kernel_formula(case_, dataBuffer[srcIdx], backBuffer[srcIdx] != 0, gamma);
       rr->dataPtr[(int64_t)col * rr->stride + row] = out;
     }
   }
@@ -303,9 +303,9 @@ native_render_update_kernel(WorkItem* item, const uint16_t* dataBuffer, const ui
 
 // Native reimplementation of dispatch_update_regions (0x4fff8): allocates the
 // item's RegionRows blob (releasing whatever it had before, via ordinary
-// shared_ptr assignment) and fills it via native_render_update_kernel.
+// shared_ptr assignment) and fills it via render_update_kernel.
 void
-native_dispatch_update_regions(WorkItem* item, void* dataBuffer, void* backBuffer) {
+dispatch_update_regions(WorkItem* item, void* dataBuffer, void* backBuffer) {
   auto* rr = new RegionRows{};
   rr->y0 = item->rectY0;
   rr->x0 = item->rectX0;
@@ -326,7 +326,7 @@ native_dispatch_update_regions(WorkItem* item, void* dataBuffer, void* backBuffe
   }
 
   // RegionRows::dataPtr is a plain non-owning pointer (see its comment in
-  // native_update.h) - this is the one site that actually owns the buffer it
+  // update.h) - this is the one site that actually owns the buffer it
   // just allocated, so free it explicitly via a custom deleter rather than
   // giving RegionRows itself an owning destructor.
   item->regionRows = std::shared_ptr<RegionRows>(rr, [](RegionRows* p) {
@@ -336,7 +336,7 @@ native_dispatch_update_regions(WorkItem* item, void* dataBuffer, void* backBuffe
   item->pixelDataPtr = (int32_t)(intptr_t)rr->dataPtr;
 
   if (item->rectY0 <= item->rectY1 && item->rectX0 <= item->rectX1)
-    native_render_update_kernel(item, (const uint16_t*)dataBuffer, (const uint8_t*)backBuffer);
+    render_update_kernel(item, (const uint16_t*)dataBuffer, (const uint8_t*)backBuffer);
 }
 
 // Native reimplementation of subtract_update_region (0x3be10): clips the
@@ -348,10 +348,10 @@ native_dispatch_update_regions(WorkItem* item, void* dataBuffer, void* backBuffe
 // otherwise compute the intersection ("cut") rect. If cut == the item's own
 // rect, the item is removed outright. Otherwise up to four leftover
 // axis-aligned strips are emitted (left, top, bottom, right - each only if
-// non-empty), each cloned from the old item via native_piece_builder, and the
+// non-empty), each cloned from the old item via piece_builder, and the
 // old item is replaced by them (in the same position, preserving order).
 static void
-native_subtract_update_region(std::list<WorkItem>& list, const WorkItem* new_item) {
+subtract_update_region(std::list<WorkItem>& list, const WorkItem* new_item) {
   Rect n{ new_item->rectY0, new_item->rectX0, new_item->rectY1, new_item->rectX1 };
   if (n.y1 < n.y0 || n.x1 < n.x0)
     return; // degenerate new rect - nothing to subtract
@@ -381,7 +381,7 @@ native_subtract_update_region(std::list<WorkItem>& list, const WorkItem* new_ite
     bool full_containment = cut.y0 == o.y0 && cut.x0 == o.x0 && cut.y1 == o.y1 && cut.x1 == o.x1;
 
     if (!full_containment) {
-      native_update_item_copy(&tmp, &old); // preserve LUT/mode/temp/flags
+      update_item_copy(&tmp, &old); // preserve LUT/mode/temp/flags
 
       if (o.x0 < cut.x0) pieces[piece_count++] = { o.y0, o.x0, o.y1, cut.x0 - 1 };
       if (o.y0 < cut.y0) pieces[piece_count++] = { o.y0, cut.x0, cut.y0 - 1, cut.x1 };
@@ -397,7 +397,7 @@ native_subtract_update_region(std::list<WorkItem>& list, const WorkItem* new_ite
 
     for (int i = 0; i < piece_count; i++) {
       WorkItem piece;
-      native_piece_builder(&piece, &tmp, pieces[i]);
+      piece_builder(&piece, &tmp, pieces[i]);
       list.insert(insert_pos, std::move(piece));
     }
     // tmp's shared_ptr fields and deps vector release/free themselves
@@ -413,13 +413,13 @@ native_subtract_update_region(std::list<WorkItem>& list, const WorkItem* new_ite
 // hooks the batch into `incoming` immediately before `pos`. `accum`'s own
 // items are left moved-from (empty) - the caller (swtcon_unlock_post) clears
 // `accum` right after, matching the original's separate
-// native_free_update_region_list call except without the redundant
+// free_update_region_list call except without the redundant
 // retain-then-release round trip a copy would need (accum's originals are
 // getting destroyed either way, so moving is strictly cheaper and
-// behaviorally identical - see native_subtract_update_region's similar
+// behaviorally identical - see subtract_update_region's similar
 // move-based erase for the same reasoning applied elsewhere in this file).
 static void
-native_build_update_batch(std::list<Batch>& incoming, std::list<Batch>::iterator pos,
+build_update_batch(std::list<Batch>& incoming, std::list<Batch>::iterator pos,
                           std::list<WorkItem>& accum, int16_t accum_flag) {
   Batch batch;
   for (auto& item : accum)
@@ -436,11 +436,11 @@ native_build_update_batch(std::list<Batch>& incoming, std::list<Batch>::iterator
 // whose threshold `temp` still meets or exceeds, and stops at the first
 // index whose threshold `temp` falls short of (so a single-entry vector
 // trivially resolves to index 0 without a special case). Falls back to an
-// empty placeholder LUT (native_make_empty_lut, same one
-// native_update_item_ctor uses) if `mode` is out of range or its ModeEntry
+// empty placeholder LUT (make_empty_lut, same one
+// update_item_ctor uses) if `mode` is out of range or its ModeEntry
 // has no LUTs at all.
 void
-native_select_waveform_lut(float temp, std::shared_ptr<LUTEntry>* out,
+select_waveform_lut(float temp, std::shared_ptr<LUTEntry>* out,
                            std::vector<ModeEntry*>* waveform, unsigned mode) {
   if (mode < waveform->size()) {
     ModeEntry* m = (*waveform)[mode];
@@ -457,14 +457,14 @@ native_select_waveform_lut(float temp, std::shared_ptr<LUTEntry>* out,
     }
   }
 
-  native_make_empty_lut(out);
+  make_empty_lut(out);
 }
 
 // Native reimplementation of update_lut_is_valid (0x409e4): sanity-checks
 // the LUT select_waveform_lut just picked - non-null pixel data, and
 // positive size_kb/bit_depth/mode_width.
 bool
-native_update_lut_is_valid(const std::shared_ptr<LUTEntry>& lut) {
+update_lut_is_valid(const std::shared_ptr<LUTEntry>& lut) {
   auto* entry = lut.get();
   if (!entry->data)
     return false;
@@ -492,12 +492,12 @@ swtcon_update(update_data* data) {
   auto* queue = update_queue_globals();
 
   alignas(16) WorkItem item;
-  native_update_item_ctor(&item); // sets seq id, empties the shared_ptrs / list
+  update_item_ctor(&item); // sets seq id, empties the shared_ptrs / list
 
   // The input rect {y0,x0,y1,x1} is byte-reversed per 64-bit lane
   // (vrev64.32) to {x0,y0,x1,y1} before clamping.
   XYRect rev{ data->x0, data->y0, data->x1, data->y1 };
-  Rect rect = native_clamp_update_rect(rev);
+  Rect rect = clamp_update_rect(rev);
   item.rectY0 = rect.y0;
   item.rectX0 = rect.x0;
   item.rectY1 = rect.y1;
@@ -514,30 +514,30 @@ swtcon_update(update_data* data) {
     item.mode = (int16_t)data->update_mode;
     item.sync = (uint8_t)((flags & Sync) != 0);
     item.fastDraw = (uint8_t)((flags & FastDraw) != 0);
-    float temp = native_get_current_temperature();
+    float temp = get_current_temperature();
     if (flags & ExplicitTemperature) // caller supplies an explicit temperature
       temp = (float)data->zero;
     item.temperature = temp;
 
-    native_dispatch_update_regions(&item, queue->dataBuffer, queue->backBuffer);
+    dispatch_update_regions(&item, queue->dataBuffer, queue->backBuffer);
 
     // Select the LUT and move the returned shared_ptr into the item -
     // assignment releases whatever was there before (empty after the ctor).
     std::shared_ptr<LUTEntry> selected;
-    native_select_waveform_lut(temp, &selected, &queue->waveform,
+    select_waveform_lut(temp, &selected, &queue->waveform,
                                 (unsigned)(int)item.mode);
     item.lut = selected;
 
-    if (native_update_lut_is_valid(item.lut)) {
+    if (update_lut_is_valid(item.lut)) {
       auto* lut = (const int32_t*)item.lut.get();
       item.lutWidthMinus1 = (int16_t)(lut[0] - 1); // packed LUT width - 1
 
       // Clip this rectangle out of the pending accumulation regions and out of
       // every not-yet-locked batch already queued for the worker.
-      native_subtract_update_region(queue->accumList, &item);
+      subtract_update_region(queue->accumList, &item);
       for (auto& b : queue->listIncomingUpdates) {
         if (!b.claimed)
-          native_subtract_update_region(b.subList, &item);
+          subtract_update_region(b.subList, &item);
       }
 
       // Enqueue at the tail of the accumulation list. `item` isn't touched
@@ -577,7 +577,7 @@ swtcon_unlock_post() {
 
   // Move the accumulated regions into a fresh batch hooked before `pos`,
   // then clear whatever's left of the (now moved-from) originals.
-  native_build_update_batch(queue->listIncomingUpdates, pos, queue->accumList, queue->accumFlag);
+  build_update_batch(queue->listIncomingUpdates, pos, queue->accumList, queue->accumFlag);
   queue->accumList.clear();
   queue->accumFlag = 0;
 

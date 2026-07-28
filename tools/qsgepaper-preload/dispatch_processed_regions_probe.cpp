@@ -25,8 +25,8 @@
 #include <new>
 #include <ucontext.h>
 
-#include "native_init.h"
-#include "native_update.h"
+#include "init.h"
+#include "update.h"
 
 #define INSTANCE_ADDR 0x35de0
 #define DISPATCH_PROCESSED_REGIONS_ADDR 0x50660
@@ -43,7 +43,7 @@ swtcon_runtime_offset() {
 
 // This probe doesn't link swtcon.cpp (see CMakeLists.txt), which normally
 // owns these - it never uses SWTCON_LIBIMPL library mode, so a
-// permanently-false/null stub is enough to satisfy native_update.cpp's link
+// permanently-false/null stub is enough to satisfy update.cpp's link
 // requirements.
 bool
 swtcon_lib_impl_enabled() {
@@ -216,11 +216,11 @@ main() {
   g_runtime_offset = load_library();
   printf("Loaded library, runtime_offset=0x%lx\n", (unsigned long)g_runtime_offset);
 
-  if (native_init_statebuffer() != 0) {
-    fprintf(stderr, "native_init_statebuffer failed\n");
+  if (init_statebuffer() != 0) {
+    fprintf(stderr, "init_statebuffer failed\n");
     return 1;
   }
-  printf("native_init_statebuffer done\n");
+  printf("init_statebuffer done\n");
   // Bridge our native g_pStateBufferNative into the library's own global,
   // exactly like render_kernel_verify.cpp bridges the gamma table - the
   // commit kernels FUN_0004f8f0/FUN_0004e680 read/write g_pStateBuffer

@@ -1,5 +1,5 @@
-// A/B verification tool for render_update_kernel (0x4e7b8), still-library
-// code that render_update_kernel is not yet native for (AGENTS.md Phase 6).
+// A/B verification tool for lib_render_update_kernel (0x4e7b8), still-library
+// code that lib_render_update_kernel is not yet native for (AGENTS.md Phase 6).
 // This does NOT reimplement the kernel's addressing/rotation logic - it
 // calls the real library function directly (with the same {item, dataBuffer,
 // backBuffer, chunkIndex=0, chunkCount=1} calling convention
@@ -26,8 +26,8 @@
 #include <ucontext.h>
 #include <vector>
 
-#include "native_init.h"
-#include "native_update.h"
+#include "init.h"
+#include "update.h"
 
 // Same symbol-relocation trick as swtcon.cpp's load_lib(), duplicated here
 // so this tool doesn't need to run the (hardware-dependent) full swtcon_init.
@@ -40,7 +40,7 @@ extern void* g_pGammaTableNative;
 
 typedef void (*RenderKernelFn)(WorkItem*, void*, void*, int, int);
 
-// native_init.cpp's temperature-sensor code path resolves a couple of
+// init.cpp's temperature-sensor code path resolves a couple of
 // library globals via resolve_ptr(), which needs this - unused by anything
 // we actually exercise here (no fb/threads/temperature), but must be
 // defined to satisfy the link.
@@ -69,7 +69,7 @@ load_library() {
   return (uintptr_t)instance_func - INSTANCE_ADDR;
 }
 
-// Effective dispatch case, mirroring render_update_kernel's pixelMode==5
+// Effective dispatch case, mirroring lib_render_update_kernel's pixelMode==5
 // ("auto") indirection through g_anPixelModeDispatchTable (confirmed by
 // reading the table's bytes directly out of the loaded library at
 // Ghidra address 0x596b8: {6,9,9,9,9,6,8} for mode 1..7).
@@ -161,18 +161,18 @@ main(int argc, char** argv) {
 
   g_runtime_offset = load_library();
   printf("Loaded library, runtime_offset=0x%lx\n", (unsigned long)g_runtime_offset);
-  auto render_update_kernel =
+  auto lib_render_update_kernel =
     (RenderKernelFn)(g_runtime_offset + RENDER_UPDATE_KERNEL_ADDR);
 
-  if (native_init_statebuffer() != 0) {
-    fprintf(stderr, "native_init_statebuffer failed\n");
+  if (init_statebuffer() != 0) {
+    fprintf(stderr, "init_statebuffer failed\n");
     return 1;
   }
-  // render_update_kernel reads the LIBRARY's own g_pGammaTable global (not a
+  // lib_render_update_kernel reads the LIBRARY's own g_pGammaTable global (not a
   // parameter) - point it at our native table, exactly like swtcon_init does
   // via statebuffer_globals()->pGammaTable for the real init path.
   statebuffer_globals()->pGammaTable = g_pGammaTableNative;
-  printf("native_init_statebuffer done\n");
+  printf("init_statebuffer done\n");
 
   const int W = 1404, H = 1872;
   uint16_t* dataBuffer = (uint16_t*)g_pImageBufferNative;
@@ -223,7 +223,7 @@ main(int argc, char** argv) {
       item.mode = (int16_t)cfg.mode;
       item.pixelMode = cfg.pixel_mode;
 
-      render_update_kernel(&item, dataBuffer, backBuffer, 0, 1);
+      lib_render_update_kernel(&item, dataBuffer, backBuffer, 0, 1);
 
       if (case_ == 0xd) {
         for (int i = 0; i < RECT * RECT; i++) {

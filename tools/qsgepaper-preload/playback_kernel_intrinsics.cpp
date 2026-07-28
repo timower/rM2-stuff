@@ -1,10 +1,10 @@
-#include "native_display.h"
+#include "display.h"
 
 #include <cstddef>
 #include <cstdint>
 
-#include "native_init.h"   // LUTEntry
-#include "native_update.h" // WorkItem, RegionRows
+#include "init.h"   // LUTEntry
+#include "update.h" // WorkItem, RegionRows
 
 #define KERNEL_MODE_C 1
 #define KERNEL_MODE_ASM 2
@@ -28,7 +28,7 @@
 //     phase/8, indexed using the row's own transition value - the raw
 //     transitionDataPtr u16, used DIRECTLY as the LUT's (row*mode_width+col)
 //     index, not split via >>5/&0x1f - the same formula as
-//     native_read_lut_packed_pixel, see WorkItem::transitionDataPtr's comment);
+//     read_lut_packed_pixel, see WorkItem::transitionDataPtr's comment);
 //   - for every one of the 8 possible sub-phases (bit offsets 0-7) packed
 //     into that one word, extracts each row's 2-bit value and OR-accumulates
 //     it into a per-sub-phase 16-bit word at bit position (7-row)*2 - row 0
@@ -41,7 +41,7 @@
 //     frameSlots[k] at the SAME destination address (only the target buffer
 //     differs per k). This is why frameCount 1-8 all reduce to the same
 //     per-column/per-group computation done once:
-//     native_advance_work_item_frames always picks frameCount so
+//     advance_work_item_frames always picks frameCount so
 //     phase&7+frameCount never crosses the 8-sub-phase boundary of a single LUT
 //     word (confirmed: case 2's decompile does one shared LUT fetch, not two
 //     independent ones).
@@ -51,16 +51,16 @@
 // - a 32-bit-word-per-column stride matching FbInitParams' xres=0x104=260.
 // mode_width is read from item->lut, but the 2-bit/8-rows-per-word packing
 // constants are hardcoded immediates in the real kernel too (not driven by
-// lut->bit_depth at runtime) - matches native_load_waveform, which always
+// lut->bit_depth at runtime) - matches load_waveform, which always
 // produces bit_depth=2 LUTs, so this native port hardcodes the same
 // assumption rather than generalizing for a case that never occurs.
 //
 // Split into its own translation unit (Phase 9, see AGENTS.md/CLAUDE.md) so a
 // NEON-vectorized fast path can live alongside the portable scalar one behind
-// an #ifdef, without dragging every other native_display.cpp dependency
+// an #ifdef, without dragging every other display.cpp dependency
 // (threads, globals, ...) into the same file.
 //
-// Non-static (extern, declared in native_display.h): tools/qsgepaper-preload/
+// Non-static (extern, declared in display.h): tools/qsgepaper-preload/
 // playback_kernel_bench.cpp calls this directly to isolate the compute cost
 // of the real, shipped kernel from the threading/dispatch machinery around
 // it - real hardware confirmed this is currently much slower than the
@@ -179,7 +179,7 @@ compute_shared_subphase_words(const uint16_t lut_words[8], uint16_t shared[8]) {
 #if KERNEL_MODE != KERNEL_MODE_ASM
 
 void
-native_playback_kernel_plain(void** frame_slots,
+playback_kernel_plain_intrinsics(void** frame_slots,
                              WorkItem* item,
                              int frame_count,
                              int chunk_index,
@@ -231,7 +231,7 @@ native_playback_kernel_plain(void** frame_slots,
 
       // transitionDataPtr (transitionData) is already rebased to THIS item's
       // own rect origin (see WorkItem::transitionDataPtr's comment /
-      // native_commit_item), so the index here must be item-rect-relative,
+      // commit_item), so the index here must be item-rect-relative,
       // not pixelTransitions-relative - indexing with
       // (col-pixelTransitions->x0)/(row-pixelTransitions->y0) here would
       // double-apply the rebase and run off the end of the pixelTransitions
@@ -282,12 +282,12 @@ native_playback_kernel_plain(void** frame_slots,
   }
 }
 void
-native_playback_kernel_aligned(void** frame_slots,
+playback_kernel_aligned_intrinsics(void** frame_slots,
                                WorkItem* item,
                                int frame_count,
                                int chunk_index,
                                int chunk_count) {
-  native_playback_kernel_plain(
+  playback_kernel_plain_intrinsics(
     frame_slots, item, frame_count, chunk_index, chunk_count);
 }
 
@@ -308,7 +308,7 @@ playback_kernel_aligned(void** frame_slots,
                         int chunk_count);
 
 void
-native_playback_kernel_plain(void** frame_slots,
+playback_kernel_plain_intrinsics(void** frame_slots,
                              WorkItem* item,
                              int frame_count,
                              int chunk_index,
@@ -318,7 +318,7 @@ native_playback_kernel_plain(void** frame_slots,
 }
 
 void
-native_playback_kernel_aligned(void** frame_slots,
+playback_kernel_aligned_intrinsics(void** frame_slots,
                                WorkItem* item,
                                int frame_count,
                                int chunk_index,

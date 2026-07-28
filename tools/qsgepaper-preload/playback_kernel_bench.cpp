@@ -1,4 +1,4 @@
-// Microbenchmark for native_playback_kernel_plain (native_display.cpp) - the
+// Microbenchmark for playback_kernel_plain_intrinsics (display.cpp) - the
 // native port of the worker-side playback kernels FUN_0004a140/FUN_0004a234
 // (see AGENTS.md). Real-hardware testing found the ported kernel noticeably
 // slower than the library it replaces, which implements it as hand-tuned
@@ -8,7 +8,7 @@
 //
 // Two things this tool measures, both against the same synthetic WorkItem/
 // transitions/LUT input:
-//   1. native_playback_kernel_plain's wall-clock cost across a matrix of
+//   1. playback_kernel_plain_intrinsics's wall-clock cost across a matrix of
 //      rect sizes and frameCounts representative of real update traffic
 //      (see swtcon_architecture.md §6.4/§6.5 for where these shapes and the
 //      dominant frameCount=8 case come from).
@@ -37,9 +37,9 @@
 #include <ucontext.h>
 #include <vector>
 
-#include "native_display.h" // native_playback_kernel_plain
-#include "native_init.h"    // LUTEntry
-#include "native_update.h"  // WorkItem, RegionRows
+#include "display.h" // playback_kernel_plain_intrinsics
+#include "init.h"    // LUTEntry
+#include "update.h"  // WorkItem, RegionRows
 
 #define INSTANCE_ADDR 0x35de0
 #define PLAIN_PLAYBACK_KERNEL_ADDR 0x4a140
@@ -47,18 +47,18 @@
 // the item's overlap-dependency intList), but that's backwards: it only
 // fires when there's NO active overlap dependency left AND phase is
 // 8-aligned - it's an alignment fast path, not an overlap-driven one. See
-// native_display.cpp's native_dispatch_aligned_kernel for the full story.
+// display.cpp's dispatch_aligned_kernel for the full story.
 #define ALIGNED_PLAYBACK_KERNEL_ADDR 0x4a234
 
 // One full hardware frame slot, bytes - see playback_kernel_probe.cpp's
-// comment (matches native_init_lut's 0x165800-byte LUT blob size, not a
+// comment (matches init_lut's 0x165800-byte LUT blob size, not a
 // coincidence).
 constexpr size_t kFrameSlotBytes = 0x165800;
 
 // kScreenWidth/kScreenHeight (the largest rect any single WorkItem can ever
 // cover - a full-panel HQ refresh, swtcon_architecture.md §6.2 step 2) and
 // kPanelFrameTickUs both live in qsgepaper_globals.h now, shared with
-// native_display.cpp's display_thread_func pacing-target formula (which
+// display.cpp's display_thread_func pacing-target formula (which
 // used to re-hardcode its own copies of the latter). This comment on
 // kPanelFrameTickUs is kept here since this is still the file that explains
 // what the constant is FOR in benchmark terms: not this kernel's own budget
@@ -76,7 +76,7 @@ swtcon_runtime_offset() {
 
 // This bench doesn't link swtcon.cpp (see CMakeLists.txt), which normally
 // owns these - it never uses SWTCON_LIBIMPL library mode, so a
-// permanently-false/null stub is enough to satisfy native_update.cpp's link
+// permanently-false/null stub is enough to satisfy update.cpp's link
 // requirements.
 bool
 swtcon_lib_impl_enabled() {
@@ -133,12 +133,12 @@ lut_data_words(int mode_width, int bit_depth, int lut_width) {
 }
 
 // A self-contained synthetic WorkItem - only the fields
-// native_playback_kernel_plain actually reads (rect, phase, lut, pixelTransitions.stride,
-// transitionDataPtr; see its definition in native_display.cpp) need to be valid,
+// playback_kernel_plain_intrinsics actually reads (rect, phase, lut, pixelTransitions.stride,
+// transitionDataPtr; see its definition in display.cpp) need to be valid,
 // so unlike playback_kernel_probe.cpp's build_item this needs no
 // WorkItemNode/regionRows/intList scaffolding.
-// LUTEntry (native_init.h) already frees `data` in its own destructor
-// (native_init.cpp: `if (data) free(data)`) - do NOT also free it here. This
+// LUTEntry (init.h) already frees `data` in its own destructor
+// (init.cpp: `if (data) free(data)`) - do NOT also free it here. This
 // is the exact double-free gotcha playback_kernel_probe.cpp's build_item hit
 // (see its free_item comment): a LUTEntry embedded by value gets its
 // destructor run automatically at scope exit, so an extra explicit free
@@ -180,7 +180,7 @@ build_item(BenchItem& bi, int y0, int x0, int y1, int x1, int mode_width, int bi
   bi.transitionsRr.size = strideRows * cols * (int)sizeof(uint16_t);
 
   size_t lut_words = lut_data_words(mode_width, bit_depth, lut_width);
-  bi.lut.size_kb = lut_width; // size_kb doubles as phase count, see native_load_waveform
+  bi.lut.size_kb = lut_width; // size_kb doubles as phase count, see load_waveform
   bi.lut.mode_width = mode_width;
   bi.lut.temperature = 0;
   bi.lut.bit_depth = bit_depth;
@@ -302,7 +302,7 @@ main(int argc, char** argv) {
 
     clear_slots();
     auto native_result = run_bench([&] {
-      native_playback_kernel_plain(frame_slots, &bi.item, sc.frame_count, /*chunk_index=*/0,
+      playback_kernel_plain_intrinsics(frame_slots, &bi.item, sc.frame_count, /*chunk_index=*/0,
                                     /*chunk_count=*/1);
     });
     print_row("native", bi, native_result);
@@ -333,7 +333,7 @@ main(int argc, char** argv) {
   printf(
     "Note: absolute ns/call numbers are only meaningful within this single run/machine - the\n"
     "native-vs-library ratios are the portable signal. The %.2fms figure is the whole display\n"
-    "pipeline's per-frame-tick pacing budget (native_display.cpp), not this kernel's own budget\n"
+    "pipeline's per-frame-tick pacing budget (display.cpp), not this kernel's own budget\n"
     "in isolation - shown for scale, not as a hard per-call target.\n",
     kPanelFrameTickUs / 1000.0);
 

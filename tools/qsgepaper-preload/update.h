@@ -20,7 +20,7 @@
 #include <semaphore.h>
 #include <vector>
 
-#include "native_init.h" // ModeEntry
+#include "init.h" // ModeEntry
 #include "qsgepaper_globals.h"
 #include "swtcon.h"
 
@@ -40,15 +40,15 @@ non_owning_sp(T* ptr) {
 }
 
 // The render kernel's "gated/inactive" pixel sentinel (native_render_kernel_
-// formula's case 7, native_update.cpp): the byte value render_update_kernel
+// formula's case 7, update.cpp): the byte value render_update_kernel
 // writes into RegionRows::dataPtr for a pixel the backBuffer says is
-// inactive. native_commit_item later reads that same buffer back and
+// inactive. commit_item later reads that same buffer back and
 // checks for this exact value to decide a pixel produced no real change -
 // the two checks must agree on this sentinel or a legitimately-computed
 // pixel value could be mistaken for "nothing happened here."
 constexpr uint16_t kGatedPixelSentinel = 0x20;
 
-// native_commit_item's packed-transition "unchanged" marker: written into
+// commit_item's packed-transition "unchanged" marker: written into
 // pixelTransitions instead of the real (oldState<<5)|newState packing
 // whenever a pixel didn't actually change (or was gated - see
 // kGatedPixelSentinel above). 0x0400 can never collide with a real packed
@@ -57,8 +57,8 @@ constexpr uint16_t kGatedPixelSentinel = 0x20;
 constexpr uint16_t kPixelTransitionUnchanged = 0x0400;
 
 // The bit width of one packed pixel state - see kPixelTransitionUnchanged's
-// packing formula, (oldState<<5)|newState, in native_commit_item
-// (native_display.cpp). NOT used to unpack: native_playback_kernel.cpp's LUT
+// packing formula, (oldState<<5)|newState, in commit_item
+// (display.cpp). NOT used to unpack: playback_kernel_intrinsics.cpp's LUT
 // index reads the raw packed u16 directly (see its own comment for why that
 // still lines up with this packing - only because mode_width==32 there).
 constexpr int kPixelTransitionShift = 5;
@@ -70,7 +70,7 @@ struct Rect {
 };
 
 // The pre-clamp rect order swtcon_update builds from update_data's
-// x0/y0/x1/y1 (see native_clamp_update_rect's comment for why this
+// x0/y0/x1/y1 (see clamp_update_rect's comment for why this
 // isn't the same axis order as Rect).
 struct XYRect {
   int32_t x0, y0, x1, y1;
@@ -85,7 +85,7 @@ struct XYRect {
 // RegionRows values on the stack aliasing externally-owned (often
 // guard-paged) test buffers they must NOT have freed out from under them at
 // scope exit. The two real allocation sites that DO own their buffer
-// (native_dispatch_update_regions's regionRows, native_commit_item's
+// (dispatch_update_regions's regionRows, commit_item's
 // pixelTransitions, which stores uint16_t payload despite the uint8_t* type
 // - see its comment)
 // free it via a custom deleter on the owning shared_ptr instead.
@@ -98,8 +98,8 @@ struct RegionRows {
 static_assert(sizeof(RegionRows) == 0x1c, "RegionRows layout drift");
 
 // The row-count alignment every RegionRows-shaped buffer's `stride` is
-// rounded up to (native_dispatch_update_regions's regionRows,
-// native_commit_item's pixelTransitions in native_display.cpp) - both
+// rounded up to (dispatch_update_regions's regionRows,
+// commit_item's pixelTransitions in display.cpp) - both
 // compute `round_up(rows, kRegionRowsStrideAlign)` independently, so this is
 // the one place that idiom should be named rather than re-spelled as a bare
 // `+0xf) & ~0xf` at each site.
@@ -109,7 +109,7 @@ constexpr int32_t kRegionRowsStrideAlign = 16;
 // update_item_ctor (0x3ffd0). Lives embedded at +8 inside a WorkItemNode.
 struct WorkItem {
   std::shared_ptr<RegionRows> regionRows; // +0x00 (dispatch_update_regions's output)
-  int32_t pixelDataPtr;        // +0x08 cached RegionRows::dataPtr (the newly-rendered per-pixel byte), rebased to this item's rect origin (see native_piece_builder). Stored as int32_t, not a real pointer type, to match the real library's ABI - dispatch_processed_regions_probe.cpp still calls the real by-address dispatch_processed_regions, whose commit kernels (FUN_0004f8f0/FUN_0004e680) read this field via WorkItem+0x08 (see native_commit_item's comment).
+  int32_t pixelDataPtr;        // +0x08 cached RegionRows::dataPtr (the newly-rendered per-pixel byte), rebased to this item's rect origin (see piece_builder). Stored as int32_t, not a real pointer type, to match the real library's ABI - dispatch_processed_regions_probe.cpp still calls the real by-address dispatch_processed_regions, whose commit kernels (FUN_0004f8f0/FUN_0004e680) read this field via WorkItem+0x08 (see commit_item's comment).
   int32_t rectY0;               // +0x0c
   int32_t rectX0;                // +0x10
   int32_t rectY1;                 // +0x14
@@ -125,7 +125,7 @@ struct WorkItem {
   float temperature;                       // +0x38
   // +0x3c [confirmed] a second per-pixel buffer distinct from regionRows,
   // holding a packed uint16_t "(oldState<<5)|newState" transition value per
-  // pixel (0x0400 as the "unchanged" sentinel - see native_commit_item),
+  // pixel (0x0400 as the "unchanged" sentinel - see commit_item),
   // NOT a snapshot of screen state itself (that's the unrelated global
   // g_pStateBufferNative/`state`, indexed screen-wide by column/row, not by
   // item - don't confuse the two). advance_work_item_frames reads
@@ -143,7 +143,7 @@ struct WorkItem {
   // coords - so it must be set (and rebased) whenever pixelTransitions is
   // (re)allocated. Setting it to the un-rebased buffer base leaves valid
   // memory (no SIGSEGV) but reads the wrong offset for any narrowed/split
-  // item -> edge artifacts (native_commit_item, empirically A/B-verified
+  // item -> edge artifacts (commit_item, empirically A/B-verified
   // via SWTCON_LIBDISPATCH). Leaving it stale/null -> SIGSEGV
   void* transitionDataPtr;
   // +0x48, was originally the library's embedded std::list<int> (despite the
@@ -152,8 +152,8 @@ struct WorkItem {
   // disassembly of build_overlap_dependency_list, 0x3a838). Nothing by-address
   // ever reads/writes this field (unlike regionRows/lut/pixelTransitions/
   // transitionDataPtr) - it's built and consumed entirely by native code
-  // (native_advance_work_item_frames,
-  // native_build_overlap_dependency_list, native_gc_processed_updates) - so a
+  // (advance_work_item_frames,
+  // build_overlap_dependency_list, gc_processed_updates) - so a
   // plain std::vector<WorkItem*> of non-owning back-pointers is both simpler
   // and, unlike the original std::list<int> mimicry, doesn't need to match
   // any real ABI at all.
@@ -262,8 +262,8 @@ struct Batch {
 // implicit destructor gets instantiated - i.e. wherever
 // update_queue_globals()'s function body (defining the static local
 // instance below) is compiled. Every file that actually calls
-// update_queue_globals() (swtcon.cpp, native_update.cpp, native_display.cpp)
-// already includes this header; native_init.h/.cpp never needed this struct
+// update_queue_globals() (swtcon.cpp, update.cpp, display.cpp)
+// already includes this header; init.h/.cpp never needed this struct
 // (see qsgepaper_globals.h's own note at the old location).
 //
 // This struct is native-owned storage (Phase 7) with no by-address ABI
@@ -309,18 +309,18 @@ update_queue_globals() {
   return &g;
 }
 
-// Shared internal primitives, also used by native_display.cpp (worker
+// Shared internal primitives, also used by display.cpp (worker
 // thread's flash sequence: temperature/LUT selection; display thread: list
 // bookkeeping + work-item cloning/teardown, since display_thread_func
 // manipulates the exact same lists swtcon_update does) - see
-// native_update.cpp for definitions.
-float native_get_current_temperature();
-void native_select_waveform_lut(float temp, std::shared_ptr<LUTEntry>* out,
+// update.cpp for definitions.
+float get_current_temperature();
+void select_waveform_lut(float temp, std::shared_ptr<LUTEntry>* out,
                                 std::vector<ModeEntry*>* waveform, unsigned mode);
-bool native_update_lut_is_valid(const std::shared_ptr<LUTEntry>& lut);
+bool update_lut_is_valid(const std::shared_ptr<LUTEntry>& lut);
 
 // Inserts `node` immediately before `pos` in a circular intrusive list (see
-// native_update.cpp's definition for the full comment) - works for any
+// update.cpp's definition for the full comment) - works for any
 // ListHead-shaped sentinel/node (WorkItemNode, BatchNode). Kept for the
 // probe tools (see BatchNode's comment); production code uses real
 // std::list<T> operations instead.
@@ -333,11 +333,11 @@ void list_unhook(void* node);
 // Deep-copies a work item's shared_ptrs/list/scalars, preserving the
 // source's rect and sequence id (see CloneWorkItemFieldsInto for the
 // shared cloning body, also used by the rect-splitting piece-builder).
-WorkItem* native_update_item_copy(WorkItem* dest, const WorkItem* src);
+WorkItem* update_item_copy(WorkItem* dest, const WorkItem* src);
 
 // Native reimplementation of dispatch_update_regions (0x4fff8) and its
-// per-pixel kernel render_update_kernel (0x4e7b8) - see native_update.cpp
+// per-pixel kernel render_update_kernel (0x4e7b8) - see update.cpp
 // for the full comment and swtcon_architecture.md §5.1/§5.2 for the
 // confirmed formulas/addressing. Allocates item's RegionRows blob and fills
 // it from dataBuffer/backBuffer (the full-screen working buffers).
-void native_dispatch_update_regions(WorkItem* item, void* dataBuffer, void* backBuffer);
+void dispatch_update_regions(WorkItem* item, void* dataBuffer, void* backBuffer);

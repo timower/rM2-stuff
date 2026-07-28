@@ -1,7 +1,7 @@
 // Empirical probe for the two worker-side playback kernels FUN_0004a140
 // ("plain") and FUN_0004a234 (called "overlap-aware" at the time this probe
-// was written - later corrected to "aligned", see native_display.cpp's
-// native_dispatch_aligned_kernel: it fires on an 8-phase-aligned boundary
+// was written - later corrected to "aligned", see display.cpp's
+// dispatch_aligned_kernel: it fires on an 8-phase-aligned boundary
 // with no live overlap dependency, the opposite of what "overlap-aware"
 // suggests) - the last still-library by-address calls anywhere in the
 // pipeline (AGENTS.md next step). Same
@@ -25,7 +25,7 @@
 //      probe is built to test: item.transitionDataPtr (+0x44) holds, per pixel,
 //      the SAME packed `(oldState<<5)|newState` transition value that
 //      dispatch_processed_regions_probe.cpp already confirmed for pixelTransitions - and
-//      LUTEntry::mode_width (16 or 32, see native_load_waveform) is exactly
+//      LUTEntry::mode_width (16 or 32, see load_waveform) is exactly
 //      the bit-width of that packed field's oldState/newState halves. That
 //      strongly suggests the LUT is a classic waveform table indexed
 //      [oldState][newState][phase] -> a bit_depth-wide drive code, NOT a
@@ -43,17 +43,17 @@
 #include <ucontext.h>
 #include <unistd.h>
 
-#include "native_init.h"
-#include "native_update.h"
+#include "init.h"
+#include "update.h"
 
 #define INSTANCE_ADDR 0x35de0
 #define PLAIN_PLAYBACK_KERNEL_ADDR 0x4a140
 #define ALIGNED_PLAYBACK_KERNEL_ADDR 0x4a234
 
 // One full hardware frame slot, bytes - bitsPerPixel(0x20) * xres(0x104) *
-// yres(0x580) / 8, matching FbInitParams in swtcon.cpp and native_init_lut's
+// yres(0x580) / 8, matching FbInitParams in swtcon.cpp and init_lut's
 // own 0x165800-byte LUT blob (same size, not a coincidence: the LUT gets
-// memcpy'd straight into a frame slot by native_upload_lut_to_frame_slot).
+// memcpy'd straight into a frame slot by upload_lut_to_frame_slot).
 constexpr size_t kFrameSlotBytes = 0x165800;
 
 // Signature shared by both kernels (confirmed, swtcon_architecture.md
@@ -71,7 +71,7 @@ swtcon_runtime_offset() {
 
 // This probe doesn't link swtcon.cpp (see CMakeLists.txt), which normally
 // owns these - it never uses SWTCON_LIBIMPL library mode, so a
-// permanently-false/null stub is enough to satisfy native_update.cpp's link
+// permanently-false/null stub is enough to satisfy update.cpp's link
 // requirements.
 bool
 swtcon_lib_impl_enabled() {
@@ -157,8 +157,8 @@ alloc_guarded(size_t size) {
   return base + guard + (rounded - size);
 }
 
-// The read-side inverse of native_read_lut_packed_pixel (already native,
-// confirmed - native_init.cpp): plants a bit_depth-wide value at (row, col,
+// The read-side inverse of read_lut_packed_pixel (already native,
+// confirmed - init.cpp): plants a bit_depth-wide value at (row, col,
 // phase) in a LUTEntry's packed data, leaving every other packed pixel in
 // the same word untouched.
 static void
@@ -177,7 +177,7 @@ write_lut_packed_pixel(const LUTEntry* lut, int row, int col, int phase, unsigne
 }
 
 // Number of 16-bit words a LUTEntry needs to hold mode_width x mode_width
-// packed pixels for phases 0..lutWidth-1, given native_read_lut_packed_pixel's
+// packed pixels for phases 0..lutWidth-1, given read_lut_packed_pixel's
 // addressing (data_idx = mw*row + col + mw*mw*word_idx + word_idx).
 static size_t
 lut_data_words(int mode_width, int bit_depth, int lut_width) {
@@ -235,7 +235,7 @@ build_item(TestItem* ti, int y0, int x0, int y1, int x1, uint16_t fill_transitio
   ti->transitionsRr.size = strideRows * cols * (int)sizeof(uint16_t);
 
   size_t lut_words = lut_data_words(mode_width, bit_depth, lut_width);
-  ti->lut.size_kb = lut_width;  // matches native_load_waveform: size_kb doubles as phase count
+  ti->lut.size_kb = lut_width;  // matches load_waveform: size_kb doubles as phase count
   ti->lut.mode_width = mode_width;
   ti->lut.temperature = 0;
   ti->lut.bit_depth = bit_depth;
@@ -269,7 +269,7 @@ free_item(TestItem* ti) {
   // malloc'd - leaking them for the lifetime of this short-lived probe
   // process is fine (a handful of experiments, not a long-running server).
   //
-  // THE ACTUAL BUG this probe kept hitting: LUTEntry (native_init.h) has a
+  // THE ACTUAL BUG this probe kept hitting: LUTEntry (init.h) has a
   // destructor - `~LUTEntry() { if (data) free(data); }` - and TestItem
   // embeds `LUTEntry lut` BY VALUE, so that destructor runs automatically
   // when `ti` goes out of scope at the end of each experiment block, calling
@@ -320,13 +320,13 @@ main() {
   // to read per-pixel state from g_pStateBuffer (absolute screen row/col)
   // rather than item.transitionDataPtr as swtcon_architecture.md's "[derived]"
   // (i.e. unconfirmed) description currently guesses.
-  if (native_init_statebuffer() != 0) {
-    fprintf(stderr, "native_init_statebuffer failed\n");
+  if (init_statebuffer() != 0) {
+    fprintf(stderr, "init_statebuffer failed\n");
     return 1;
   }
   statebuffer_globals()->pStatebuffer = g_pStateBufferNative;
   statebuffer_globals()->pGammaTable = g_pGammaTableNative;
-  printf("native_init_statebuffer done, bridged pStatebuffer/pGammaTable\n");
+  printf("init_statebuffer done, bridged pStatebuffer/pGammaTable\n");
 
   auto plain_kernel = (PlaybackKernelFn)(g_runtime_offset + PLAIN_PLAYBACK_KERNEL_ADDR);
   auto aligned_kernel = (PlaybackKernelFn)(g_runtime_offset + ALIGNED_PLAYBACK_KERNEL_ADDR);
@@ -358,7 +358,7 @@ main() {
   // Transition (0,0), mode_width=32/bit_depth=2/lutWidth=8 (typical
   // GC16-shaped LUT), LUT cell (row=0,col=0,phase=0) set to the max 2-bit
   // value (3) - the decompile also confirmed the LUT index formula matches
-  // native_read_lut_packed_pixel exactly, using the raw transitionDataPtr u16
+  // read_lut_packed_pixel exactly, using the raw transitionDataPtr u16
   // value directly as `mw*row+col` (not a >>5/&0x1f split - numerically
   // identical only because mode_width=32 here).
   {
@@ -529,7 +529,7 @@ main() {
   // bit-offsets extractable from the single fetched packed-LUT word), then
   // frameSlots[k] (k=0..frameCount-1) just reads out shared-buffer entry
   // (phase&7)+k - never a second independent LUT fetch. This works because
-  // native_advance_work_item_frames's frame_count is always chosen so
+  // advance_work_item_frames's frame_count is always chosen so
   // phase&7 + frameCount never crosses an 8-phase LUT-word boundary, i.e.
   // frameCount<=8-phase%8. Verify: one active row (row=0) with a LUT entry
   // whose phase=0 slot (bit-offset 0) = 1 and phase=1 slot (bit-offset 1,
@@ -574,7 +574,7 @@ main() {
   // different NEON unrolling strategy (justified by phase&7==0 always
   // holding when the aligned kernel is selected, letting it extract all 8
   // sub-phases from one lane-shifted vector instead of doing the (phase&7)+k
-  // slice FUN_0004a140 does). If true, native_playback_kernel_plain should
+  // slice FUN_0004a140 does). If true, playback_kernel_plain_intrinsics should
   // already produce byte-identical output to the real FUN_0004a234 - this
   // decisive test calls BOTH kernels on the IDENTICAL WorkItem/state/LUT
   // (into separate frame-slot buffers) and diffs every byte, rather than

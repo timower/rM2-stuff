@@ -56,7 +56,7 @@ enum UpdateMode {
 };
 
 // UpdateFlags (Sync/FastDraw/ExplicitTemperature) lives in swtcon.h, shared
-// with native_update.cpp's swtcon_update - see that header for why, and for
+// with update.cpp's swtcon_update - see that header for why, and for
 // why bit 1 is FastDraw rather than the "FullRefresh" this project
 // originally (and wrongly) called it.
 
@@ -160,7 +160,7 @@ int main(int argc, char** argv) {
         //
         // Everything above is a single full-screen Sync update, which always
         // finds the accumulation list empty: it never exercises
-        // native_subtract_update_region's overlap/split logic. The tests
+        // subtract_update_region's overlap/split logic. The tests
         // below issue *multiple* swtcon_update() calls under one
         // swtcon_lock()/swtcon_unlock_post() pair (a real, intended usage
         // pattern - e.g. an app coalescing several dirty regions into one
@@ -287,7 +287,7 @@ int main(int argc, char** argv) {
                      "'overlap' (0x4a234) for as long as the dependency is "
                      "active - the branch never hit by any test above. "
                      "Needs the first item to actually clear its own "
-                     "dispatch gate (native_display_thread_func's "
+                     "dispatch gate (display_thread_func's "
                      "nFrameCleanupCursor pacing check) before the second "
                      "is submitted, which takes several real frame ticks -"
                      " a short sleep is not enough (confirmed empirically "
@@ -305,7 +305,7 @@ int main(int argc, char** argv) {
 
         if (should_run(10)) {
         std::cout << "Overlap: small isolated rect (area well under 20000px) "
-                     "-> forces native_playback_chunk_count's synchronous "
+                     "-> forces playback_chunk_count's synchronous "
                      "chunk_count=1 dispatch path, never exercised by the "
                      "large rects above (which always split into 2 chunks). "
                      "Flips white then black so the second update is "

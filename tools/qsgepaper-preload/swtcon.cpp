@@ -16,8 +16,8 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#include "native_display.h"
-#include "native_init.h"
+#include "display.h"
+#include "init.h"
 #include "qsgepaper_globals.h"
 
 // Symbol addresses for version 3.23.0.54 / 3.23.0.64 (assumes 0x10000 image
@@ -39,8 +39,8 @@ static uintptr_t runtime_offset = 0;
 static init_func_t qsgepaper_init = nullptr;
 
 // Library exports for A/B comparison against the native update
-// reimplementation - see native_update.cpp's NATIVE_UPDATE switch. Non-static
-// (extern) so native_update.cpp can reach them for its `#else` fallback.
+// reimplementation - see update.cpp's NATIVE_UPDATE switch. Non-static
+// (extern) so update.cpp can reach them for its `#else` fallback.
 void (*qsgepaper_lock)() = nullptr;
 void (*qsgepaper_update)(update_data*) = nullptr;
 void (*qsgepaper_unlock_post)() = nullptr;
@@ -48,7 +48,7 @@ void (*qsgepaper_wait)() = nullptr;
 
 // EPFramebufferSwtcon::initialize (0x38e30) calls qsgepaper_init and then
 // this - the startup flash, blocking until it completes - before doing
-// anything else (see native_request_flash_and_wait's comment, which mirrors
+// anything else (see request_flash_and_wait's comment, which mirrors
 // this natively). Library mode needs to call it explicitly too: unlike the
 // other four, it isn't reached through any of the five public swtcon_*
 // entry points on its own.
@@ -139,7 +139,7 @@ swtcon_init() {
 
     // Matches EPFramebufferSwtcon::initialize's own call sequence (see
     // qsgepaper_flash's comment) - native mode does the equivalent via
-    // native_request_flash_and_wait() at the end of its own init path below.
+    // request_flash_and_wait() at the end of its own init path below.
     std::cout << "Requesting startup flash (library mode)..." << std::endl;
     qsgepaper_flash();
 
@@ -148,16 +148,16 @@ swtcon_init() {
   }
 
   // --- NATIVE INIT IMPLEMENTATION ---
-  if (native_create_pid_file() != 0) return nullptr;
+  if (create_pid_file() != 0) return nullptr;
 
-    if (native_init_statebuffer() != 0) return nullptr;
+    if (init_statebuffer() != 0) return nullptr;
 
     auto* queue = update_queue_globals();
     auto* sb = statebuffer_globals();
     auto* fb = framebuffer_globals();
 
     // Phase 4 cleanup (Step 4): listProcessedUpdates/listIncomingUpdates/
-    // accumList are real std::list<T> now (see native_update.h's
+    // accumList are real std::list<T> now (see update.h's
     // UpdateQueueGlobals) - their own default constructor already produces
     // a valid empty list, so the explicit self-referencing-sentinel setup
     // this used to need (back when they were a hand-rolled ListHead that
@@ -172,8 +172,8 @@ swtcon_init() {
 
     char* path1 = (char*)"/usr/share/remarkable/320_R467_AF4731_ED103TC2C6_VB3300-KCD_TC.wbf";
 
-    std::cout << "Calling native_load_waveform with path=" << path1 << std::endl;
-    if (!native_load_waveform(&queue->waveform, path1)) {
+    std::cout << "Calling load_waveform with path=" << path1 << std::endl;
+    if (!load_waveform(&queue->waveform, path1)) {
         std::cerr << "swtcon_init: failed to load waveform natively" << std::endl;
         return nullptr;
     }
@@ -192,7 +192,7 @@ swtcon_init() {
     fb_info.hsyncLen = 1;
     fb_info.vsyncLen = 1;
 
-    if (native_init_framebuffer(fb_info) != 0) {
+    if (init_framebuffer(fb_info) != 0) {
         std::cerr << "swtcon_init: failed to init framebuffer" << std::endl;
         return nullptr;
     }
@@ -210,27 +210,27 @@ swtcon_init() {
     fb->fbVar = g_fbVarScreeninfoNative;
 
     std::cout << "Calling init_LUT..." << std::endl;
-    native_init_lut();
+    init_lut();
     fb->pLUT = g_pLUTAddrNative;
 
     std::cout << "Uploading LUT to all frame slots..." << std::endl;
     for (int i = 0; i < g_nFbSizeYNative; i++) {
-        native_upload_lut_to_frame_slot(native_frame_buffer_addr(i));
+        upload_lut_to_frame_slot(frame_buffer_addr(i));
     }
 
     // Phase 7: temperature_mutex() is natively-owned zero-initialized storage
     // now (previously the library's own .bss, already valid as an
     // all-zero glibc fast mutex without an explicit init) - init it
     // explicitly like every other mutex here, before the temperature-polling
-    // thread or native_get_current_temperature can touch it.
+    // thread or get_current_temperature can touch it.
     pthread_mutex_init(temperature_mutex(), nullptr);
-    native_init_temperature_sensor();
+    init_temperature_sensor();
 
     // Prime the display exactly as qsgepaper_init does. init_framebuffer leaves
     // g_nIsFbBlanked = 1 (blanked); record the current wall-clock time in
     // timeVar; init the display-timing mutex used by the worker and display
     // threads to timestamp frame flushes; then run the priming sequence
-    // native_prime_display (pan to frame 16, unblank, reblank). Without this the
+    // prime_display (pan to frame 16, unblank, reblank). Without this the
     // frame counters never get seeded and the worker streams frame 0 forever.
     fb->nIsFbBlanked = 1;
 
@@ -240,7 +240,7 @@ swtcon_init() {
 
     pthread_mutex_init(&queue->displayTimingMutex, nullptr);
 
-    native_prime_display();
+    prime_display();
 
     std::cout << "Starting threads natively..." << std::endl;
 
@@ -249,8 +249,8 @@ swtcon_init() {
     pthread_mutex_init(&queue->workerCondMutex, nullptr);
     pthread_cond_init(&queue->workerCond, nullptr);
 
-    pthread_create(&queue->workerThread, nullptr, native_worker_thread_func, nullptr);
-    pthread_create(&queue->displayThread, nullptr, native_display_thread_func, nullptr);
+    pthread_create(&queue->workerThread, nullptr, worker_thread_func, nullptr);
+    pthread_create(&queue->displayThread, nullptr, display_thread_func, nullptr);
 
     // auto display_thread_func = resolve_ptr<void*(*)(void*)>(0x3d2ac);
     // pthread_create(&queue->displayThread, nullptr, display_thread_func, nullptr);
@@ -266,7 +266,7 @@ swtcon_init() {
     // completes - before doing anything else. swtcon_init now replaces that
     // whole call site, so it does the same here.
     std::cout << "Requesting startup flash..." << std::endl;
-    native_request_flash_and_wait();
+    request_flash_and_wait();
 
     std::cout << "swtcon_init: native initialization complete!" << std::endl;
     return (uint16_t*)g_pImageBufferNative;
@@ -275,7 +275,7 @@ swtcon_init() {
 // Walk the waveform vector and print each LUT's metadata plus a checksum of
 // its packed data. The ModeEntry/LUTEntry layout matches the library
 // (ABI=1), so this works whether the struct was populated by
-// native_load_waveform or the library's load_waveform, letting us A/B the
+// load_waveform or the library's load_waveform, letting us A/B the
 // two byte-for-byte.
 void
 swtcon_dump_waveform() {
@@ -383,31 +383,31 @@ swtcon_shutdown(int state_ptr_or_zero) {
 
   if (state_ptr_or_zero != 0) {
     std::cout << "swtcon_shutdown: saving statebuffer..." << std::endl;
-    native_save_statebuffer(state_ptr_or_zero);
+    save_statebuffer(state_ptr_or_zero);
     std::cout << "swtcon_shutdown: statebuffer saved" << std::endl;
   }
 
   std::cout << "swtcon_shutdown: shutting down..." << std::endl;
 
-  if (native_is_fb_blanked() == 0) {
-    native_blank_fb();
+  if (is_fb_blanked() == 0) {
+    blank_fb();
   }
 
-  native_free_statebuffer();
+  free_statebuffer();
 
   free(queue->dataBuffer);
   free(queue->backBuffer);
 
-  native_close_fb();
+  close_fb();
   // dummy uninit
-  native_free_LUT();
-  native_unlock_pid_file();
+  free_LUT();
+  unlock_pid_file();
 
   // Phase 7: the library's own exit-time destructor for the waveform vector
   // (FUN_000451b0 via _INIT_3) used to free every ModeEntry and the backing
   // array for us; nothing runs that once the library is never dlopen'd for
   // the production path. ModeEntry/LUTEntry already have correct native
-  // destructors (see native_init.h), so freeing it here is just walking the
+  // destructors (see init.h), so freeing it here is just walking the
   // vector - not new reversing.
   for (auto* mode : queue->waveform)
     delete mode;

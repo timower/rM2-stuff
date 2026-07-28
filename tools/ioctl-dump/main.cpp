@@ -39,7 +39,7 @@ void* globalMem = nullptr;
 // Phase 7's note that the old SWTCON_LIBDISPATCH mid-pipeline splice is now
 // structurally defunct for that reason), hash exactly what gets sent to the
 // panel - both on FBIOPAN_DISPLAY *and* on a successful FBIOPUT_VSCREENINFO,
-// which also sets yoffset and is what native_pan_and_unblank (native_init.cpp)
+// which also sets yoffset and is what pan_and_unblank (init.cpp)
 // actually uses for its pan, not FBIOPAN_DISPLAY - see capture_display's call
 // sites. Two completely independent process runs (native swtcon vs.
 // SWTCON_LIBIMPL=1) can be diffed purely by their emitted display sequence,
@@ -160,7 +160,7 @@ handleIOCTL(unsigned long request, char* ptr) {
   if (request == FBIOPUT_VSCREENINFO) {
     std::cout << "Put info:\n"
               << std::hex << std::showbase << *(fb_var_screeninfo*)ptr << "\n";
-    // native_pan_and_unblank (native_init.cpp) sets the pan offset via THIS
+    // pan_and_unblank (init.cpp) sets the pan offset via THIS
     // ioctl, not FBIOPAN_DISPLAY - the first frame of every unblank
     // transition (init priming, every unblank-advance, the first frame of
     // every flash cycle) would otherwise be invisible to capture_display.

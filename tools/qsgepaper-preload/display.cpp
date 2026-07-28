@@ -1,4 +1,4 @@
-#include "native_display.h"
+#include "display.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -17,8 +17,8 @@
 #include <utility>
 #include <vector>
 
-#include "native_init.h"
-#include "native_update.h"
+#include "init.h"
+#include "update.h"
 #include "qsgepaper_globals.h"
 
 // Native reimplementation of worker_thread_func (0x3ae38) - see AGENTS.md
@@ -58,9 +58,9 @@ pan_and_advance_frame(UpdateQueueGlobals* queue,
                       bool unblank) {
   int frame_idx = queue->curFrame % kFrameSlotRingCount;
   if (unblank)
-    native_pan_and_unblank(frame_idx);
+    pan_and_unblank(frame_idx);
   else
-    native_pan_to_frame(frame_idx);
+    pan_to_frame(frame_idx);
 
   pthread_mutex_lock(&queue->displayTimingMutex);
   stamp_last_pan_timestamp(queue);
@@ -70,7 +70,7 @@ pan_and_advance_frame(UpdateQueueGlobals* queue,
 }
 
 void*
-native_worker_thread_func(void*) {
+worker_thread_func(void*) {
   auto* queue = update_queue_globals();
   auto* cursor = frame_cursor_globals();
 
@@ -80,9 +80,9 @@ native_worker_thread_func(void*) {
     // 2. Pre-frame housekeeping: if unblanked, double-pan the init slot and
     // stamp timing (no curFrame advance - the panel isn't showing a new
     // frame yet, just being kept alive).
-    if (!native_is_fb_blanked()) {
-      native_pan_to_frame(kInitFrameSlotIndex);
-      native_pan_to_frame(kInitFrameSlotIndex);
+    if (!is_fb_blanked()) {
+      pan_to_frame(kInitFrameSlotIndex);
+      pan_to_frame(kInitFrameSlotIndex);
       pthread_mutex_lock(&queue->displayTimingMutex);
       stamp_last_pan_timestamp(queue);
       cursor->nLastPannedFrame = queue->curFrame - 1;
@@ -100,7 +100,7 @@ native_worker_thread_func(void*) {
     double now = (double)tv.tv_sec + (double)tv.tv_usec / 1e6;
     if ((double)(queue->timeVar + 60) <= now) {
       queue->timeVar = (int)now;
-      native_prime_display();
+      prime_display();
     }
 
     // 5. Wait for the display thread to advance the target frame, a flash
@@ -130,7 +130,7 @@ native_worker_thread_func(void*) {
         int r = pthread_cond_timedwait(
           &queue->workerCond, &queue->workerCondMutex, &deadline);
         if (r == ETIMEDOUT) {
-          native_blank_fb();
+          blank_fb();
           want_timed = false;
           if (queue->curFrame != queue->targetFrame)
             break;
@@ -147,7 +147,7 @@ native_worker_thread_func(void*) {
 
     // 7. Un-blank and advance one frame, unless a flash or shutdown is
     // pending (both handled below instead).
-    if (native_is_fb_blanked() && queue->workerThreadShutdown == 0 &&
+    if (is_fb_blanked() && queue->workerThreadShutdown == 0 &&
         queue->flashRequested == 0) {
       pan_and_advance_frame(queue, cursor, /*unblank=*/true);
     }
@@ -158,32 +158,32 @@ native_worker_thread_func(void*) {
     // each phase's pixel byte, then restores the real waveform LUT into
     // those same slots and resets per-pixel state to neutral.
     if (queue->flashRequested != 0) {
-      float temp = native_get_current_temperature();
+      float temp = get_current_temperature();
       std::shared_ptr<LUTEntry> lut_sp;
-      native_select_waveform_lut(temp,
+      select_waveform_lut(temp,
                                  &lut_sp,
                                  &queue->waveform,
                                  /*mode=*/0);
 
-      if (native_update_lut_is_valid(lut_sp)) {
+      if (update_lut_is_valid(lut_sp)) {
         static const uint16_t kFlashPatterns[3] = { 0x0000, 0x5555, 0xaaaa };
         for (int i = 0; i < 3; i++)
-          native_write_lut_pattern(native_frame_buffer_addr(i),
+          write_lut_pattern(frame_buffer_addr(i),
                                    kFlashPatterns[i]);
 
         auto* lut = lut_sp.get();
-        native_pan_and_unblank((int)native_read_lut_packed_pixel(lut, 0, 0, 0));
+        pan_and_unblank((int)read_lut_packed_pixel(lut, 0, 0, 0));
         int phase_count =
           lut->size_kb; // doubles as this LUT's frame/phase count
         for (int phase = 1; phase < phase_count; phase++)
-          native_pan_to_frame(
-            (int)native_read_lut_packed_pixel(lut, 0, 0, phase));
-        native_pan_to_frame(0);
-        native_pan_to_frame(kInitFrameSlotIndex);
-        native_blank_fb();
+          pan_to_frame(
+            (int)read_lut_packed_pixel(lut, 0, 0, phase));
+        pan_to_frame(0);
+        pan_to_frame(kInitFrameSlotIndex);
+        blank_fb();
         for (int i = 0; i < 3; i++)
-          native_upload_lut_to_frame_slot(native_frame_buffer_addr(i));
-        native_reset_statebuffer_neutral();
+          upload_lut_to_frame_slot(frame_buffer_addr(i));
+        reset_statebuffer_neutral();
       }
 
       queue->flashRequested = 0;
@@ -212,7 +212,7 @@ native_worker_thread_func(void*) {
 // and avoids replicating threading boilerplate nothing else reads (same
 // call already made for swtcon_wait's own queue-drain spin-loop).
 void
-native_request_flash_and_wait() {
+request_flash_and_wait() {
   auto* queue = update_queue_globals();
 
   queue->flashRequested = 1;
@@ -233,9 +233,9 @@ native_request_flash_and_wait() {
 // rule for advance_work_item_frames - see that function's comment).
 //
 // Both worker-side playback kernels (0x4a140 "plain" and 0x4a234, formerly
-// mislabeled "overlap-aware" - see native_dispatch_aligned_kernel's comment
+// mislabeled "overlap-aware" - see dispatch_aligned_kernel's comment
 // for why that name was wrong) are native now, sharing one implementation
-// (native_playback_kernel_plain below) - see native_dispatch_aligned_kernel's
+// (playback_kernel_plain_intrinsics below) - see dispatch_aligned_kernel's
 // comment for why a single native function covers both by-address
 // originals. Zero by-address calls remain in the production pipeline; the
 // library is only ever touched at all under SWTCON_LIBIMPL (swtcon.cpp),
@@ -254,7 +254,7 @@ extern void* g_pStateBufferNative;
 // rect in one pass rather than the library's 1-2 column chunks: chunking
 // only splits this same per-pixel computation into disjoint column ranges
 // with no shared mutable state across chunks, so it's provably invisible to
-// the output (same reasoning as native_render_update_kernel's chunking,
+// the output (same reasoning as render_update_kernel's chunking,
 // confirmed empirically here too - probe experiment 7).
 //
 // Also allocates item.pixelTransitions fresh (releasing whatever it held
@@ -266,7 +266,7 @@ extern void* g_pStateBufferNative;
 // with literally nothing changed anywhere) and should be destroyed by the
 // caller exactly like an already-degenerate item.
 static bool
-native_commit_item(WorkItem* item) {
+commit_item(WorkItem* item) {
   int rows = item->rectY1 - item->rectY0 + 1;
   int cols = item->rectX1 - item->rectX0 + 1;
   int strideRows = (rows + kRegionRowsStrideAlign - 1) &
@@ -283,7 +283,7 @@ native_commit_item(WorkItem* item) {
   rr->dataPtr = (uint8_t*)transitionBuf;
 
   // RegionRows::dataPtr is a plain non-owning pointer (see its comment in
-  // native_update.h) - this allocation actually owns the uint16_t buffer it
+  // update.h) - this allocation actually owns the uint16_t buffer it
   // just made, so free it (correctly typed) via a custom deleter on the
   // shared_ptr rather than giving RegionRows itself an owning destructor.
   item->pixelTransitions = std::shared_ptr<RegionRows>(rr, [](RegionRows* p) {
@@ -315,7 +315,7 @@ native_commit_item(WorkItem* item) {
 
   // Read the new pixel through item.pixelDataPtr (the REBASED
   // RegionRows::dataPtr, +0x08), NOT regionRows->dataPtr. For a split piece
-  // (native_piece_builder) the regionRows shared_ptr still points at the
+  // (piece_builder) the regionRows shared_ptr still points at the
   // ORIGINAL region's struct (origin = old rect's x0/y0), and only
   // `pixelDataPtr` is rebased to the piece's own origin - so indexing
   // regionRows->dataPtr with piece-local coords reads from the wrong spot
@@ -432,7 +432,7 @@ native_commit_item(WorkItem* item) {
 // rectangle merge; empirically disproved via
 // tools/qsgepaper-preload/dispatch_processed_regions_probe.cpp - items in a
 // batch are processed completely independently). Runs each item through
-// native_commit_item in a single full-rect pass (no thread pool - see that
+// commit_item in a single full-rect pass (no thread pool - see that
 // function's comment for why chunking is provably invisible here), destroys
 // items that come back degenerate (either already-degenerate on entry, or
 // "incremental" with literally nothing changed) via a plain std::list erase,
@@ -451,21 +451,21 @@ native_commit_item(WorkItem* item) {
 // item+0x44 right after allocating pixelTransitions (`node[0x13] =
 // *piVar21`), and BOTH playback kernels (FUN_0004a140/FUN_0004a234) read
 // their per-pixel transitions through that cached +0x44 pointer, not via
-// pixelTransitions.ptr->dataPtr. native_commit_item now sets it (see there);
+// pixelTransitions.ptr->dataPtr. commit_item now sets it (see there);
 // without it the kernels dereferenced a stale/null pointer. That also
 // explains why the earlier elimination log missed it: the "downstream state
 // identical" check enumerated frameCursor/frameAnchor/phase/rect/sync/
 // lutWidthMinus1 but not +0x44, and zero-filling pixelTransitions' PAYLOAD
 // couldn't help since the kernels never read pixelTransitions.ptr->dataPtr.
 static bool
-native_dispatch_processed_regions_native(std::list<WorkItem>& sub_list) {
+dispatch_processed_regions_native(std::list<WorkItem>& sub_list) {
   bool any_survived = false;
   for (auto it = sub_list.begin(); it != sub_list.end();) {
     WorkItem& item = *it;
 
     bool degenerate_on_entry =
       item.rectY1 < item.rectY0 || item.rectX1 < item.rectX0;
-    bool survives = !degenerate_on_entry && native_commit_item(&item);
+    bool survives = !degenerate_on_entry && commit_item(&item);
 
     if (!survives) {
       it = sub_list.erase(it);
@@ -480,7 +480,7 @@ native_dispatch_processed_regions_native(std::list<WorkItem>& sub_list) {
 // Mirrors copy_init_frame_row (0x53be4, newly named this pass): restores
 // one stale frame-slot row from the LUT blob's fixed reference row.
 static void
-native_copy_init_frame_row(void* frame_slot_addr, int col) {
+copy_init_frame_row(void* frame_slot_addr, int col) {
   auto* fb = framebuffer_globals();
   uint8_t* dest = (uint8_t*)frame_slot_addr + (int64_t)(col + 3) * 0x410;
   const uint8_t* src = (const uint8_t*)fb->pLUT + 0xc30;
@@ -500,7 +500,7 @@ native_copy_init_frame_row(void* frame_slot_addr, int col) {
 // backwards past the array's base - a real quirk in the library itself,
 // transcribed verbatim rather than "fixed" (see swtcon_architecture.md §8).
 static void
-native_stale_row_cleanup() {
+stale_row_cleanup() {
   auto* cursor = frame_cursor_globals();
   uint8_t* dirty_gate = backbuffer_dirty_gate();
   int32_t last_panned = cursor->nLastPannedFrame;
@@ -509,11 +509,11 @@ native_stale_row_cleanup() {
        i <= last_panned; i++) {
     int32_t bucket = i % kFrameSlotRingCount;
     uint8_t* row = dirty_gate + (int64_t)bucket * kDirtyGateRowBytes;
-    void* frame_slot = native_frame_buffer_addr(bucket);
+    void* frame_slot = frame_buffer_addr(bucket);
 
     for (int32_t col = 0; col < kDirtyGateRowBytes; col++) {
       if (row[col] != 0)
-        native_copy_init_frame_row(frame_slot, col);
+        copy_init_frame_row(frame_slot, col);
     }
     memset(row, 0, kDirtyGateRowBytes);
     cursor->nFrameCleanupCursor = i + kFrameSlotRingCount;
@@ -527,7 +527,7 @@ native_stale_row_cleanup() {
 // matching teardown for the links build_overlap_dependency_list builds -
 // see §6.2a).
 static void
-native_gc_processed_updates() {
+gc_processed_updates() {
   auto* queue = update_queue_globals();
 
   for (auto it = queue->listProcessedUpdates.begin();
@@ -552,7 +552,7 @@ native_gc_processed_updates() {
 // still-active item in g_pListProcessedUpdates whose rect overlaps and
 // whose lifetime outlasts this item's own frameAnchor.
 static void
-native_build_overlap_dependency_list(std::list<WorkItem>& sub_list) {
+build_overlap_dependency_list(std::list<WorkItem>& sub_list) {
   auto* queue = update_queue_globals();
 
   for (auto& item : sub_list) {
@@ -579,13 +579,13 @@ native_build_overlap_dependency_list(std::list<WorkItem>& sub_list) {
 }
 
 // Signature shared by both worker-side playback kernels (native
-// native_playback_kernel_plain and the still-library FUN_0004a234):
+// playback_kernel_plain_intrinsics and the still-library FUN_0004a234):
 // (frameSlots[8], item, frameCount, chunkIndex, chunkCount).
 using PlaybackKernelFn = void (*)(void**, WorkItem*, int, int, int);
 
-// native_playback_kernel_plain itself (the native port of FUN_0004a140/
+// playback_kernel_plain_intrinsics itself (the native port of FUN_0004a140/
 // FUN_0004a234, "the plain playback kernel") now lives in its own
-// translation unit, native_playback_kernel.cpp, so its NEON fast path
+// translation unit, playback_kernel_intrinsics.cpp, so its NEON fast path
 // (Phase 9, see AGENTS.md) can sit behind an #ifdef without dragging in
 // this file's threading/globals dependencies. See that file's header
 // comment for the full byte-verified algorithm breakdown.
@@ -600,7 +600,7 @@ using PlaybackKernelFn = void (*)(void**, WorkItem*, int, int, int);
 // including the LUT-wraparound correction - unsynchronized plain field
 // writes, matching the library (no mutex held here either).
 static void
-native_playback_kernel_dispatch(PlaybackKernelFn kernel_fn,
+playback_kernel_dispatch(PlaybackKernelFn kernel_fn,
                                 void** frame_slots,
                                 WorkItem* item,
                                 int frame_count,
@@ -635,7 +635,7 @@ native_playback_kernel_dispatch(PlaybackKernelFn kernel_fn,
 // is non-degenerate and its area exceeds 20000px, in which case 1 if its
 // column span is under 10, else 2.
 static int
-native_playback_chunk_count(const WorkItem* item) {
+playback_chunk_count(const WorkItem* item) {
   if (item->rectY0 <= item->rectY1 && item->rectX0 <= item->rectX1) {
     int32_t width_span = item->rectX1 - item->rectX0;
     int64_t area =
@@ -650,18 +650,18 @@ native_playback_chunk_count(const WorkItem* item) {
 // the chunk count and dispatches through FUN_0003ec78 with the "plain"
 // kernel - playback_kernel_plain (playback_kernel.s), a direct assembly
 // transliteration of the real FUN_0004a140, not by-address anymore and not
-// the from-scratch NEON-intrinsics native_playback_kernel_plain either (see
+// the from-scratch NEON-intrinsics playback_kernel_plain_intrinsics either (see
 // AGENTS.md's Phase 9 "fifth pass": the intrinsics port passed every
 // black-box verification this codebase has - probe, ab-test, bench - but
 // still produced visible real-hardware artifacts; the literal
 // transliteration fixed them, root cause still unidentified).
 static void
-native_dispatch_plain_kernel(void** frame_slots,
+dispatch_plain_kernel(void** frame_slots,
                              WorkItem* item,
                              int frame_count) {
-  int chunk_count = native_playback_chunk_count(item);
-  native_playback_kernel_dispatch(
-    native_playback_kernel_plain, frame_slots, item, frame_count, chunk_count);
+  int chunk_count = playback_chunk_count(item);
+  playback_kernel_dispatch(
+    playback_kernel_plain_intrinsics, frame_slots, item, frame_count, chunk_count);
 }
 
 // Mirrors FUN_0003f1f0 (0x3f1f0, the "aligned" kernel wrapper - CONFIRMED):
@@ -670,7 +670,7 @@ native_dispatch_plain_kernel(void** frame_slots,
 //
 // NAMING: this and FUN_0004a234 were previously called "overlap-aware"/
 // "overlap" - a name inherited from the fact that the selection rule below
-// (native_advance_work_item_frames) consults the item's overlap-dependency
+// (advance_work_item_frames) consults the item's overlap-dependency
 // intList to choose between this path and the plain one. That name is
 // backwards and misleading: this path fires exactly when there is NO active
 // overlap dependency left to account for (see have_active_dep below) - it
@@ -703,11 +703,11 @@ native_dispatch_plain_kernel(void** frame_slots,
 // code, provably same output - so no separate native implementation is
 // needed, and the delegates never need reversing at all.
 static void
-native_dispatch_aligned_kernel(void** frame_slots,
+dispatch_aligned_kernel(void** frame_slots,
                                WorkItem* item,
                                int frame_count) {
-  int chunk_count = native_playback_chunk_count(item);
-  native_playback_kernel_dispatch(native_playback_kernel_aligned,
+  int chunk_count = playback_chunk_count(item);
+  playback_kernel_dispatch(playback_kernel_aligned_intrinsics,
                                   frame_slots,
                                   item,
                                   frame_count,
@@ -729,10 +729,10 @@ native_dispatch_aligned_kernel(void** frame_slots,
 // live dependency left to account for - which is exactly why "overlap-aware"
 // (its name before this pass) was backwards and misleading: it fires when
 // there's NO overlap left to track, not when there is. It's an alignment
-// fast path, not an overlap-aware one - see native_dispatch_aligned_kernel's
+// fast path, not an overlap-aware one - see dispatch_aligned_kernel's
 // comment.
 static void
-native_advance_work_item_frames(WorkItem* item) {
+advance_work_item_frames(WorkItem* item) {
   auto* queue = update_queue_globals();
   auto* cursor = frame_cursor_globals();
 
@@ -747,7 +747,7 @@ native_advance_work_item_frames(WorkItem* item) {
   void* frame_slots[8];
   for (int i = 0; i < 8; i++)
     frame_slots[i] =
-      native_frame_buffer_addr((start_frame_cursor + i) % kFrameSlotRingCount);
+      frame_buffer_addr((start_frame_cursor + i) % kFrameSlotRingCount);
 
   int32_t budget = cursor->nFrameCleanupCursor - start_frame_cursor + 1;
 
@@ -782,10 +782,10 @@ native_advance_work_item_frames(WorkItem* item) {
       return; // full abort - matches the library's early `return` here (no tail
               // either)
 
-    native_dispatch_plain_kernel(frame_slots, item, frame_count);
+    dispatch_plain_kernel(frame_slots, item, frame_count);
     dispatched = true;
   } else if (budget >= frame_count) {
-    native_dispatch_aligned_kernel(frame_slots, item, frame_count);
+    dispatch_aligned_kernel(frame_slots, item, frame_count);
     dispatched = true;
   }
   // else: aligned path, insufficient budget - skip the kernel call but
@@ -793,7 +793,7 @@ native_advance_work_item_frames(WorkItem* item) {
   // early return above).
 
   // Mark newly-advanced frame slots dirty in the backBuffer gate array -
-  // the producer side of native_stale_row_cleanup and render_update_kernel
+  // the producer side of stale_row_cleanup and render_update_kernel
   // case 7's gate. Only runs if frameCursor actually moved forward (it can
   // end up <= where it started if the LUT-wraparound correction above
   // consumed the whole advance).
@@ -832,7 +832,7 @@ native_advance_work_item_frames(WorkItem* item) {
 // sequence for every batch this tick - not dropped before the heavy
 // dispatch_processed_regions call as an earlier draft of this port assumed).
 void*
-native_display_thread_func(void*) {
+display_thread_func(void*) {
   auto* queue = update_queue_globals();
   auto* cursor = frame_cursor_globals();
 
@@ -840,10 +840,10 @@ native_display_thread_func(void*) {
     sem_wait(&queue->displayThreadSem);
 
     // 1. Stale-row cleanup.
-    native_stale_row_cleanup();
+    stale_row_cleanup();
 
     // 2. g_pListProcessedUpdates GC.
-    native_gc_processed_updates();
+    gc_processed_updates();
 
     bool processed_empty = queue->listProcessedUpdates.empty();
     bool incoming_empty = queue->listIncomingUpdates.empty();
@@ -862,7 +862,7 @@ native_display_thread_func(void*) {
         }
 
         Batch& batch = *batch_it;
-        native_build_overlap_dependency_list(batch.subList);
+        build_overlap_dependency_list(batch.subList);
 
         // Gate-check "max lifetime" scan (exact condition, not
         // "[derived, not fully closed]" - a dependency is skipped exactly
@@ -891,7 +891,7 @@ native_display_thread_func(void*) {
         int32_t gate_target = std::max(max_lifetime, queue->curFrame);
         if (cursor->nFrameCleanupCursor - gate_target > 6) {
           bool dispatched =
-            native_dispatch_processed_regions_native(batch.subList);
+            dispatch_processed_regions_native(batch.subList);
 
           if (dispatched) {
             int32_t target;
@@ -951,14 +951,14 @@ native_display_thread_func(void*) {
             }
 
             // Dependencies now reflect final frame numbers - rebuild.
-            native_build_overlap_dependency_list(batch.subList);
+            build_overlap_dependency_list(batch.subList);
 
             // Move each surviving item onward into the processed list -
             // batch.subList's own copies are moved-from (empty) afterward,
             // so erasing the whole batch below is cheap and doesn't need a
-            // separate native_free_update_region_list-style pass.
+            // separate free_update_region_list-style pass.
             for (auto& item : batch.subList) {
-              native_advance_work_item_frames(&item);
+              advance_work_item_frames(&item);
               queue->listProcessedUpdates.push_back(std::move(item));
             }
           }
@@ -976,7 +976,7 @@ native_display_thread_func(void*) {
     // still has frames left, even if this tick didn't commit a new batch.
     for (auto& item : queue->listProcessedUpdates) {
       if (item.phase < item.lutWidthMinus1)
-        native_advance_work_item_frames(&item);
+        advance_work_item_frames(&item);
     }
   }
 
