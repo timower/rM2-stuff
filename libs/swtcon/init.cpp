@@ -66,16 +66,18 @@ int create_pid_file() {
     return -1;
 }
 
-int init_statebuffer() {
+int init_statebuffer(void* dataBuffer, void* backBuffer) {
     size_t sz = kStatebufferSize;
 
     // g_pDataBuffer: 16-bit image working buffer, returned to the caller.
-    g_pImageBufferNative = malloc(sz);
+    g_pImageBufferNative = dataBuffer == nullptr ? malloc(sz) : dataBuffer;
     if (!g_pImageBufferNative) return -1;
     memset(g_pImageBufferNative, 0xff, sz);
 
     // g_pBackBuffer: full-screen 1 byte/pixel back buffer.
-    g_pScreenBufferNative = calloc((size_t)kScreenWidth * kScreenHeight, 1);
+    g_pScreenBufferNative = backBuffer == nullptr
+                               ? calloc((size_t)kScreenWidth * kScreenHeight, 1)
+                               : backBuffer;
     if (!g_pScreenBufferNative) return -1;
 
     // DAT_0006d1d0: the persisted statebuffer. init_statebuffer @0x4fad4 fills it

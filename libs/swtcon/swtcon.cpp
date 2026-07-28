@@ -121,7 +121,7 @@ extern struct fb_var_screeninfo g_fbVarScreeninfoNative;
 extern struct fb_fix_screeninfo g_fbFixScreeninfoNative;
 
 uint16_t*
-swtcon_init() {
+swtcon_init(void* dataBuffer, void* backBuffer) {
   std::cout << "swtcon_init: initialization sequence starting..." << std::endl;
 
   if (swtcon_lib_impl_enabled()) {
@@ -150,7 +150,7 @@ swtcon_init() {
   // --- NATIVE INIT IMPLEMENTATION ---
   if (create_pid_file() != 0) return nullptr;
 
-    if (init_statebuffer() != 0) return nullptr;
+    if (init_statebuffer(dataBuffer, backBuffer) != 0) return nullptr;
 
     auto* queue = update_queue_globals();
     auto* sb = statebuffer_globals();

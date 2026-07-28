@@ -64,7 +64,11 @@ static_assert(sizeof(FbInitParams) == 14 * sizeof(int32_t), "FbInitParams must m
 
 // Re-implemented functions
 int create_pid_file();
-int init_statebuffer();
+// dataBuffer/backBuffer let a caller supply pre-allocated storage for the
+// image working buffer and the full-screen back buffer (e.g. rm2fb's shared
+// framebuffer) instead of having init_statebuffer malloc/calloc its own -
+// null (the default) keeps the original self-allocating behavior.
+int init_statebuffer(void* dataBuffer = nullptr, void* backBuffer = nullptr);
 int init_framebuffer(const FbInitParams& fb_info);
 int init_lut();
 bool load_waveform(std::vector<ModeEntry*>* waveform_struct, const char* path);

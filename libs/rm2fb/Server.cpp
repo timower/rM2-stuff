@@ -716,5 +716,7 @@ serverMain(char* argv0, const AddressInfoBase* addrs) { // NOLINT
     }
   }
 
+  addrs->shutdownThreads();
+
   return EXIT_SUCCESS;
 }

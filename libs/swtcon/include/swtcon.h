@@ -51,7 +51,11 @@ enum UpdateFlags {
 };
 
 // Initializes the library and returns the 16-bit framebuffer pointer.
-uint16_t* swtcon_init();
+// dataBuffer/backBuffer optionally supply pre-allocated storage for the
+// image working buffer / full-screen back buffer (e.g. rm2fb's shared
+// framebuffer) instead of letting swtcon allocate its own - see
+// init_statebuffer.
+uint16_t* swtcon_init(void* dataBuffer = nullptr, void* backBuffer = nullptr);
 
 // Lock, update, unlock/post, and wait.
 void swtcon_lock();

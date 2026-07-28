@@ -43,6 +43,17 @@ target_link_libraries(rm2fb_server_exe PRIVATE Evdev::Static udev)
 
 target_compile_definitions(rm2fb_server_exe PRIVATE USE_QSGEPAPER)
 
+# rm2fb server backed directly by the native swtcon reimplementation instead
+# of by-address hooking into a version-specific libqsgepaper.so (compare
+# ServerExe.cpp/rm2fb_server_exe above) - drives the display straight off
+# swtcon_*, reading/writing rm2fb's own shared framebuffer. Only builds where
+# swtcon itself does (32-bit ARM target - see libs/swtcon/CMakeLists.txt).
+if(TARGET swtcon)
+  add_executable(rm2fb_server_swtcon ServerSwtcon.cpp Server.cpp ImageHook.cpp)
+  target_link_libraries(rm2fb_server_swtcon PRIVATE swtcon rm2fb_lib
+                                                     Evdev::Static udev Systemd::Lib pthread)
+endif()
+
 add_library(rm2fb_client SHARED Client.cpp IOCTL.cpp ImageHook.cpp
                                 AddressHooking.cpp)
 
