@@ -2,6 +2,7 @@
 #include "statebuffer_table.h"
 #include <iostream>
 #include <fstream>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
@@ -444,6 +445,259 @@ bool load_waveform(std::vector<ModeEntry*>* waveform_struct, const char* path) {
         waveform_struct->push_back(mode);
     }
 
+    return true;
+}
+
+namespace {
+
+// The real library's search order (qsgepaper_init's directory-list
+// construction, DAT_00066de0/de4/de8 in the library's .rodata).
+const char* const kWaveformSearchDirs[] = {
+    "/var/lib/remarkable/",
+    "/var/lib/uboot/",
+    "/usr/share/remarkable/",
+};
+
+bool has_wbf_suffix(const char* name) {
+    size_t len = strlen(name);
+    if (len < 4) return false;
+    const char* suffix = name + len - 4;
+    return suffix[0] == '.' && tolower((unsigned char)suffix[1]) == 'w' &&
+           tolower((unsigned char)suffix[2]) == 'b' && tolower((unsigned char)suffix[3]) == 'f';
+}
+
+// Lists every *.wbf (case-insensitive) regular-file dirent in `dir`,
+// appending its full path to *out. A missing directory is silently skipped
+// (mirrors get_waveform_path's own opendir-failure handling, which just
+// moves on to the next directory in the list).
+void list_wbf_files(const std::string& dir, std::vector<std::string>* out) {
+    DIR* d = opendir(dir.c_str());
+    if (!d) return;
+    struct dirent* entry;
+    while ((entry = readdir(d)) != nullptr) {
+        if (entry->d_type != DT_REG) continue;
+        if (!has_wbf_suffix(entry->d_name)) continue;
+        out->push_back(dir + entry->d_name);
+    }
+    closedir(d);
+}
+
+// Mirrors FUN_00054628: pulls a .wbf file's own matching fields - fpl_lot
+// (u16 @ header offset 0xE) and the 2-char TFT_VID code embedded at a fixed
+// offset inside the XWIA extended-info text (offset 0x1c is a 3-byte offset
+// to a length-prefixed string; TFT_VID sits at that string's own offset
+// 0x18). Both confirmed byte-for-byte against real .wbf files pulled off a
+// device image: e.g. 320_R299_..._ED103TC2U2_...wbf has fpl_lot=299 and its
+// xwia text (which is just the filename itself) slices to "U2" at that exact
+// offset. Returns false only if the file is too short to even hold a
+// header; a missing/oversized XWIA block just yields the "00" wildcard
+// TFT_VID rather than failing outright (matches FUN_00054628, which never
+// fails on XWIA content, only on a null wbf_read_file result).
+bool read_wbf_match_fields(const std::string& path, uint16_t* fpl_lot, char tft_vid[3]) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file) return false;
+    file.seekg(0, std::ios::end);
+    size_t sz = file.tellg();
+    if (sz < 0x20) return false;
+    file.seekg(0, std::ios::beg);
+    std::vector<uint8_t> data(sz);
+    if (!file.read((char*)data.data(), sz)) return false;
+
+    *fpl_lot = *(uint16_t*)(data.data() + 0xe);
+
+    tft_vid[0] = '0';
+    tft_vid[1] = '0';
+    tft_vid[2] = '\0';
+    uint32_t xwia = (*(uint32_t*)(data.data() + 0x1c)) & 0xffffff;
+    if (xwia + 1 >= sz) return true;
+    uint8_t xwia_len = data[xwia];
+    if (xwia_len < 0x1a || xwia + 1 + xwia_len > sz) return true;
+    const uint8_t* xwia_text = data.data() + xwia + 1;
+    tft_vid[0] = (char)xwia_text[0x18];
+    tft_vid[1] = (char)xwia_text[0x19];
+    return true;
+}
+
+// Mirrors FUN_00053528: decodes a two-character FPL_LOT pair (barcode bytes
+// [6:8]) into a single int. Alphabet skips 'I'/'O' (a classic lot-code
+// convention avoiding confusion with 1/0). Empirically confirmed against a
+// real on-device barcode - bytes "AD" decoded to 333, matching that same
+// device's own /var/lib/uboot/320_R333_..._TC.wbf (per an actual xochitl
+// log line: "Loading waveforms from: /var/lib/uboot/320_R333_..."). Only the
+// digit/'A'-'H' first-letter branch has been empirically validated this way;
+// the 'J'-'N'/'Q'-'Z' branches below are [derived] from Ghidra disassembly
+// alone.
+int decode_fpl_lot_pair(char c1, char c2) {
+    int v1 = (uint8_t)c1 - 0x30;
+    int iVar1;
+    if (v1 >= 0 && v1 <= 9) {
+        iVar1 = v1;
+    } else if (v1 >= 0x11 && v1 <= 0x18) {
+        iVar1 = c1 - 0x37;
+    } else if (v1 >= 0x1a && v1 <= 0x1e) {
+        iVar1 = c1 - 0x38;
+    } else if (v1 >= 0x21 && v1 <= 0x2a) {
+        iVar1 = c1 - 0x3a;
+    } else {
+        return -1;
+    }
+
+    int v2 = (uint8_t)c2 - 0x30;
+    if (v1 <= 0x18) {
+        // First letter was digit/'A'-'H': second can be digit/'A'-'H'/'J'-'N'/'Q'-'Z'.
+        if (v2 >= 0 && v2 <= 9) {
+            if (iVar1 == 0 && v2 == 0) return -1;
+            return iVar1 * 10 + v2;
+        } else if (v2 >= 0x11 && v2 <= 0x18) {
+            return iVar1 * 0x17 + (c2 - 0x37) + 0x5a;
+        } else if (v2 >= 0x1a && v2 <= 0x1e) {
+            return iVar1 * 0x17 + (c2 - 0x38) + 0x5a;
+        } else if (v2 >= 0x21 && v2 <= 0x2a) {
+            return iVar1 * 0x17 + (c2 - 0x3a) + 0x5a;
+        }
+        return -1;
+    } else {
+        // First letter was 'J'-'N'/'Q'-'Z': second letter must be a digit.
+        if ((uint8_t)c2 >= 0x30 && (uint8_t)c2 <= 0x39) return iVar1 * 10 + (c2 - 0x30);
+        return -1;
+    }
+}
+
+// Mirrors FUN_000537b4: decodes the factory barcode's TFT_VID (bytes [0:3],
+// fixed lookup table) and FPL_LOT (bytes [6:8] via decode_fpl_lot_pair, only
+// if byte[5]=='R'). A TFT_VID lookup miss still succeeds (falls back to
+// "00", matching the real "Unable to decode TFT_VID from barcode." warning
+// path) - only a missing/invalid FPL_LOT fails the whole decode, at which
+// point the caller reverts to wildcard-everything matching (matches
+// get_waveform_path, which never uses a partially-decoded barcode).
+bool decode_barcode(const std::string& barcode, char tft_vid[3], int* fpl_lot) {
+    if (barcode.size() != 25) return false;
+    const char* b = barcode.data();
+
+    if (b[0] == 'E' && b[1] == 'U' && b[2] == 'F') { tft_vid[0] = 'U'; tft_vid[1] = '2'; }
+    else if (b[0] == 'E' && b[1] == 'R' && b[2] == 'L') { tft_vid[0] = 'M'; tft_vid[1] = '1'; }
+    else if (b[0] == 'H' && b[1] == '0' && b[2] == '4') { tft_vid[0] = 'U'; tft_vid[1] = '3'; }
+    else if (b[0] == 'H' && b[1] == '1' && b[2] == 'V') { tft_vid[0] = 'C'; tft_vid[1] = '5'; }
+    else if (b[0] == 'H' && b[1] == '3' && b[2] == 'Y') { tft_vid[0] = 'C'; tft_vid[1] = '6'; }
+    else { tft_vid[0] = '0'; tft_vid[1] = '0'; }
+    tft_vid[2] = '\0';
+
+    if (b[5] != 'R') return false;
+    int lot = decode_fpl_lot_pair(b[6], b[7]);
+    if (lot == -1) return false;
+    *fpl_lot = lot;
+    return true;
+}
+
+// Mirrors get_waveform_path's own /dev/mmcblk2boot1 read: 4 big-endian
+// length-prefixed fields; field index 3 is the 25-byte factory calibration
+// barcode. Confirmed against a real boot1 dump: field 3 decoded to
+// "EUFZBRAD1V9V00A6TAT -1.39", a well-formed 25-byte barcode whose decode
+// (see decode_barcode/decode_fpl_lot_pair) matches that unit's real
+// waveform file exactly.
+bool read_factory_barcode(std::string* out_barcode) {
+    FILE* f = fopen64("/dev/mmcblk2boot1", "rb");
+    if (!f) return false;
+
+    std::string field;
+    bool ok = false;
+    for (int i = 0; i < 4; i++) {
+        uint8_t len_be[4];
+        if (fread(len_be, 4, 1, f) != 1) { ok = false; break; }
+        uint32_t len = (uint32_t(len_be[0]) << 24) | (uint32_t(len_be[1]) << 16) |
+                       (uint32_t(len_be[2]) << 8) | uint32_t(len_be[3]);
+        if (len >= 0xfe) { ok = false; break; }
+        field.resize(len);
+        if (len > 0 && fread(&field[0], len, 1, f) != 1) { ok = false; break; }
+        ok = true;
+    }
+    fclose(f);
+    if (!ok) return false;
+    *out_barcode = field;
+    return true;
+}
+
+} // namespace
+
+bool find_waveform_path(std::string* out_path) {
+    out_path->clear();
+
+    // Fast path: postinst-waveform (run once at OS install/update time, by a
+    // separate "csl" tool) leaves exactly one already-matched .wbf in
+    // /var/lib/uboot/ on any device that's been through that flow, deleting
+    // any others there first - if that holds, skip the barcode dance
+    // entirely. Confirmed against a real device: its /var/lib/uboot/ held
+    // exactly one file, and a real xochitl log line showed it loading that
+    // exact same file.
+    std::vector<std::string> uboot_wbfs;
+    list_wbf_files("/var/lib/uboot/", &uboot_wbfs);
+    if (uboot_wbfs.size() == 1) {
+        std::cout << "find_waveform_path: single .wbf in /var/lib/uboot/, using it directly: "
+                  << uboot_wbfs[0] << std::endl;
+        *out_path = uboot_wbfs[0];
+        return true;
+    }
+
+    // Fallback: full barcode-based matching across all three search
+    // directories, mirroring get_waveform_path/FUN_00051fd0. Needed for
+    // older devices/layouts that never went through the postinst-waveform
+    // flow above - confirmed to still exist: an early-2020 rM2 image has
+    // several loose, unmatched .wbf files directly under
+    // /usr/share/remarkable/ and nothing in /var/lib/uboot/.
+    char target_tft_vid[3] = {'0', '0', '\0'};
+    int target_fpl_lot = -1;
+
+    std::string barcode;
+    if (read_factory_barcode(&barcode)) {
+        if (!decode_barcode(barcode, target_tft_vid, &target_fpl_lot)) {
+            target_tft_vid[0] = '0';
+            target_tft_vid[1] = '0';
+            target_tft_vid[2] = '\0';
+            target_fpl_lot = -1;
+        }
+    } else {
+        std::cerr << "find_waveform_path: unable to read barcode from /dev/mmcblk2boot1"
+                  << std::endl;
+    }
+
+    std::vector<std::string> candidates;
+    for (const char* dir : kWaveformSearchDirs) {
+        list_wbf_files(dir, &candidates);
+    }
+    if (candidates.empty()) {
+        std::cerr << "find_waveform_path: unable to find any waveform files!" << std::endl;
+        return false;
+    }
+
+    std::string exact_match, fpl_lot_only, tft_vid_only, last_seen;
+    for (const auto& path : candidates) {
+        uint16_t file_fpl_lot;
+        char file_tft_vid[3];
+        if (!read_wbf_match_fields(path, &file_fpl_lot, file_tft_vid)) continue;
+
+        last_seen = path;
+        bool fpl_lot_ok = target_fpl_lot != -1 && file_fpl_lot == (uint16_t)target_fpl_lot;
+        bool tft_vid_ok = strcmp(target_tft_vid, file_tft_vid) == 0;
+        if (fpl_lot_ok && tft_vid_ok) exact_match = path;
+        else if (fpl_lot_ok) fpl_lot_only = path;
+        else if (tft_vid_ok) tft_vid_only = path;
+    }
+
+    if (!exact_match.empty()) {
+        *out_path = exact_match;
+    } else if (!fpl_lot_only.empty()) {
+        std::cout << "Waveform file with correct TFT_VID not found, using fallback matching only on FPL_LOT: "
+                  << fpl_lot_only << std::endl;
+        *out_path = fpl_lot_only;
+    } else if (!tft_vid_only.empty()) {
+        std::cout << "Waveform file with correct FPL_LOT not found, using fallback matching only on TFT_VID: "
+                  << tft_vid_only << std::endl;
+        *out_path = tft_vid_only;
+    } else {
+        std::cout << "Waveform file with correct FPL_LOT and TFT_VID not found, using fallback: "
+                  << last_seen << std::endl;
+        *out_path = last_seen;
+    }
     return true;
 }
 

@@ -177,10 +177,14 @@ swtcon_init(void* dataBuffer, void* backBuffer, bool skipPidLock) {
     sb->pGammaTable = g_pGammaTableNative;
     sb->nSize = kStatebufferSize;
 
-    char* path1 = (char*)"/usr/share/remarkable/320_R467_AF4731_ED103TC2C6_VB3300-KCD_TC.wbf";
+    std::string waveform_path;
+    if (!find_waveform_path(&waveform_path)) {
+        std::cerr << "swtcon_init: unable to find any waveform files!" << std::endl;
+        return nullptr;
+    }
 
-    std::cout << "Calling load_waveform with path=" << path1 << std::endl;
-    if (!load_waveform(&queue->waveform, path1)) {
+    std::cout << "Calling load_waveform with path=" << waveform_path << std::endl;
+    if (!load_waveform(&queue->waveform, waveform_path.c_str())) {
         std::cerr << "swtcon_init: failed to load waveform natively" << std::endl;
         return nullptr;
     }

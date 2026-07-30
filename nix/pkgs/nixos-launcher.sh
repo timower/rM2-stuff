@@ -38,6 +38,10 @@ start_server() {
   mkdir -p "/run/nextroot/lib/firmware"
   cp -ar /lib/firmware/* "/run/nextroot/lib/firmware"
 
+  # Copy the e-ink waveform file(s), required by swtcon.
+  mkdir -p "/run/nextroot/var/lib/uboot"
+  cp /var/lib/uboot/*.wbf /usr/share/remarkable/*.wbf "/run/nextroot/var/lib/uboot/" || true
+
   # Save active partition
   swupdate -g >/run/active-partition
 
@@ -107,6 +111,10 @@ boot() {
   # Copy wifi networks config
   cp /home/root/.config/remarkable/wifi_networks.conf \
     /run/nextroot/etc/wpa_supplicant.conf || true
+
+  # Copy waveforms
+  mkdir -p "/run/nextroot/var/lib/uboot"
+  cp /var/lib/uboot/*.wbf /usr/share/remarkable/*.wbf "/run/nextroot/var/lib/uboot/" || true
 
   exit 0
 }
