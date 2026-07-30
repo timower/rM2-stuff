@@ -249,7 +249,7 @@ struct AddressInfo : public AddressInfoBase {
     } else if ((update.flags & 0x1) == 0) {
       // Not full update, set the default 'extraMode' to 6.
       res.flags = 0;
-      res.extraMode = 6;
+      res.extraMode = 9;
     } else {
       // Full update
       res.flags = 1;

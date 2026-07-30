@@ -48,7 +48,7 @@ struct AddressInfo : public AddressInfoBase {
     } else if ((params.flags & 0x1) == 0) {
       // Not full update, set the default 'extraMode' to 6.
       res.flags = 0;
-      res.pixel_mode = 6;
+      res.pixel_mode = 9;
     } else {
       // Full update
       res.flags = 1;
@@ -65,7 +65,8 @@ struct AddressInfo : public AddressInfoBase {
     // here rather than fight over it, and rely on suspendForXochitl()/
     // resumeForXochitl() (SIGSTOP/SIGCONT-coordinated, see Server.cpp's
     // pause()/resume()) for mutual exclusion instead.
-    if (swtcon_init(fb.getFb(), fb.getGrayBuffer(), /*skipPidLock=*/true) == nullptr) {
+    if (swtcon_init(fb.getFb(), fb.getGrayBuffer(), /*skipPidLock=*/true) ==
+        nullptr) {
       std::cerr << "swtcon_init failed\n";
       std::exit(EXIT_FAILURE);
     }
