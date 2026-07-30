@@ -69,12 +69,110 @@ pan_and_advance_frame(UpdateQueueGlobals* queue,
   pthread_mutex_unlock(&queue->displayTimingMutex);
 }
 
+// swtcon_suspend/swtcon_resume's gate - see swtcon.h for the full
+// rationale. A plain condvar-guarded flag, independent of any of the
+// UpdateQueueGlobals/FrameCursorGlobals state above (those get torn down
+// and recreated across swtcon_init/swtcon_shutdown cycles; this doesn't
+// need to, and default-initializing to "not suspended" keeps every
+// existing caller - qsgepaper-test, ServerSwtcon.cpp - working unchanged
+// without ever having to call swtcon_resume() themselves).
+namespace {
+pthread_mutex_t g_suspendMutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t g_suspendCond = PTHREAD_COND_INITIALIZER;
+bool g_workerSuspended = false;
+
+// Peeks the suspend flag without blocking - used by worker_thread_func at
+// points other than the main gate (step 1) to notice a suspend request
+// that arrived while it was blocked elsewhere in the loop. See
+// swtcon_suspend()'s comment for why the gate alone isn't sufficient.
+bool
+is_worker_suspended() {
+  pthread_mutex_lock(&g_suspendMutex);
+  bool suspended = g_workerSuspended;
+  pthread_mutex_unlock(&g_suspendMutex);
+  return suspended;
+}
+} // namespace
+
+void
+swtcon_suspend() {
+  pthread_mutex_lock(&g_suspendMutex);
+  g_workerSuspended = true;
+  pthread_mutex_unlock(&g_suspendMutex);
+
+  // The gate at the top of worker_thread_func's outer loop (step 1) is the
+  // only place that actually blocks on g_workerSuspended - but the worker
+  // thread spends most of its time NOT there, blocked instead inside step
+  // 5's wait for the next frame to advance to. Setting the flag alone
+  // doesn't wake it from that wait; if left alone, the next real update
+  // (or the loop's own 3s idle timeout) would eventually wake it anyway,
+  // and it would then run the rest of that iteration - including the real
+  // pan_and_advance_frame()/flash hardware calls in steps 7-8 - before
+  // ever looping back to check this flag. Confirmed empirically via
+  // tools/qsgepaper-preload/suspend_sync_probe.cpp: a Sync update
+  // submitted right after swtcon_suspend() still produced a real
+  // FBIOPAN/FBIOBLANK sequence before returning. Broadcasting workerCond
+  // here kicks the worker thread out of that wait immediately so the new
+  // break condition added to that loop (and the re-check right after it)
+  // can catch the suspend request before any hardware-touching step runs.
+  auto* queue = update_queue_globals();
+  pthread_mutex_lock(&queue->workerCondMutex);
+  pthread_cond_broadcast(&queue->workerCond);
+  pthread_mutex_unlock(&queue->workerCondMutex);
+}
+
+// See display.h - only wakes the gate, doesn't touch nIsFbBlanked.
+void
+wake_suspend_gate() {
+  pthread_mutex_lock(&g_suspendMutex);
+  g_workerSuspended = false;
+  pthread_cond_broadcast(&g_suspendCond);
+  pthread_mutex_unlock(&g_suspendMutex);
+}
+
+void
+swtcon_resume() {
+  // Force this instance's own nIsFbBlanked tracking to "blanked" before
+  // waking the worker thread, regardless of what it actually was when we
+  // suspended. It goes stale while suspended - whatever else drove the
+  // panel in the meantime (e.g. xochitl's own, independent swtcon
+  // instance, coordinated only via SIGSTOP/SIGCONT, not shared state) has
+  // no way to keep it in sync. Reporting "blanked" makes the worker
+  // thread's very next pan go through pan_and_unblank's real
+  // FBIOBLANK-unblank sequence instead of a bare pan_to_frame/
+  // pan_and_advance_frame call - confirmed on real hardware: a bare pan to
+  // an actually-blanked/powered-down panel is rejected by the driver
+  // ("Pan failed"), repeatedly, since nothing ever unblanks it. Re-
+  // unblanking an already-unblanked panel is a harmless no-op at the
+  // driver level, so this is safe even when the panel was never actually
+  // blanked while we were suspended.
+  //
+  // Only correct here because the worker thread is about to resume real,
+  // ongoing per-frame operation (steps 2/7/8/10 below) that will actually
+  // observe and act on this flag. swtcon_shutdown() (swtcon.cpp) needs the
+  // gate woken too but must NOT go through this force - see
+  // wake_suspend_gate(), which it calls instead.
+  framebuffer_globals()->nIsFbBlanked = 1;
+  wake_suspend_gate();
+}
+
 void*
 worker_thread_func(void*) {
   auto* queue = update_queue_globals();
   auto* cursor = frame_cursor_globals();
 
   for (;;) {
+    // Suspend gate: while suspended, block here doing nothing at all - no
+    // housekeeping, no reprime, no pan - see swtcon_suspend's comment in
+    // swtcon.h. Checked first, before anything below touches hardware.
+    pthread_mutex_lock(&g_suspendMutex);
+    while (g_workerSuspended && queue->workerThreadShutdown == 0)
+      pthread_cond_wait(&g_suspendCond, &g_suspendMutex);
+    pthread_mutex_unlock(&g_suspendMutex);
+
+    if (queue->workerThreadShutdown != 0)
+      pthread_exit(nullptr);
+
     cursor->bWorkerThreadBusy = 1;
 
     // 2. Pre-frame housekeeping: if unblanked, double-pan the init slot and
@@ -119,6 +217,15 @@ worker_thread_func(void*) {
           break;
         if (queue->flashRequested != 0)
           break;
+        // Not part of the byte-verified original algorithm (see this
+        // function's banner comment) - swtcon_suspend()/swtcon_resume()
+        // are this project's own addition, with no analog in the real
+        // library. Bail out of the wait as soon as a suspend is
+        // requested, same as the shutdown/flash checks above, so the
+        // re-check right after this loop (below) can skip steps 7-8
+        // instead of running one more real pan first.
+        if (is_worker_suspended())
+          break;
 
         if (!want_timed) {
           pthread_cond_wait(&queue->workerCond, &queue->workerCondMutex);
@@ -144,6 +251,17 @@ worker_thread_func(void*) {
 
     // 6.
     cursor->bWorkerThreadBusy = 0;
+
+    // Re-check suspend immediately after the wait above returns - not
+    // part of the original algorithm, see the break condition added to
+    // that loop above for why. A suspend request may have arrived while
+    // we were blocked in it; skip straight back to the top of the outer
+    // loop (which blocks properly on the real gate, step 1) instead of
+    // running steps 7-8's hardware-touching work first. Shutdown still
+    // takes priority (falls through to step 9 below as before) - only
+    // skip ahead here if we're suspended and NOT shutting down.
+    if (queue->workerThreadShutdown == 0 && is_worker_suspended())
+      continue;
 
     // 7. Un-blank and advance one frame, unless a flash or shutdown is
     // pending (both handled below instead).

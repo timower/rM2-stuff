@@ -112,6 +112,8 @@ extern void* g_pImageBufferNative;
 extern void* g_pScreenBufferNative;
 extern void* g_pStateBufferNative;
 extern void* g_pGammaTableNative;
+extern bool g_imageBufferOwnedNative;
+extern bool g_screenBufferOwnedNative;
 extern int g_nFbFdNative;
 extern int g_nFbSizeXNative;
 extern int g_nFbSizeYNative;
@@ -121,7 +123,7 @@ extern struct fb_var_screeninfo g_fbVarScreeninfoNative;
 extern struct fb_fix_screeninfo g_fbFixScreeninfoNative;
 
 uint16_t*
-swtcon_init(void* dataBuffer, void* backBuffer) {
+swtcon_init(void* dataBuffer, void* backBuffer, bool skipPidLock) {
   std::cout << "swtcon_init: initialization sequence starting..." << std::endl;
 
   if (swtcon_lib_impl_enabled()) {
@@ -148,7 +150,12 @@ swtcon_init(void* dataBuffer, void* backBuffer) {
   }
 
   // --- NATIVE INIT IMPLEMENTATION ---
-  if (create_pid_file() != 0) return nullptr;
+  // Caller (e.g. rm2fb's server, coordinating with xochitl's own separate,
+  // unmodified swtcon instance via SIGSTOP + idle notices instead of this
+  // lock - see tools/xochitl-mock-server) takes responsibility for
+  // ensuring only one swtcon instance actually drives hardware at a time
+  // when skipPidLock is set.
+  if (!skipPidLock && create_pid_file() != 0) return nullptr;
 
     if (init_statebuffer(dataBuffer, backBuffer) != 0) return nullptr;
 
@@ -379,6 +386,20 @@ swtcon_shutdown(int state_ptr_or_zero) {
   pthread_mutex_lock(&queue->workerCondMutex);
   pthread_cond_broadcast(&queue->workerCond);
   pthread_mutex_unlock(&queue->workerCondMutex);
+  // If the worker thread is currently parked in swtcon_suspend()'s gate
+  // (a separate condvar from workerCond above), the broadcast above alone
+  // wouldn't reach it and this pthread_join would hang forever. Only the
+  // gate itself needs waking here - NOT swtcon_resume(), which would also
+  // force nIsFbBlanked=1 and so make the "if (is_fb_blanked() == 0)
+  // blank_fb();" check below always skip a real blank on an ordinary
+  // shutdown that was never actually suspended. wake_suspend_gate() is
+  // safe regardless of which condvar the worker thread is actually blocked
+  // on - whichever one it's not waiting on is just a no-op - and it'll
+  // exit immediately via the shutdown check right after the gate, since
+  // workerThreadShutdown is already set above, before any pan/blank code
+  // runs - so there's no next pan cycle for nIsFbBlanked's staleness to
+  // affect either way.
+  wake_suspend_gate();
   pthread_join(queue->workerThread, nullptr);
 
   if (state_ptr_or_zero != 0) {
@@ -395,8 +416,11 @@ swtcon_shutdown(int state_ptr_or_zero) {
 
   free_statebuffer();
 
-  free(queue->dataBuffer);
-  free(queue->backBuffer);
+  // Only free what we actually allocated - a caller-supplied dataBuffer/
+  // backBuffer (see swtcon_init) is owned by the caller, e.g. rm2fb's
+  // server passing in its own mmap'd shared framebuffer.
+  if (g_imageBufferOwnedNative) free(queue->dataBuffer);
+  if (g_screenBufferOwnedNative) free(queue->backBuffer);
 
   close_fb();
   // dummy uninit

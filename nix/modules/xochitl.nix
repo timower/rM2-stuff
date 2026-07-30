@@ -5,8 +5,21 @@
   ...
 }:
 let
+  # Matches services.rm2fb.variant (nix/modules/rm2-display.nix) - the
+  # "swtcon" variant needs xochitl to preload the coexistence client
+  # (ClientSwtcon.cpp) instead of the by-address hooking one, so its own
+  # internal swtcon runs untouched rather than being hooked at all.
   xochitl-env = pkgs.callPackage ../pkgs/xochitlEnv.nix {
     preloadRm2fb = true;
+    preloadLibs = [
+      "/run/current-system/sw/lib/${
+        if config.services.rm2fb.variant == "swtcon" then
+          "librm2fb_client_swtcon.so"
+        else
+          "librm2fb_client.so"
+      }"
+    ]
+    ++ config.programs.xochitl.extraPreloadLibraries;
   };
   xochitl = pkgs.writeShellApplication {
     name = "xochitl";
@@ -77,6 +90,19 @@ in
 {
   options.programs.xochitl = {
     enable = lib.mkEnableOption "Enable Xochitl chroot wrapper";
+
+    extraPreloadLibraries = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      description = ''
+        Extra libraries (full store paths) to LD_PRELOAD into xochitl,
+        after the rm2fb client library. Test/debugging use only - e.g.
+        libioctl-dump.so to mock /dev/fb0 for the services.rm2fb.variant =
+        "swtcon" coexistence client in an environment without a real
+        framebuffer device (see nix/tests/default.nix's xochitl-swtcon) -
+        not meant for a real on-device configuration.
+      '';
+    };
   };
 
   config = lib.mkIf config.programs.xochitl.enable {
@@ -97,6 +123,28 @@ in
         }
       ];
     };
+
+    # xochitl ultimately runs as an unprivileged user here (rocket.service's
+    # User=, still in effect after xochitl-env's sudo+chroot --userspec
+    # dance drops back to it) - fine for the "hook" variant, since xochitl's
+    # own display code never actually runs there (fully intercepted by
+    # address before it would reach a scheduling call). The "swtcon"
+    # variant's whole point is letting xochitl's real, unmodified code run
+    # instead, including its own pthread_setschedparam(SCHED_FIFO) call for
+    # its display threads - which fails ("Unable to set thread priority:
+    # Operation not permitted") and crashes without this. RLIMIT_RTPRIO
+    # lets an unprivileged process use real-time scheduling up to this
+    # value without needing CAP_SYS_NICE - this is real hardware behavior,
+    # not just a VM/test artifact, since the same de-privileged launch path
+    # is used either way.
+    security.pam.loginLimits = lib.mkIf (config.services.rm2fb.variant == "swtcon") [
+      {
+        domain = "*";
+        type = "-";
+        item = "rtprio";
+        value = "99";
+      }
+    ];
 
     environment = {
       etc."draft/xochitl.draft".text = ''

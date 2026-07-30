@@ -16,8 +16,12 @@
 #include <csignal>
 #include <cstring>
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <iostream>
+#include <optional>
+#include <sys/file.h>
 #include <sys/stat.h>
+#include <type_traits>
 #include <unistd.h>
 
 #include <systemd/sd-daemon.h>
@@ -41,6 +45,31 @@ std::atomic_bool running = true; // NOLINT
 void
 onSigint(int num) {
   running = false;
+}
+
+// Guards against two rm2fb-server processes running concurrently.
+// Deliberately a separate lock file from swtcon's own /tmp/epd.lock
+// (see ServerSwtcon.cpp's skipPidLock=true) - that lock is reserved for
+// keeping this server's swtcon instance from fighting xochitl's own,
+// independent one over the same hardware, coordinated instead via
+// SIGSTOP/SIGCONT (suspendForXochitl/resumeForXochitl); it says nothing
+// about whether a second rm2fb-server itself is already running, which
+// skipPidLock=true no longer guards against on its own.
+FD
+acquireServerLock() {
+  // unistdpp::open only wraps the 2-arg (path, flags) form of ::open, so
+  // O_CREAT's mode argument needs the raw POSIX call here, same as
+  // swtcon's own create_pid_file() (libs/swtcon/init.cpp).
+  FD fd{ ::open("/tmp/rm2fb-server.lock", O_RDWR | O_CREAT, 0666) };
+  if (!fd.isValid()) {
+    perror("Failed to open /tmp/rm2fb-server.lock");
+    std::exit(EXIT_FAILURE);
+  }
+  if (flock(fd.fd, LOCK_EX | LOCK_NB) != 0) {
+    std::cerr << "Another rm2fb-server instance is already running\n";
+    std::exit(EXIT_FAILURE);
+  }
+  return fd;
 }
 
 // Starts a tcp server socket
@@ -88,7 +117,16 @@ getProcName(pid_t pid) {
 
   std::array<char, 512> buf;
   auto size = TRY(fd.readAll(buf.data(), buf.size()));
-  auto res = std::string(buf.data(), size);
+
+  // cmdline is a NUL-separated argv[] list (e.g. "xochitl\0--system\0" for
+  // the real xochitl) - only argv[0] matters here. std::filesystem::path
+  // treats an embedded NUL as an ordinary character, not a terminator, so
+  // without this the whole "xochitl\0--system" would get parsed as one
+  // filename component, comparing equal to nothing callers actually check
+  // against (see acceptUnixClient's isXochitl - this silently made it
+  // false for real xochitl, since it's always launched with args).
+  auto argv0Size = std::find(buf.data(), buf.data() + size, '\0') - buf.data();
+  auto res = std::string(buf.data(), argv0Size);
 
   return std::filesystem::path(res).filename().string();
 }
@@ -184,12 +222,36 @@ struct UnixClient {
   pid_t pid;
   bool dontPause;
 
+  // Whether this client runs its own, independent swtcon instance
+  // (currently only xochitl, via ClientSwtcon.cpp/rm2fb_client_swtcon)
+  // that needs SIGSTOP/SIGCONT + AddressInfoBase::suspendForXochitl()/
+  // resumeForXochitl() coordination instead of being driven through
+  // doUpdate(). Detected once at accept time via /proc/<pid>/cmdline.
+  bool isXochitl;
+  // Last IdleUpdate value reported over this client's control socket.
+  // Only meaningful when isXochitl.
+  bool idle = false;
+  // Set if this client's Init message arrived while it wasn't front yet -
+  // see requestSwitch()'s deferred-switch case (a fresh client connecting
+  // while the current front is a busy xochitl client doesn't get a
+  // buffer/frontPID/Init reply at all until that switch actually
+  // resolves). resume() replies to it (and clears it) once the client
+  // actually becomes front. For the common, non-deferred case this is
+  // always false by the time Init arrives, since resume() already runs
+  // synchronously within acceptUnixClient() well before the new client's
+  // Init message could have reached the server.
+  bool initPending = false;
+
   unistdpp::FD memFD;
 };
 
 struct Server : ControlInterface {
   const bool debugMode = checkDebugMode();
   const bool inQemu = !unistdpp::open("/dev/fb0", O_RDONLY).has_value();
+
+  // Held for the process's lifetime once acquired in the constructor -
+  // see acquireServerLock().
+  unistdpp::FD serverLockFd = acquireServerLock();
 
   AllUinputDevices uinputDevices;
   InputMonitor inputMonitor;
@@ -200,6 +262,26 @@ struct Server : ControlInterface {
   ControlServer controlServer;
 
   pid_t frontPID = 0;
+  // Whether this server's own swtcon is currently suspended in favor of
+  // an xochitl client that owns the panel (set alongside every
+  // suspendForXochitl() call, cleared alongside every resumeForXochitl()
+  // call). Needed because a paused-and-owning xochitl client can vanish
+  // (crash/disconnect) without ever going through pause() - see
+  // updateFrontClient() - so relying solely on findClient()-driven
+  // pause()/resume() pairing isn't enough to guarantee it gets resumed.
+  bool xochitlOwnsPanel = false;
+  // Switch target requested while the current front is a busy (non-idle)
+  // xochitl client - see requestSwitch(). Deliberately defers the *whole*
+  // switch (not just xochitl's freeze) until it reports idle: submitting
+  // updates to our own swtcon while its worker thread is suspended is not
+  // safe even setting aside the freeze-timing hazard itself - confirmed
+  // empirically that display_thread_func's own dispatch gate
+  // (nFrameCleanupCursor vs. gate_target) is paced against real panel
+  // progress (nLastPannedFrame, written only by the worker thread), so a
+  // second queued update while suspended can hang swtcon_wait() forever.
+  // Only one switch can be pending at a time; a newer request simply
+  // overwrites an older, still-unresolved one.
+  std::optional<pid_t> pendingSwitchTarget;
   std::vector<UnixClient> unixClients;
   std::vector<unistdpp::FD> tcpClients;
 
@@ -372,25 +454,63 @@ struct Server : ControlInterface {
     frontPID = client.pid;
     std::cerr << "Resuming: " << frontPID << "\n";
 
+    bool shouldUpdate = true;
     if (client.memFD.isValid()) {
       // Set FD and overwrite mapping.
       fb.setFD(std::move(client.memFD));
       fb.mmap();
 
+    } else if (!fb.isValid()) {
+      // Fresh client with no buffer of its own yet, and nothing currently
+      // live either (e.g. pause() just took the previous front's FD away,
+      // or this switch was deferred and never touched fb at all until
+      // now - see requestSwitch()) - give it a blank one to draw into.
+      if (auto err = fb.alloc(); !err.has_value()) {
+        std::cerr << "Error alloc FB: " << to_string(err.error()) << "\n";
+      }
+      shouldUpdate = !client.isXochitl;
+    }
+
+    if (shouldUpdate) {
       doUpdate(UpdateParams{
         .y1 = 0,
         .x1 = 0,
         .y2 = fb_height - 1,
         .x2 = fb_width - 1,
-        .flags = 0,
-        .waveform = WAVEFORM_MODE_GL16 | UpdateParams::ioctl_waveform_flag,
+        .flags = 1, // Set sync flag to ensure clean FB.
+        .waveform = WAVEFORM_MODE_GC16 | UpdateParams::ioctl_waveform_flag,
         .temperatureOverride = 0,
         .extraMode = 0,
       });
     }
 
+    // If this client's Init message arrived while it wasn't front yet
+    // (requestSwitch()'s deferred-switch case), it's still waiting on a
+    // reply - send it now that fb is finally set up correctly for it.
+    if (client.initPending) {
+      client.initPending = false;
+      fb.send(client.sock).or_else([&](auto err) {
+        std::cerr << "Error sending fb to resumed client: " << to_string(err)
+                  << "\n";
+      });
+    }
+
     if (!client.dontPause) {
       inputMonitor.flood();
+    }
+
+    // client is about to own the panel via its own swtcon instance - the
+    // doUpdate() above (through this server's own swtcon, still active at
+    // this point) already resynced the panel to client's buffer content and
+    // (now that it's Sync) is guaranteed to have fully completed, so it's
+    // safe to step this server's own swtcon out of the way before handing
+    // control over. Gated on !inQemu like initSWTCON()/doUpdate() - in
+    // qemu there's no real swtcon instance here to suspend (hookAddrs
+    // ->initThreads() is never called either), so calling into it would
+    // touch synchronization objects swtcon_init() never initialized.
+    if (client.isXochitl && !inQemu) {
+      hookAddrs->suspendForXochitl();
+      xochitlOwnsPanel = true;
     }
 
     kill(-getpgid(frontPID), SIGCONT);
@@ -425,7 +545,55 @@ struct Server : ControlInterface {
 
     it->memFD = fb.takeFD();
 
+    // pid no longer owns the panel - bring this server's own swtcon back
+    // so the next resume()'s doUpdate() has something to drive updates
+    // through. Gated on !inQemu - see resume()'s matching suspendForXochitl
+    // call for why.
+    if (it->isXochitl && !inQemu) {
+      hookAddrs->resumeForXochitl();
+      xochitlOwnsPanel = false;
+    }
+
     return true;
+  }
+
+  // Single entry point for switching the front client - acceptUnixClient()
+  // and switchTo() both funnel through this instead of calling pause()/
+  // resume() directly. If the current front is a busy (non-idle) xochitl
+  // client, defers the *entire* switch (not just its freeze) until it
+  // reports idle via IdleUpdate - see pendingSwitchTarget's comment for
+  // why nothing here can be done partially/early in that case. Otherwise
+  // behaves exactly like the old inline pause()+resume() sequence.
+  void requestSwitch(pid_t targetPid) {
+    // Verify the target still exists BEFORE touching the current front at
+    // all - pause(frontPID) below has real, only-partially-reversible
+    // side effects (SIGSTOP, buffer detach, resumeForXochitl()). Checking
+    // this only *after* calling pause() (an earlier version of this
+    // function did) left the front stopped with nothing resumed to take
+    // its place whenever a deferred switch's target had vanished by the
+    // time it finally resolved - confirmed on the emulator: xochitl stuck
+    // in SIGSTOP state after its pending switch target crashed before it
+    // ever went idle.
+    auto targetIt = findClient(targetPid);
+    if (targetIt == unixClients.end()) {
+      std::cerr << "requestSwitch: target " << targetPid << " gone\n";
+      return;
+    }
+
+    if (frontPID != 0) {
+      auto frontIt = findClient(frontPID);
+      if (frontIt != unixClients.end() && frontIt->isXochitl &&
+          !frontIt->idle) {
+        pendingSwitchTarget = targetPid;
+        std::cerr << "Deferring switch to " << targetPid
+                  << ", xochitl still busy\n";
+        return;
+      }
+
+      pause(frontPID);
+    }
+
+    resume(*targetIt);
   }
 
   unistdpp::Result<std::vector<Client>> getClients() override {
@@ -459,6 +627,12 @@ struct Server : ControlInterface {
     return it->memFD.fd;
   }
 
+  // Returns success once the switch is *requested*, not necessarily once
+  // it's complete - it may be deferred (see requestSwitch()) if the
+  // current front is a busy xochitl client. Matches how a fresh
+  // acceptUnixClient() connection already behaves (fire-and-forget), and
+  // avoids blocking this control-socket RPC (and so callers like
+  // rm2fbctl) for an unbounded time.
   unistdpp::Result<void> switchTo(pid_t pid) override {
     if (pid == frontPID) {
       return {};
@@ -469,10 +643,7 @@ struct Server : ControlInterface {
       return tl::unexpected(std::errc::bad_file_descriptor);
     }
 
-    if (frontPID != 0) {
-      pause(frontPID);
-    }
-    resume(*it);
+    requestSwitch(pid);
     return {};
   }
 
@@ -487,11 +658,45 @@ struct Server : ControlInterface {
   }
 
   void updateFrontClient() {
+    // If the client we were deferring a switch to has disconnected before
+    // ever becoming front, it's not just moot - it can also be the pid a
+    // still-connected, still-waiting client (initPending=true) was
+    // silently overwritten by (see requestSwitch()'s "newer overwrites
+    // older" comment). Promote that waiting client instead of just
+    // dropping the request, so it isn't stranded forever with no future
+    // event left to ever resume it. requestSwitch() itself decides whether
+    // this can resolve immediately (front already idle/gone) or has to
+    // defer again (front still busy) - same as any other switch request.
+    if (pendingSwitchTarget &&
+        findClient(*pendingSwitchTarget) == unixClients.end()) {
+      pendingSwitchTarget.reset();
+      auto waiting = std::find_if(unixClients.begin(),
+                                  unixClients.end(),
+                                  [](auto& c) { return c.initPending; });
+      if (waiting != unixClients.end()) {
+        requestSwitch(waiting->pid);
+      }
+    }
+
     if (std::any_of(unixClients.begin(),
                     unixClients.end(),
                     [this](auto& client) { return client.pid == frontPID; })) {
       return;
     }
+
+    // The front client is gone from unixClients (socket closed, dropped by
+    // dropClients()) without ever going through pause() - if it was an
+    // xochitl client that owned the panel, this server's own swtcon is
+    // still suspended and needs to be brought back before anything below
+    // tries to doUpdate() through it again.
+    if (xochitlOwnsPanel) {
+      hookAddrs->resumeForXochitl();
+      xochitlOwnsPanel = false;
+    }
+
+    // Whatever we were waiting on it to go idle for is moot now - it's
+    // gone, not just paused.
+    pendingSwitchTarget.reset();
 
     if (unixClients.empty()) {
       frontPID = 0;
@@ -521,28 +726,42 @@ struct Server : ControlInterface {
 
     std::cerr << "New unix client: " << std::dec << peerCred.pid << "!\n";
 
-    // Pause first, so memFD gets taken.
-    if (frontPID != 0 && peerCred.pid != frontPID) {
-      pause(frontPID);
-    }
-
-    // Alloc new memFD if needed.
-    if (!fb.isValid()) {
-      if (auto err = fb.alloc(); !err.has_value()) {
-        std::cerr << "Error alloc FB: " << to_string(err.error()) << "\n";
-        return false;
+    // A live, not-yet-pruned stale entry for this same pid (e.g. a fast
+    // reconnect from the same client before dropClients() noticed the old
+    // socket's HUP, or a pid reused by an unrelated process before that
+    // happened) would otherwise alias findClient(pid)'s first-match lookup
+    // - used by requestSwitch() below - onto the OLD entry instead of the
+    // one about to be added. Close its socket and run it through the same
+    // dropClients()/updateFrontClient() path a real disconnect goes
+    // through (resumeForXochitl() if it owned the panel, promoting a
+    // waiting pendingSwitchTarget, etc.) before adding the new one, rather
+    // than duplicating that cleanup here.
+    for (auto& client : unixClients) {
+      if (client.pid == peerCred.pid) {
+        client.sock.close();
       }
     }
+    if (dropClients()) {
+      updateFrontClient();
+    }
+
+    bool isXochitl = getProcName(peerCred.pid).value_or("") == "xochitl";
 
     unixClients.emplace_back(UnixClient{
       .sock = std::move(*sock),
       .pid = peerCred.pid,
       .dontPause = false,
+      .isXochitl = isXochitl,
 
       .memFD = FD{},
     });
 
-    frontPID = unixClients.back().pid;
+    // Register first (above), so requestSwitch() can find this client by
+    // pid - it handles everything else (pausing the old front if any,
+    // buffer handoff, frontPID, suspendForXochitl if this new client is
+    // xochitl), including deferring all of it if the current front is a
+    // busy xochitl client instead of doing any of it here early.
+    requestSwitch(peerCred.pid);
 
     return true;
   }
@@ -560,16 +779,53 @@ struct Server : ControlInterface {
   }
 
   void readUnixSock(UnixClient& client) {
-    client.sock.readAll<UpdateParams>()
-      .and_then([&](auto msg) {
-        // Emtpy message, just to check init.
-        if (msg.x1 == msg.x2 && msg.y1 == msg.y2) {
-          std::cerr << "Got init check!\n";
-          return fb.send(client.sock);
-        }
+    recvMessage<UnixClientMsg>(client.sock)
+      .and_then([&](auto msg) -> unistdpp::Result<void> {
+        return std::visit(
+          [&](auto& m) -> unistdpp::Result<void> {
+            using T = std::decay_t<decltype(m)>;
+            if constexpr (std::is_same_v<T, Init>) {
+              std::cerr << "Got init check!\n";
+              if (client.pid != frontPID) {
+                // Not front yet - a deferred switch (requestSwitch()) is
+                // holding this client back until the current front
+                // (necessarily a busy xochitl client) goes idle. Hold the
+                // reply too - fb is still the outgoing front's, not this
+                // client's - resume() sends it once this client actually
+                // becomes front.
+                client.initPending = true;
+                return {};
+              }
+              return fb.send(client.sock);
+            } else if constexpr (std::is_same_v<T, UpdateParams>) {
+              if (client.pid != frontPID) {
+                // Only the front client's updates should reach the shared
+                // swtcon instance. It may currently be suspended (xochitl
+                // owns the panel - see suspendForXochitl()), in which case
+                // swtcon_wait() would block forever and hang this
+                // server's single poll() thread for every client.
+                return client.sock.writeAll(false);
+              }
+              bool res = doUpdate(m);
+              return client.sock.writeAll(res);
+            } else {
+              // IdleUpdate.
+              if (!client.isXochitl) {
+                std::cerr << "Unexpected IdleUpdate on a regular client\n";
+                return {};
+              }
+              client.idle = m.val;
 
-        bool res = doUpdate(msg);
-        return client.sock.writeAll(res);
+              if (m.val && pendingSwitchTarget && client.pid == frontPID) {
+                pid_t target = *pendingSwitchTarget;
+                pendingSwitchTarget.reset();
+                requestSwitch(target);
+              }
+
+              return {};
+            }
+          },
+          msg);
       })
       .or_else([&](auto err) {
         std::cerr << "Unix client fail: " << to_string(err) << "\n";

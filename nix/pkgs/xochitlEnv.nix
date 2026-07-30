@@ -6,6 +6,13 @@
   coreutils,
 
   preloadRm2fb ? false,
+  # Full paths of libraries to LD_PRELOAD, in order - only meaningful when
+  # preloadRm2fb is true. Defaults to the standard by-address hooking
+  # client; callers pick the coexistence variant (librm2fb_client_swtcon.so)
+  # and/or append extra libraries (e.g. libioctl-dump.so, to mock /dev/fb0
+  # in an environment without real hardware) via this list - see
+  # nix/modules/xochitl.nix.
+  preloadLibs ? [ "/run/current-system/sw/lib/librm2fb_client.so" ],
   extraEnv ? { },
 }:
 let
@@ -15,7 +22,7 @@ let
   }
   // extraEnv
   // lib.optionalAttrs preloadRm2fb {
-    LD_PRELOAD = "/run/current-system/sw/lib/librm2fb_client.so";
+    LD_PRELOAD = lib.concatStringsSep ":" preloadLibs;
   };
 
   # Generate '${FOO+FOO="$FOO"}' which ensures it's not an error if the variable isn't set.

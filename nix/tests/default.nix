@@ -132,6 +132,20 @@ rec {
     '';
   };
 
+  # Same scenario as `yaft-user`, but with services.rm2fb.variant = "swtcon"
+  # - yaft is a regular (non-xochitl) client, always preloading the plain
+  # rm2fb_client regardless of variant (see wrapWithClient.nix/xochitl.nix's
+  # variant-only distinction), so this only exercises the server half of
+  # the toggle: does rm2fb_server_swtcon start and serve a regular client
+  # correctly. Reuses the same testScript/reference screenshot.
+  yaft-swtcon = yaft-user.override {
+    modules = [
+      ../modules/remarkable.nix
+      ../template/config.nix
+      { services.rm2fb.variant = "swtcon"; }
+    ];
+  };
+
   koreader = mkTest {
     modules = [
       ../modules/remarkable.nix
@@ -164,6 +178,54 @@ rec {
     '';
   };
 
+  # Same scenario as `xochitl`, but with services.rm2fb.variant = "swtcon"
+  # (nix/modules/rm2-display.nix) - the native swtcon reimplementation
+  # server (rm2fb_server_swtcon) paired with xochitl's coexistence client
+  # (librm2fb_client_swtcon.so, ClientSwtcon.cpp) instead of the by-address
+  # hooking pair. Reuses the same testScript/reference screenshot: both
+  # variants are expected to render xochitl identically.
+  #
+  # Unlike the "hook" pair above, the coexistence client deliberately does
+  # NOT redirect xochitl's own /dev/fb0 access (that's the whole point -
+  # xochitl drives the real framebuffer itself) - so unlike `xochitl`
+  # above, this VM needs a working /dev/fb0 for xochitl's own (real,
+  # unmodified) display init to succeed. This emulator doesn't have real
+  # e-ink hardware, so mock it the same way this project's own swtcon
+  # testing already does on-device (see CLAUDE.md's Building/Testing
+  # section) - LD_PRELOAD libioctl-dump.so into xochitl too, after the
+  # coexistence client so its ioctl()/open() hooks chain into the mock via
+  # RTLD_NEXT instead of a real (nonexistent) kernel driver.
+  xochitl-swtcon = xochitl.override {
+    modules = [
+      ../modules/remarkable.nix
+      ../template/config.nix
+      { services.rm2fb.variant = "swtcon"; }
+      (
+        { pkgs, ... }:
+        {
+          programs.xochitl.extraPreloadLibraries = [
+            "${pkgs.rm2-stuff.ioctl_dump}/lib/libioctl-dump.so"
+          ];
+
+          # Test-only (the rtprio grant itself now lives in xochitl.nix,
+          # applied whenever services.rm2fb.variant is "swtcon" - it's real
+          # hardware behavior, not just a VM artifact): raise the core
+          # limit so a crash actually produces a coredump instead of
+          # "Resource limits disable core dumping", for debugging this test
+          # specifically.
+          security.pam.loginLimits = [
+            {
+              domain = "*";
+              type = "-";
+              item = "core";
+              value = "unlimited";
+            }
+          ];
+        }
+      )
+    ];
+  };
+
   xochitl-nouser = xochitl.override {
     modules = [
       ../modules/remarkable.nix
@@ -190,5 +252,19 @@ rec {
       done
       wait_for "startup.png"
     '';
+  };
+
+  # Same install/reboot scenario as `installer`, but with the resulting
+  # NixOS config carrying services.rm2fb.variant = "swtcon" - checks that
+  # rm2fb_server_swtcon comes up cleanly as a systemd service after a real
+  # install+reboot (reaching the same "startup.png" launcher screen), not
+  # just when directly booted via mkTest's default bootNixos = true path
+  # like the other *-swtcon checks above.
+  installer-swtcon = installer.override {
+    modules = [
+      ../modules/remarkable.nix
+      ../template/config.nix
+      { services.rm2fb.variant = "swtcon"; }
+    ];
   };
 }

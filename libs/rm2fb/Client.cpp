@@ -59,21 +59,10 @@ setupHooks() {
   return result ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-// Sends an empty message to make sure the rm2fb server is listening and has
-// started the SWTCON.
+// Sends Init to make sure the rm2fb server is listening and has started
+// the SWTCON.
 unistdpp::Result<void>
 doInit(SharedFB& fb) {
-  constexpr auto init_params = UpdateParams{
-    .y1 = 0,
-    .x1 = 0,
-    .y2 = 0,
-    .x2 = 0,
-    .flags = 0,
-    .waveform = 0,
-    .temperatureOverride = 0,
-    .extraMode = 0,
-  };
-
   if (fb.isValid()) {
     return {};
   }
@@ -85,7 +74,7 @@ doInit(SharedFB& fb) {
     std::exit(EXIT_FAILURE);
   }
 
-  return sock.writeAll(init_params)
+  return sendMessage(sock, UnixClientMsg{ Init{} })
     .and_then([&] { return fb.recv(sock); })
     .or_else([&](auto err) {
       std::cerr << "Error sending: " << unistdpp::to_string(err) << "\n";
@@ -102,7 +91,7 @@ sendUpdate(const UpdateParams& params) {
     return false;
   }
 
-  return clientSock.writeAll(params)
+  return sendMessage(clientSock, UnixClientMsg{ params })
     .and_then([&]() { return clientSock.readAll<bool>(); })
     .or_else([&](auto err) {
       std::cerr << "Error sending: " << unistdpp::to_string(err) << "\n";

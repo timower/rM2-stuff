@@ -63,6 +63,33 @@ struct PowerButton {
 
 using ClientMsg = std::variant<Input, GetUpdate, PowerButton>;
 
+// The per-client unix control-socket protocol (getControlSocket() client
+// side, acceptUnixClient()/readUnixSock() server side) - every message on
+// that connection, tagged, rather than a bare untagged UpdateParams write
+// plus a degenerate empty-rect sentinel standing in for "this is actually
+// an init request, not a real update."
+//
+// Init: the first message any client sends, replacing the old
+// x1==x2&&y1==y2 UpdateParams sentinel - the server replies with the
+// shared framebuffer's fd (SharedFB::send/recv).
+//
+// IdleUpdate: sent by xochitl's client library (ClientSwtcon.cpp) after
+// Init, whenever its own swtcon blanks/unblanks the panel past the
+// startup grace window - see ClientSwtcon.cpp's handleBlankTransition.
+// val is true for idle (panel blanked, worker thread parked, safe to
+// pause xochitl), false for un-idle. Regular (non-xochitl) clients never
+// send this.
+//
+// UpdateParams: a real update request, exactly as before - the server
+// replies with a bool ack. Regular (non-xochitl) clients only.
+struct Init {};
+
+struct IdleUpdate {
+  bool val;
+};
+
+using UnixClientMsg = std::variant<Init, IdleUpdate, UpdateParams>;
+
 template<typename... T>
 unistdpp::Result<void>
 sendMessage(const unistdpp::FD& fd, const std::variant<T...>& msg) {

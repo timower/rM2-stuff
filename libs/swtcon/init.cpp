@@ -31,6 +31,16 @@ void* g_pScreenBufferNative = nullptr;
 void* g_pStateBufferNative = nullptr;
 void* g_pGammaTableNative = nullptr;
 
+// Whether g_pImageBufferNative/g_pScreenBufferNative were malloc'd/calloc'd
+// here (and so need freeing at shutdown) versus supplied externally by the
+// caller (e.g. rm2fb's server passing in its own mmap'd shared framebuffer
+// - see swtcon_init's dataBuffer/backBuffer params). free()ing an
+// externally-supplied buffer would hand a non-heap pointer to the
+// allocator - confirmed on real hardware as an immediate "free(): invalid
+// pointer" abort in swtcon_shutdown.
+bool g_imageBufferOwnedNative = false;
+bool g_screenBufferOwnedNative = false;
+
 int g_nPidFdNative = -1;
 int g_nFbFdNative = -1;
 int g_nFbSizeXNative = 0;
@@ -70,11 +80,13 @@ int init_statebuffer(void* dataBuffer, void* backBuffer) {
     size_t sz = kStatebufferSize;
 
     // g_pDataBuffer: 16-bit image working buffer, returned to the caller.
+    g_imageBufferOwnedNative = dataBuffer == nullptr;
     g_pImageBufferNative = dataBuffer == nullptr ? malloc(sz) : dataBuffer;
     if (!g_pImageBufferNative) return -1;
     memset(g_pImageBufferNative, 0xff, sz);
 
     // g_pBackBuffer: full-screen 1 byte/pixel back buffer.
+    g_screenBufferOwnedNative = backBuffer == nullptr;
     g_pScreenBufferNative = backBuffer == nullptr
                                ? calloc((size_t)kScreenWidth * kScreenHeight, 1)
                                : backBuffer;

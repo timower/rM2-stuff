@@ -65,6 +65,23 @@ add_library(rm2fb_client_no_hook SHARED Client.cpp IOCTL.cpp ImageHook.cpp)
 target_link_libraries(rm2fb_client_no_hook PRIVATE rm2fb_lib)
 target_compile_definitions(rm2fb_client_no_hook PRIVATE NO_HOOKING)
 
+# rm2fb client, xochitl-coexistence variant (see ClientSwtcon.cpp) - lets
+# xochitl run its own statically-linked swtcon completely untouched instead
+# of the by-address per-xochitl-version hooking rm2fb_client above uses.
+# Deliberately not linked against rm2fb_lib, which bundles Versions/*.cpp
+# and evdev - PreloadHooks.cpp (the only piece of rm2fb_lib this needs, for
+# the malloc/calloc redirect) is compiled directly instead, so this target
+# has zero Versions.cpp/Frida dependency. Only builds where swtcon does
+# (32-bit ARM target - see libs/swtcon/CMakeLists.txt), since it's meant to
+# pair with rm2fb_server_swtcon.
+if(TARGET swtcon)
+  add_library(rm2fb_client_swtcon SHARED ClientSwtcon.cpp IOCTL.cpp
+                                         ImageHook.cpp PreloadHooks.cpp)
+  target_link_libraries(rm2fb_client_swtcon PRIVATE rm2fb_headers linux::mxcfb)
+  set_target_properties(rm2fb_client_swtcon PROPERTIES VERSION "1.0.0"
+                                                        SOVERSION "1")
+endif()
+
 # Utility target that builds both the client and server libs.
 add_custom_target(rm2fb DEPENDS rm2fb_client rm2fb_server)
 
@@ -94,6 +111,22 @@ if(ADD_OPT_PREFIX)
     FILES "${CMAKE_BINARY_DIR}/librm2fb_client.so.1"
     DESTINATION usr/lib
     COMPONENT rm2display)
+endif()
+
+# Not built (and so not installed) on non-32-bit targets - see swtcon's own
+# guard in libs/swtcon/CMakeLists.txt.
+if(TARGET rm2fb_server_swtcon)
+  install(
+    TARGETS rm2fb_server_swtcon
+    COMPONENT rm2display
+    DESTINATION ${OPT_PREFIX}bin)
+endif()
+
+if(TARGET rm2fb_client_swtcon)
+  install(
+    TARGETS rm2fb_client_swtcon
+    COMPONENT rm2display
+    DESTINATION ${OPT_PREFIX}lib)
 endif()
 
 install(

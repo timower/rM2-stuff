@@ -54,14 +54,37 @@ enum UpdateFlags {
 // dataBuffer/backBuffer optionally supply pre-allocated storage for the
 // image working buffer / full-screen back buffer (e.g. rm2fb's shared
 // framebuffer) instead of letting swtcon allocate its own - see
-// init_statebuffer.
-uint16_t* swtcon_init(void* dataBuffer = nullptr, void* backBuffer = nullptr);
+// init_statebuffer. skipPidLock skips the /tmp/epd.lock exclusive flock -
+// for a caller (e.g. rm2fb's server) that coordinates mutual exclusion
+// with another, separate swtcon instance itself (e.g. xochitl's own
+// statically-linked swtcon, via SIGSTOP + idle notices - see
+// tools/xochitl-mock-server) rather than relying on this lock, which a
+// second concurrently-running swtcon instance would otherwise always lose.
+uint16_t* swtcon_init(void* dataBuffer = nullptr,
+                       void* backBuffer = nullptr,
+                       bool skipPidLock = false);
 
 // Lock, update, unlock/post, and wait.
 void swtcon_lock();
 void swtcon_update(update_data* data);
 void swtcon_unlock_post();
 void swtcon_wait();
+
+// Suspends/resumes worker_thread_func's autonomous housekeeping (including
+// its periodic ~60s reprime, which touches the panel - see prime_display -
+// even with nothing queued) without a full shutdown/reinit. While
+// suspended, the worker thread blocks entirely: no reprime, no pan, no
+// housekeeping of any kind - display_thread_func is purely reactive (only
+// ever woken by the worker thread's own tick), so gating the worker thread
+// alone is sufficient to guarantee zero autonomous hardware access. Lets
+// an instance stay alive-but-suspended (skipping re-init/waveform-reload
+// overhead) while a *different* swtcon instance (e.g. xochitl's own,
+// coordinated via SIGSTOP - see tools/xochitl-mock-server) actually drives
+// hardware, then resume without a fresh swtcon_init(). Only valid after
+// swtcon_init() has returned; a redundant call (e.g. resume when not
+// suspended) is a no-op.
+void swtcon_suspend();
+void swtcon_resume();
 
 // Re-implemented natively
 void swtcon_shutdown(int state_ptr_or_zero);

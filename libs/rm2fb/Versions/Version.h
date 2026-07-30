@@ -17,6 +17,20 @@ public:
   virtual bool doUpdate(const UpdateParams& params) const = 0;
   virtual void shutdownThreads() const = 0;
 
+  // Hooks for coexisting with a client that runs its own, independent
+  // swtcon instance (currently only xochitl, via ClientSwtcon.cpp/
+  // rm2fb_client_swtcon) rather than being driven through doUpdate().
+  // Called by Server.cpp around pausing/resuming that client, so this
+  // server's own swtcon instance (if any) stays out of the panel's way
+  // while the coexisting client owns it, and drives it again once that
+  // client is paused. No-op by default: only the swtcon-backed server
+  // (ServerSwtcon.cpp) owns a swtcon instance of its own to suspend/
+  // resume here - the by-address hooking implementations don't have a
+  // separate swtcon instance, since they drive xochitl's own qsgepaper
+  // directly via doUpdate() instead.
+  virtual void suspendForXochitl() const {}
+  virtual void resumeForXochitl() const {}
+
   // Client API:
   virtual bool installHooks(UpdateFn* newUpdate) const = 0;
 

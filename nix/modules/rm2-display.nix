@@ -37,12 +37,42 @@ let
     done
   '';
 
+  serverBinary = if config.services.rm2fb.variant == "swtcon" then "rm2fb_server_swtcon" else "rm2fb_server";
 in
 {
   options = {
     services.rm2fb = {
       # TODO: enable by default?
       enable = lib.mkEnableOption "Enable own rm2fb server";
+
+      variant = lib.mkOption {
+        type = lib.types.enum [
+          "hook"
+          "swtcon"
+        ];
+        default = "hook";
+        description = ''
+          Which rm2fb server/client implementation to run:
+
+          - "hook": the original implementation. The server drives updates
+            by dlopen'ing libqsgepaper.so (rm2fb_server); xochitl's own
+            internal update/init/shutdown calls are intercepted by address,
+            per xochitl version (librm2fb_client.so).
+          - "swtcon": the from-scratch native swtcon reimplementation. The
+            server (rm2fb_server_swtcon) drives the display without ever
+            dlopen'ing libqsgepaper.so; xochitl runs its own, separate
+            swtcon instance completely untouched
+            (librm2fb_client_swtcon.so), coordinated with the server via
+            SIGSTOP/SIGCONT and an idle/un-idle handshake instead of being
+            hooked at all. See CLAUDE.md's "Swtcon Re-Implementation" notes
+            and libs/rm2fb/ClientSwtcon.cpp.
+
+          Both halves (server binary, xochitl's preloaded client library)
+          switch together - mixing them isn't a supported combination, since
+          the "swtcon" client deliberately drives the real framebuffer
+          itself instead of going through the "hook" server's virtual one.
+        '';
+      };
     };
 
     hardware.rm2display = {
@@ -95,7 +125,7 @@ in
         serviceConfig = {
           Type = "simple";
 
-          ExecStart = "${lib.getExe xochitl-env} ${lib.getExe' rm2-server-pkg "rm2fb_server"}";
+          ExecStart = "${lib.getExe xochitl-env} ${lib.getExe' rm2-server-pkg serverBinary}";
 
           Restart = "on-failure";
           RestartSec = "5";
