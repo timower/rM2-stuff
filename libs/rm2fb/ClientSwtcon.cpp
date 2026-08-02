@@ -42,9 +42,9 @@
 #include <unistdpp/error.h>
 #include <unistdpp/socket.h>
 
+#include <csignal>
 #include <cstdint>
 #include <cstring>
-#include <csignal>
 #include <dlfcn.h>
 #include <iomanip>
 #include <iostream>
@@ -85,7 +85,7 @@ getControlSocket() {
 // Sends Init to make sure the rm2fb server is listening and has started
 // the SWTCON, then receives the shared framebuffer.
 unistdpp::Result<void>
-doInit(SharedFB& fb) {
+doInit(SharedFB& fb, bool ownSwtcon) {
   if (fb.isValid()) {
     return {};
   }
@@ -96,7 +96,7 @@ doInit(SharedFB& fb) {
     std::exit(EXIT_FAILURE);
   }
 
-  return sendMessage(sock, UnixClientMsg{ Init{} })
+  return sendMessage(sock, UnixClientMsg{ Init{ .ownSwtcon = ownSwtcon } })
     .and_then([&] { return fb.recv(sock); })
     .or_else([&](auto err) {
       std::cerr << "Error sending: " << unistdpp::to_string(err) << "\n";
@@ -117,7 +117,7 @@ int g_realFbFd = -1;
 SharedFB&
 xochitlFb() {
   static const bool ok = [] {
-    auto res = doInit(SharedFB::getInstance());
+    auto res = doInit(SharedFB::getInstance(), true);
     if (!res) {
       std::cerr << "rm2fb: failed receiving shared framebuffer\n";
       return false;
@@ -231,7 +231,7 @@ int
 open64(const char* pathname, int flags, mode_t mode = 0) {
   if (!inXochitl && pathname == std::string("/dev/fb0")) {
     auto& fb = SharedFB::getInstance();
-    unistdpp::fatalOnError(doInit(fb), "init FB failed");
+    unistdpp::fatalOnError(doInit(fb, false), "init FB failed");
     return fb.getFd();
   }
 
@@ -249,7 +249,7 @@ int
 open(const char* pathname, int flags, mode_t mode = 0) {
   if (!inXochitl && pathname == std::string("/dev/fb0")) {
     auto& fb = SharedFB::getInstance();
-    unistdpp::fatalOnError(doInit(fb), "init FB failed");
+    unistdpp::fatalOnError(doInit(fb, false), "init FB failed");
     return fb.getFd();
   }
 

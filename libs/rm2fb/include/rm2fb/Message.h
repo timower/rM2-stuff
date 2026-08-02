@@ -82,7 +82,11 @@ using ClientMsg = std::variant<Input, GetUpdate, PowerButton>;
 //
 // UpdateParams: a real update request, exactly as before - the server
 // replies with a bool ack. Regular (non-xochitl) clients only.
-struct Init {};
+struct Init {
+  // True if this client manages its own swtcon and will send idle update
+  // messages.
+  bool ownSwtcon;
+};
 
 struct IdleUpdate {
   bool val;

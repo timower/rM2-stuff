@@ -9,7 +9,7 @@
 constexpr auto touch_flood_size = 8 * 512 * 4;
 constexpr auto key_flood_size = 8 * 64;
 
-auto
+inline auto
 mkEvent(int a, int b, int v) {
   input_event r{};
   r.type = a;
@@ -20,7 +20,7 @@ mkEvent(int a, int b, int v) {
   return r;
 }
 
-auto*
+inline auto*
 getTouchFlood() {
   static const auto* floodBuffer = [] {
     // NOLINTNEXTLINE
@@ -36,7 +36,7 @@ getTouchFlood() {
   return floodBuffer;
 }
 
-auto*
+inline auto*
 getKeyFlood() {
   static const auto* floodBuffer = [] {
     // NOLINTNEXTLINE

@@ -14,20 +14,29 @@
 
 using namespace unistdpp;
 
-unistdpp::Result<void>
-SharedFB::alloc() {
-  fd = unistdpp::FD(memfd_create("swtfb", MFD_CLOEXEC));
+unistdpp::Result<unistdpp::FD>
+allocBlankBuffer() {
+  FD fd{ memfd_create("swtfb", MFD_CLOEXEC) };
   if (!fd.isValid()) {
     return tl::unexpected(getErrno());
   }
   TRY(unistdpp::ftruncate(fd, total_size));
 
-  TRY(mmap());
-
+  // Short-lived mapping just to zero it out - unlike SharedFB::mmap(),
+  // this one isn't the fixed, currently-active shared address, so it's
+  // unmapped again as soon as it goes out of scope.
+  auto mem = TRY(unistdpp::mmap(
+    nullptr, total_size, PROT_WRITE | PROT_READ, MAP_SHARED, fd, 0));
   memset(mem.get(), UINT8_MAX, fb_size);
   memset((char*)mem.get() + fb_size, 0, grayscale_size);
 
-  return {};
+  return fd;
+}
+
+unistdpp::Result<void>
+SharedFB::alloc() {
+  fd = TRY(allocBlankBuffer());
+  return mmap();
 }
 
 unistdpp::Result<void>

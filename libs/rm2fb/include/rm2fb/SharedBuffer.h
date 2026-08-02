@@ -13,6 +13,13 @@ constexpr int fb_size = fb_width * fb_height * fb_pixel_size;
 constexpr int grayscale_size = fb_width * fb_height;
 constexpr int total_size = fb_size + grayscale_size;
 
+// Allocates a fresh, blank buffer with the same size/layout as SharedFB,
+// but not tied to a SharedFB instance and not left mapped - for handing
+// out to a client that isn't (yet, or ever) the currently-active one, see
+// UnixClient::buffer in Server.cpp.
+unistdpp::Result<unistdpp::FD>
+allocBlankBuffer();
+
 struct SharedFB {
   bool isValid() const { return fd.isValid(); }
   int getFd() const { return fd.fd; }

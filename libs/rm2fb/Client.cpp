@@ -74,7 +74,7 @@ doInit(SharedFB& fb) {
     std::exit(EXIT_FAILURE);
   }
 
-  return sendMessage(sock, UnixClientMsg{ Init{} })
+  return sendMessage(sock, UnixClientMsg{ Init{ .ownSwtcon = false } })
     .and_then([&] { return fb.recv(sock); })
     .or_else([&](auto err) {
       std::cerr << "Error sending: " << unistdpp::to_string(err) << "\n";

@@ -1,7 +1,8 @@
 project(unit-tests)
 
-add_executable(${PROJECT_NAME} TestUnistdpp.cpp TestRMLib.cpp TestTilem.cpp
-                               TestYaft.cpp TestRocket.cpp TestRm2fb.cpp)
+add_executable(
+  ${PROJECT_NAME} TestUnistdpp.cpp TestRMLib.cpp TestTilem.cpp TestYaft.cpp
+                  TestRocket.cpp TestRm2fb.cpp)
 
 find_program(CAT_EXE cat)
 
@@ -18,6 +19,17 @@ target_link_libraries(
           Yaft::app_lib
           rocket::lib
           rm2fb_headers)
+
+# Server (Server.cpp/ServerInternal.h) only builds/is meaningful on Linux -
+# see libs/rm2fb/CMakeLists.txt's own guard.
+if(TARGET rm2fb_lib)
+  target_sources(
+    ${PROJECT_NAME}
+    PRIVATE TestRm2fbServer.cpp ${CMAKE_SOURCE_DIR}/libs/rm2fb/Server.cpp
+            ${CMAKE_SOURCE_DIR}/libs/rm2fb/ImageHook.cpp)
+  target_link_libraries(${PROJECT_NAME} PRIVATE rm2fb_lib Systemd::Lib
+                                                Evdev::Static udev)
+endif()
 
 # From:
 # https://github.com/catchorg/Catch2/blob/devel/docs/cmake-integration.md#catchcmake-and-catchaddtestscmake

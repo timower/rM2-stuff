@@ -1,0 +1,163 @@
+#include <catch2/catch_test_macros.hpp>
+#include <unistd.h>
+#include <utility>
+#include <vector>
+
+#include "ServerInternal.h"
+
+namespace {
+
+// Records suspend/resume calls instead of touching real hardware. Note:
+// on a dev/CI box without a real /dev/fb0, Server::inQemu is always true,
+// so Server never actually calls suspendForXochitl()/resumeForXochitl()
+// regardless of what this records - see the comment on Server::resume()'s
+// "focus tracks client-driven-ness unconditionally" for why that's still
+// fine to assert on via `focus` itself.
+struct FakeAddressInfo : AddressInfoBase {
+  void initThreads() const override {}
+  bool doUpdate(const UpdateParams&) const override { return true; }
+  void shutdownThreads() const override {}
+  bool installHooks(UpdateFn*) const override { return true; }
+
+  mutable int suspendCount = 0;
+  mutable int resumeCount = 0;
+  void suspendForXochitl() const override { suspendCount++; }
+  void resumeForXochitl() const override { resumeCount++; }
+};
+
+// Records what pause()/resume() would have sent instead of sending a real
+// SIGSTOP/SIGCONT/SIGUSR1 - see ProcessControl's own comment. Without
+// this, testing pause()/resume() at all would need a real, safely-
+// signalable process to point them at (this test used to fork one; that
+// turned out to need its own process-group isolation and inherited-fd
+// cleanup to avoid colliding with whatever other tests in this same
+// binary happen to be doing - not worth it just to satisfy a kill() call
+// nothing here actually needs to be real).
+struct FakeProcessControl : ProcessControl {
+  mutable std::vector<std::pair<pid_t, int>> signals;
+
+  void pause(pid_t pid, bool dontPause) const override {
+    signals.emplace_back(pid, dontPause ? SIGUSR1 : SIGSTOP);
+  }
+  void resume(pid_t pid) const override { signals.emplace_back(pid, SIGCONT); }
+};
+
+// A bare-bones stand-in for Client.cpp/ClientSwtcon.cpp's own doInit() -
+// speaks the same raw UnixClientMsg protocol without going through either
+// client library.
+struct FakeClient {
+  unistdpp::FD sock;
+
+  explicit FakeClient(const char* serverPath) {
+    sock = unistdpp::fatalOnError(
+      unistdpp::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0), "socket");
+    unistdpp::fatalOnError(
+      unistdpp::bind(sock, unistdpp::Address::fromUnixPath(nullptr)), "bind");
+    unistdpp::fatalOnError(
+      unistdpp::connect(sock, unistdpp::Address::fromUnixPath(serverPath)),
+      "connect");
+  }
+
+  void sendInit(bool ownSwtcon) {
+    auto res =
+      sendMessage(sock, UnixClientMsg{ Init{ .ownSwtcon = ownSwtcon } });
+    REQUIRE(res.has_value());
+  }
+};
+
+// Server::poll()'s blocking ::poll() can be interrupted by a signal
+// (EINTR) - e.g. a SIGCHLD from some other test's own subprocess
+// elsewhere in this test binary - in which case it just logs and returns
+// without processing anything. The real daemon's own outer loop
+// (serverMain()) just calls poll() again on the next iteration when that
+// happens, which is harmless there since nothing else runs in between;
+// do the same here instead of asserting after a single call, which was
+// flaky for exactly this reason.
+template<typename Pred>
+void
+pollUntil(Server& server, Pred ready) {
+  for (int i = 0; i < 50 && !ready(); i++) {
+    server.poll();
+  }
+}
+
+} // namespace
+
+// Regression coverage for two related bugs in how the server used to
+// decide a client owns its own independent swtcon (and so should get
+// suspendForXochitl()/its own ClientDrivenFront panel ownership):
+//  1. Detection used to be by process name ("xochitl") at accept() time -
+//     which also (wrongly) matched the older by-address-hooking xochitl
+//     client (Client.cpp), which does NOT run its own swtcon and relies
+//     on this server driving updates for it like any other client.
+//  2. Even for a client that genuinely does own its own swtcon, resume()
+//     ran synchronously inside acceptUnixClient() - before the client's
+//     Init (which is what actually carries this information) could
+//     possibly have arrived - so the decision was made on data that
+//     wasn't there yet.
+// Both are now fixed by deriving it purely from the client's own Init
+// message, and only ever switching a client to front once that Init has
+// been processed (see readUnixSock()/requestSwitch() in ServerInternal.h).
+TEST_CASE("Server client-driven front is derived from Init not accept",
+          "[rm2fb][rm2fb-server]") {
+  const char* lockPath = "/tmp/rm2fb-test-server.lock";
+  const char* sockPath = "/tmp/rm2fb-test-server.sock";
+  unlink(sockPath);
+
+  FakeAddressInfo fakeAddrs;
+  FakeProcessControl fakeProcessControl;
+  Server server(&fakeAddrs, lockPath, sockPath, fakeProcessControl);
+
+  // Nothing connected yet.
+  REQUIRE(std::holds_alternative<NoFront>(server.focus));
+
+  SECTION("old hooking-based client (Init.ownSwtcon=false) never becomes "
+          "client-driven") {
+    FakeClient client(sockPath);
+
+    // Wait for the server to accept() before sending Init, to also
+    // exercise the accept-then-Init ordering explicitly.
+    pollUntil(server, [&] { return !server.unixClients.empty(); });
+    REQUIRE(server.unixClients.size() == 1);
+    REQUIRE(std::holds_alternative<NoFront>(server.focus));
+
+    client.sendInit(/* ownSwtcon= */ false);
+    pollUntil(server,
+              [&] { return !std::holds_alternative<NoFront>(server.focus); });
+
+    REQUIRE(std::holds_alternative<ServerDrivenFront>(server.focus));
+    REQUIRE(focusPid(server.focus) == getpid());
+    REQUIRE(server.unixClients[0].ownSwtcon == false);
+
+    // Never asked to suspend this server's own swtcon for a client that
+    // doesn't own one.
+    REQUIRE(fakeAddrs.suspendCount == 0);
+  }
+
+  SECTION("swtcon-owning client only becomes client-driven once its Init "
+          "actually arrives") {
+    FakeClient client(sockPath);
+
+    // accept() alone must not decide anything yet - this is exactly bug 2
+    // above: resume() used to run here, before Init, with no way to know
+    // ownSwtcon yet.
+    pollUntil(server, [&] { return !server.unixClients.empty(); });
+    REQUIRE(server.unixClients.size() == 1);
+    REQUIRE(std::holds_alternative<NoFront>(server.focus));
+    REQUIRE(!server.unixClients[0].ownSwtcon.has_value());
+
+    client.sendInit(/* ownSwtcon= */ true);
+    pollUntil(server,
+              [&] { return !std::holds_alternative<NoFront>(server.focus); });
+
+    REQUIRE(std::holds_alternative<ClientDrivenFront>(server.focus));
+    REQUIRE(focusPid(server.focus) == getpid());
+    REQUIRE(server.unixClients[0].ownSwtcon == true);
+  }
+
+  // Whichever section ran, resume() should have sent exactly one SIGCONT
+  // to this (fake) client and nothing else - no pause() was ever due,
+  // since this is the only client to ever connect.
+  REQUIRE(fakeProcessControl.signals ==
+          std::vector<std::pair<pid_t, int>>{ { getpid(), SIGCONT } });
+}
