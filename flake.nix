@@ -45,8 +45,15 @@
           default = pkgs.callPackage ./nix/pkgs/rm2-stuff.nix { };
           dev-cross = pkgsArmv7.callPackage ./nix/pkgs/rm2-stuff.nix { };
 
-          koreader = pkgsArmv7.callPackage ./nix/pkgs/koreader.nix { };
           inherit nix-installer;
+        }
+        // lib.optionalAttrs pkgs.stdenv.hostPlatform.isx86_64 {
+          # LuaJIT's build needs a real 32-bit x86 host compiler
+          # (`pkgsi686Linux`), only available when building from an x86_64
+          # host.
+          koreader = pkgsArmv7.callPackage ./nix/pkgs/koreader.nix {
+            inherit (pkgs) pkgsi686Linux;
+          };
         }
         // lib.optionalAttrs (!isDarwin) rec {
           rm2-toolchain = pkgsLinux.callPackage ./nix/pkgs/rm2-toolchain.nix { };

@@ -1,0 +1,20 @@
+diff --git i/thirdparty/luajit/CMakeLists.txt w/thirdparty/luajit/CMakeLists.txt
+index b8b78eb0..eb867d29 100644
+--- i/thirdparty/luajit/CMakeLists.txt
++++ w/thirdparty/luajit/CMakeLists.txt
+@@ -50,7 +50,14 @@ else()
+         OUTPUT_VARIABLE HOST_CC_MACHINE
+     )
+     if((HOST_CC_MACHINE MATCHES "^.+64-.+$") AND (NOT CMAKE_SYSTEM_PROCESSOR MATCHES ".+64$"))
+-        set(HOST_CC "${HOSTCC} -m32")
++        if(DEFINED LUAJIT_HOST_CC32)
++            # nix cross builds have no usable -m32 multilib; use a real
++            # 32-bit host compiler instead (buildvm needs matching pointer
++            # width to the 32-bit ARM target).
++            set(HOST_CC "${LUAJIT_HOST_CC32}")
++        else()
++            set(HOST_CC "${HOSTCC} -m32")
++        endif()
+     else()
+         set(HOST_CC ${HOSTCC})
+     endif()

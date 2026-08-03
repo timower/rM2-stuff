@@ -1,0 +1,52 @@
+diff --git i/thirdparty/libjpeg-turbo/CMakeLists.txt w/thirdparty/libjpeg-turbo/CMakeLists.txt
+index 92f02525..bbe91fd0 100644
+--- i/thirdparty/libjpeg-turbo/CMakeLists.txt
++++ w/thirdparty/libjpeg-turbo/CMakeLists.txt
+@@ -29,7 +29,7 @@ if(NOT MONOLIBTIC)
+ endif()
+ 
+ external_project(
+-    DOWNLOAD GIT 3.1.1
++    DOWNLOAD GIT 7723f50f3f66b9da74376e6d8badb6162464212c
+     https://github.com/libjpeg-turbo/libjpeg-turbo.git
+     PATCH_FILES ${PATCH_FILES}
+     CMAKE_ARGS ${CMAKE_ARGS}
+diff --git i/thirdparty/lua-Spore/CMakeLists.txt w/thirdparty/lua-Spore/CMakeLists.txt
+index b4e8f52e..8a654175 100644
+--- i/thirdparty/lua-Spore/CMakeLists.txt
++++ w/thirdparty/lua-Spore/CMakeLists.txt
+@@ -8,7 +8,7 @@ append_install_commands(INSTALL_CMD src/Spore.lua DESTINATION common)
+ append_tree_install_commands(INSTALL_CMD src/Spore common/Spore)
+ 
+ external_project(
+-    DOWNLOAD GIT 0.4.0
++    DOWNLOAD GIT e4223b8c9814721afefd4e1395eb437eee46ca96
+     https://framagit.org/fperrad/lua-Spore
+     PATCH_FILES ${PATCH_FILES}
+     INSTALL_COMMAND ${INSTALL_CMD}
+diff --git i/thirdparty/luasec/CMakeLists.txt w/thirdparty/luasec/CMakeLists.txt
+index d60311a7..12001964 100644
+--- i/thirdparty/luasec/CMakeLists.txt
++++ w/thirdparty/luasec/CMakeLists.txt
+@@ -16,7 +16,7 @@ append_install_commands(INSTALL_CMD ${SOURCE_DIR}/src/ssl.lua DESTINATION common
+ append_install_commands(INSTALL_CMD ${SOURCE_DIR}/src/https.lua DESTINATION common/ssl)
+ 
+ external_project(
+-    DOWNLOAD GIT v1.3.2
++    DOWNLOAD GIT 4c06287052d68fdbe7429b8f967cdc8ee94aa44a
+     https://github.com/brunoos/luasec
+     PATCH_OVERLAY overlay
+     PATCH_FILES ${PATCH_FILES}
+diff --git i/thirdparty/turbo/CMakeLists.txt w/thirdparty/turbo/CMakeLists.txt
+index f9081a34..11fe2cad 100644
+--- i/thirdparty/turbo/CMakeLists.txt
++++ w/thirdparty/turbo/CMakeLists.txt
+@@ -26,7 +26,7 @@ append_install_commands(INSTALL_CMD ${SOURCE_DIR}/turbo.lua ${SOURCE_DIR}/turbov
+ append_tree_install_commands(INSTALL_CMD ${SOURCE_DIR}/turbo common/turbo)
+ 
+ external_project(
+-    DOWNLOAD GIT v2.1.3
++    DOWNLOAD GIT 7fe88c2b99ff9bd6d6df3ee3c4077ea8a7d1e6a3
+     https://github.com/kernelsauce/turbo
+     PATCH_OVERLAY overlay
+     PATCH_FILES ${PATCH_FILES}
