@@ -12,12 +12,7 @@ let
   xochitl-env = pkgs.callPackage ../pkgs/xochitlEnv.nix {
     preloadRm2fb = true;
     preloadLibs = [
-      "/run/current-system/sw/lib/${
-        if config.services.rm2fb.variant == "swtcon" then
-          "librm2fb_client_swtcon.so"
-        else
-          "librm2fb_client.so"
-      }"
+      "/run/current-system/sw/lib/librm2fb_client.so"
     ]
     ++ config.programs.xochitl.extraPreloadLibraries;
   };

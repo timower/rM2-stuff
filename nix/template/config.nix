@@ -10,13 +10,8 @@
   hardware.rm2display.enable = true;
   services = {
     rm2fb.enable = true;
-    rm2fb.variant = "swtcon";
     openssh.enable = true;
   };
-
-  programs.xochitl.extraPreloadLibraries = [
-    "${pkgs.rm2-stuff.ioctl_dump}/lib/libioctl-dump.so"
-  ];
 
   programs = {
     yaft.enable = true;

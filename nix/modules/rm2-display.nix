@@ -37,7 +37,22 @@ let
     done
   '';
 
-  serverBinary = if config.services.rm2fb.variant == "swtcon" then "rm2fb_server_swtcon" else "rm2fb_server";
+  clientLibrary =
+    if config.services.rm2fb.variant == "swtcon" then
+      "librm2fb_client_swtcon.so"
+    else
+      "librm2fb_client.so";
+  rm2fb-client = pkgs.runCommand "rm2fb-client" { } ''
+    mkdir -p $out/lib
+    ln -s ${pkgs.rm2-stuff.rm2display}/lib/${clientLibrary} $out/lib/librm2fb_client.so
+    ln -s ${pkgs.rm2-stuff.rm2display}/bin $out/bin
+  '';
+
+  serverExec =
+    if config.services.rm2fb.variant != "hook" then
+      lib.getExe' rm2-server-pkg "rm2fb_server_swtcon"
+    else
+      "${lib.getExe xochitl-env} ${lib.getExe' rm2-server-pkg "rm2fb_server"}";
 in
 {
   options = {
@@ -45,32 +60,21 @@ in
       # TODO: enable by default?
       enable = lib.mkEnableOption "Enable own rm2fb server";
 
+      swtcon = lib.mkEnableOption "Enable own swtcon server";
+
       variant = lib.mkOption {
         type = lib.types.enum [
           "hook"
+          "swtcon-server"
           "swtcon"
         ];
         default = "hook";
         description = ''
           Which rm2fb server/client implementation to run:
 
-          - "hook": the original implementation. The server drives updates
-            by dlopen'ing libqsgepaper.so (rm2fb_server); xochitl's own
-            internal update/init/shutdown calls are intercepted by address,
-            per xochitl version (librm2fb_client.so).
-          - "swtcon": the from-scratch native swtcon reimplementation. The
-            server (rm2fb_server_swtcon) drives the display without ever
-            dlopen'ing libqsgepaper.so; xochitl runs its own, separate
-            swtcon instance completely untouched
-            (librm2fb_client_swtcon.so), coordinated with the server via
-            SIGSTOP/SIGCONT and an idle/un-idle handshake instead of being
-            hooked at all. See CLAUDE.md's "Swtcon Re-Implementation" notes
-            and libs/rm2fb/ClientSwtcon.cpp.
-
-          Both halves (server binary, xochitl's preloaded client library)
-          switch together - mixing them isn't a supported combination, since
-          the "swtcon" client deliberately drives the real framebuffer
-          itself instead of going through the "hook" server's virtual one.
+          - "hook": Use hooks for xochitl to drive the display and intercept updates.
+          - "swtcon-server": Use native swtcon implementation on the server.
+          - "swtcon": Swtcon on the server, and hookless (own) swtcon based in xochitl.
         '';
       };
     };
@@ -125,7 +129,7 @@ in
         serviceConfig = {
           Type = "simple";
 
-          ExecStart = "${lib.getExe xochitl-env} ${lib.getExe' rm2-server-pkg serverBinary}";
+          ExecStart = serverExec;
 
           Restart = "on-failure";
           RestartSec = "5";
@@ -137,7 +141,7 @@ in
     (lib.mkIf config.hardware.rm2display.enable {
       # Add the client to the systemPacakges, this ensure it's linked into
       # /run/current-system/sw/lib.
-      environment.systemPackages = [ rm2-pkgs.rm2display ];
+      environment.systemPackages = [ rm2fb-client ];
     })
 
   ];
