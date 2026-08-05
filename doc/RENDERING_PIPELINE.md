@@ -45,7 +45,7 @@ Because the reMarkable 2 uses a CPU-driven Software TCON (`swtcon`), `pixel_mode
 *   **`6` vs `9` (The 16-bit Qt Canvas)**: Both instruct the TCON to read from the primary 16-bit Qt `data` buffer, but they represent different rendering phases:
     *   **`6` (Rough Pass)**: Used for Panning and Progress bars. Draws the pixels quickly, skipping complex waveform settling.
     *   **`9` (Settle Pass)**: Used for static UI elements. Applies a more precise, high-fidelity waveform calculation.
-    *   *Note on Full Refreshes:* `swapBuffers_impl` explicitly calls `6` then `9` on the same rectangles during a full refresh. This queues two physical waveform phases (e.g., drive to extremes, then settle to final grayscale) to completely eliminate ghosting.
+    *   *Note on Full Refreshes (corrected):* `swapBuffers_impl` does queue `6` then `9` on the same rectangles, for both the synchronous full refresh and the `UI` fallback branch below - but this does **not** produce two physical waveform phases. Both calls land inside a single `LockSwapMutex()`/`UnlockAndPostSwapMutex()` bracket, and `queue_update`'s own `subtract_update_region` (`libs/swtcon/update.cpp`) clips a newly-queued item's exact rect out of every not-yet-posted pending item before appending itself. Since both loops iterate the identical `QRegion`, the `9` call's subtraction pass finds the `6` call's entry for that same rect still sitting unposted in `accumList` and, being a byte-for-byte rect match, erases it outright (zero leftover pieces). So per rect, `6`'s CPU render (`dispatch_update_regions`) still runs and is thrown away, but only `9` (the Settle Pass) is ever posted to the display thread and reaches the panel - there is exactly one physical waveform phase here, not two. (Confirmed by direct reading of `update.cpp`'s `subtract_update_region`/`swtcon_update`, not just the decompile of `swapBuffers_impl` itself.)
 
 ### `flags` (Synchronization)
 *   **`0`**: Async. Pushes the update to the queue without forcing the calling thread to wait.
@@ -59,8 +59,8 @@ The following mapping table (often seen in community tools like `rm2fb`) maps di
 
 | Action | update_mode | flags | pixel_mode | Found in `swapBuffers_impl` |
 | :--- | :--- | :--- | :--- | :--- |
-| **Refresh** | 2 | 1 | 9 (and 6) | The synchronous branch calls `update(..., 2, 6, 1)` followed by `update(..., 2, 9, 1)`. |
-| **UI** | 3 | 0 | 9 (and 6) | The default fallback branch for leftover regions calls `update(..., 3, 6, 0)` and `3, 9, 0`. |
+| **Refresh** | 2 | 1 | 9 (`6` queued first but superseded - see note above) | The synchronous branch calls `update(..., 2, 6, 1)` followed by `update(..., 2, 9, 1)` on the same rects; only the `9` item survives to be posted. |
+| **UI** | 3 | 0 | 9 (`6` queued first but superseded - see note above) | The default fallback branch for leftover regions calls `update(..., 3, 6, 0)` and `update(..., 3, 9, 0)` on the same rects; only the `9` item survives to be posted. |
 | **Progress** | 1 | 0 | 6 | `updateInBlocks` for non-sync Mode 2 regions. |
 | **Pen / Marker**| 1 | 2 | 7 | `updateInBlocks(..., 1, uVar4, 2)`. `uVar4` evaluates to `7` when `flags & 2` (`FastDraw`) is passed. |
 | **Pan / Shape** | 6 | 0 | 6 | `updateInBlocks(..., 6, 6, 0)` for Mode 0 fast UI regions. |
