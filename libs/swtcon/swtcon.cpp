@@ -123,10 +123,12 @@ extern struct fb_var_screeninfo g_fbVarScreeninfoNative;
 extern struct fb_fix_screeninfo g_fbFixScreeninfoNative;
 
 uint16_t*
-swtcon_init(void* dataBuffer, void* backBuffer, bool skipPidLock) {
+swtcon_init(const InitParams& params) {
   std::cout << "swtcon_init: initialization sequence starting..." << std::endl;
 
   if (swtcon_lib_impl_enabled()) {
+    // Library mode always drives real hardware - InitParams' native-mode
+    // injection seams don't apply here.
     load_lib();
 
     char state[256];
@@ -155,13 +157,22 @@ swtcon_init(void* dataBuffer, void* backBuffer, bool skipPidLock) {
   // lock - see tools/xochitl-mock-server) takes responsibility for
   // ensuring only one swtcon instance actually drives hardware at a time
   // when skipPidLock is set.
-  if (!skipPidLock && create_pid_file() != 0) return nullptr;
+  if (!params.skipPidLock && create_pid_file() != 0) return nullptr;
 
-    if (init_statebuffer(dataBuffer, backBuffer) != 0) return nullptr;
+    if (init_statebuffer(params.dataBuffer, params.backBuffer) != 0) return nullptr;
 
     auto* queue = update_queue_globals();
     auto* sb = statebuffer_globals();
     auto* fb = framebuffer_globals();
+    auto* cursor = frame_cursor_globals();
+
+    // Reset every singleton first - swtcon_shutdown doesn't zero scalar
+    // bookkeeping, so a second swtcon_init() in one process would otherwise
+    // see stale state (e.g. workerThreadShutdown still set).
+    *queue = UpdateQueueGlobals{};
+    *sb = StatebufferGlobals{};
+    *fb = FramebufferGlobals{};
+    *cursor = FrameCursorGlobals{};
 
     // Phase 4 cleanup (Step 4): listProcessedUpdates/listIncomingUpdates/
     // accumList are real std::list<T> now (see update.h's
@@ -178,7 +189,9 @@ swtcon_init(void* dataBuffer, void* backBuffer, bool skipPidLock) {
     sb->nSize = kStatebufferSize;
 
     std::string waveform_path;
-    if (!find_waveform_path(&waveform_path)) {
+    if (params.waveformPathOverride) {
+        waveform_path = params.waveformPathOverride;
+    } else if (!find_waveform_path(&waveform_path)) {
         std::cerr << "swtcon_init: unable to find any waveform files!" << std::endl;
         return nullptr;
     }
@@ -203,7 +216,9 @@ swtcon_init(void* dataBuffer, void* backBuffer, bool skipPidLock) {
     fb_info.hsyncLen = 1;
     fb_info.vsyncLen = 1;
 
-    if (init_framebuffer(fb_info) != 0) {
+    if (params.framebufferFd >= 0) {
+        init_framebuffer_with_fd(fb_info, params.framebufferFd);
+    } else if (init_framebuffer(fb_info) != 0) {
         std::cerr << "swtcon_init: failed to init framebuffer" << std::endl;
         return nullptr;
     }
@@ -253,31 +268,32 @@ swtcon_init(void* dataBuffer, void* backBuffer, bool skipPidLock) {
 
     prime_display();
 
-    std::cout << "Starting threads natively..." << std::endl;
-
+    // Needed by swtcon_lock/update/unlock_post regardless of startThreads.
     pthread_mutex_init(&queue->updateQueueMutex, nullptr);
     sem_init(&queue->displayThreadSem, 0, 0);
     pthread_mutex_init(&queue->workerCondMutex, nullptr);
     pthread_cond_init(&queue->workerCond, nullptr);
 
-    pthread_create(&queue->workerThread, nullptr, worker_thread_func, nullptr);
-    pthread_create(&queue->displayThread, nullptr, display_thread_func, nullptr);
+    if (params.startThreads) {
+        std::cout << "Starting threads natively..." << std::endl;
 
-    // auto display_thread_func = resolve_ptr<void*(*)(void*)>(0x3d2ac);
-    // pthread_create(&queue->displayThread, nullptr, display_thread_func, nullptr);
+        pthread_create(&queue->workerThread, nullptr, worker_thread_func, nullptr);
+        pthread_create(&queue->displayThread, nullptr, display_thread_func, nullptr);
+        queue->threadsStarted = true;
 
-    sched_param param;
-    param.__sched_priority = 99;
-    pthread_setschedparam(queue->workerThread, SCHED_FIFO, &param);
-    param.__sched_priority = 98;
-    pthread_setschedparam(queue->displayThread, SCHED_FIFO, &param);
+        sched_param param;
+        param.__sched_priority = 99;
+        pthread_setschedparam(queue->workerThread, SCHED_FIFO, &param);
+        param.__sched_priority = 98;
+        pthread_setschedparam(queue->displayThread, SCHED_FIFO, &param);
 
-    // EPFramebufferSwtcon::initialize (0x38e30) calls qsgepaper_init and then
-    // FUN_0003b4b4 - a startup flash of the panel, blocking until it
-    // completes - before doing anything else. swtcon_init now replaces that
-    // whole call site, so it does the same here.
-    std::cout << "Requesting startup flash..." << std::endl;
-    request_flash_and_wait();
+        // EPFramebufferSwtcon::initialize (0x38e30) calls qsgepaper_init and
+        // then FUN_0003b4b4 - a startup flash of the panel, blocking until it
+        // completes - before doing anything else. swtcon_init now replaces
+        // that whole call site, so it does the same here.
+        std::cout << "Requesting startup flash..." << std::endl;
+        request_flash_and_wait();
+    }
 
     std::cout << "swtcon_init: native initialization complete!" << std::endl;
     return (uint16_t*)g_pImageBufferNative;
@@ -369,42 +385,46 @@ swtcon_shutdown(int state_ptr_or_zero) {
     return;
   }
 
-  std::cout << "swtcon_shutdown: waiting for updates to complete..."
-            << std::endl;
-
   auto* queue = update_queue_globals();
 
-  // wait for queues to empty
-  while (queue->shutdownRequested == 0 &&
-         (!queue->listIncomingUpdates.empty() ||
-          !queue->listProcessedUpdates.empty())) {
-    usleep(100);
+  // Skip straight to teardown if InitParams::startThreads was false -
+  // workerThread/displayThread were never pthread_create'd.
+  if (queue->threadsStarted) {
+    std::cout << "swtcon_shutdown: waiting for updates to complete..."
+              << std::endl;
+
+    // wait for queues to empty
+    while (queue->shutdownRequested == 0 &&
+           (!queue->listIncomingUpdates.empty() ||
+            !queue->listProcessedUpdates.empty())) {
+      usleep(100);
+    }
+
+    queue->shutdownRequested = 1;
+    sem_post(&queue->displayThreadSem);
+    pthread_join(queue->displayThread, nullptr);
+
+    std::cout << "swtcon_shutdown: waiting for display to finish..." << std::endl;
+    queue->workerThreadShutdown = 1;
+    pthread_mutex_lock(&queue->workerCondMutex);
+    pthread_cond_broadcast(&queue->workerCond);
+    pthread_mutex_unlock(&queue->workerCondMutex);
+    // If the worker thread is currently parked in swtcon_suspend()'s gate
+    // (a separate condvar from workerCond above), the broadcast above alone
+    // wouldn't reach it and this pthread_join would hang forever. Only the
+    // gate itself needs waking here - NOT swtcon_resume(), which would also
+    // force nIsFbBlanked=1 and so make the "if (is_fb_blanked() == 0)
+    // blank_fb();" check below always skip a real blank on an ordinary
+    // shutdown that was never actually suspended. wake_suspend_gate() is
+    // safe regardless of which condvar the worker thread is actually blocked
+    // on - whichever one it's not waiting on is just a no-op - and it'll
+    // exit immediately via the shutdown check right after the gate, since
+    // workerThreadShutdown is already set above, before any pan/blank code
+    // runs - so there's no next pan cycle for nIsFbBlanked's staleness to
+    // affect either way.
+    wake_suspend_gate();
+    pthread_join(queue->workerThread, nullptr);
   }
-
-  queue->shutdownRequested = 1;
-  sem_post(&queue->displayThreadSem);
-  pthread_join(queue->displayThread, nullptr);
-
-  std::cout << "swtcon_shutdown: waiting for display to finish..." << std::endl;
-  queue->workerThreadShutdown = 1;
-  pthread_mutex_lock(&queue->workerCondMutex);
-  pthread_cond_broadcast(&queue->workerCond);
-  pthread_mutex_unlock(&queue->workerCondMutex);
-  // If the worker thread is currently parked in swtcon_suspend()'s gate
-  // (a separate condvar from workerCond above), the broadcast above alone
-  // wouldn't reach it and this pthread_join would hang forever. Only the
-  // gate itself needs waking here - NOT swtcon_resume(), which would also
-  // force nIsFbBlanked=1 and so make the "if (is_fb_blanked() == 0)
-  // blank_fb();" check below always skip a real blank on an ordinary
-  // shutdown that was never actually suspended. wake_suspend_gate() is
-  // safe regardless of which condvar the worker thread is actually blocked
-  // on - whichever one it's not waiting on is just a no-op - and it'll
-  // exit immediately via the shutdown check right after the gate, since
-  // workerThreadShutdown is already set above, before any pan/blank code
-  // runs - so there's no next pan cycle for nIsFbBlanked's staleness to
-  // affect either way.
-  wake_suspend_gate();
-  pthread_join(queue->workerThread, nullptr);
 
   if (state_ptr_or_zero != 0) {
     std::cout << "swtcon_shutdown: saving statebuffer..." << std::endl;

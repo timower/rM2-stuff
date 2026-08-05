@@ -28,6 +28,10 @@ constexpr size_t kStatebufferSize = (size_t)kScreenWidth * kScreenHeight * 2;
 constexpr size_t kGammaTableSize = 0x4400;    // == 128 temperature entries * 0x88 bytes
 constexpr size_t kLutBlobSize = 0x165800;     // one full frame slot's worth (bitsPerPixel*xres*yres/8, see FbInitParams in swtcon.cpp)
 
+// Size of the whole panel framebuffer (all kFrameSlotRingCount+1 frame
+// slots) - what swtcon_init's real /dev/fb0 mmap covers.
+constexpr size_t kFramebufferMemorySize = (size_t)(kFrameSlotRingCount + 1) * kLutBlobSize;
+
 // The neutral per-pixel statebuffer fill (init_statebuffer,
 // reset_statebuffer_neutral): each 32-bit word packs two identical
 // 16-bit "state = 0x001e" pixels, NOT a byte-wise 0x1e fill (memset(0x1e)
@@ -70,8 +74,19 @@ int create_pid_file();
 // null (the default) keeps the original self-allocating behavior.
 int init_statebuffer(void* dataBuffer = nullptr, void* backBuffer = nullptr);
 int init_framebuffer(const FbInitParams& fb_info);
+// Like init_framebuffer, but mmaps a caller-supplied fd (e.g. memfd_create())
+// instead of opening /dev/fb0 - see InitParams::framebufferFd in swtcon.h.
+void init_framebuffer_with_fd(const FbInitParams& fb_info, int fd);
 int init_lut();
 bool load_waveform(std::vector<ModeEntry*>* waveform_struct, const char* path);
+
+// Pure pieces of find_waveform_path's matching algorithm, exposed here for
+// direct unit testing - see their definitions in init.cpp.
+bool has_wbf_suffix(const char* name);
+void list_wbf_files(const std::string& dir, std::vector<std::string>* out);
+bool read_wbf_match_fields(const std::string& path, uint16_t* fpl_lot, char tft_vid[3]);
+int decode_fpl_lot_pair(char c1, char c2);
+bool decode_barcode(const std::string& barcode, char tft_vid[3], int* fpl_lot);
 
 // Mirrors qsgepaper_init's own waveform-path selection (get_waveform_path
 // @0x52fb0 + FUN_00051fd0's directory scan): picks which .wbf file to hand

@@ -78,3 +78,13 @@ playback_kernel_aligned_intrinsics(void** frame_slots,
                                int frame_count,
                                int chunk_index,
                                int chunk_count);
+
+// Individual pieces of display_thread_func, non-static so each can be
+// unit-tested directly - see display.cpp for the full comments.
+bool commit_item(WorkItem* item);
+bool dispatch_processed_regions_native(std::list<WorkItem>& sub_list);
+void stale_row_cleanup();
+void gc_processed_updates();
+void build_overlap_dependency_list(std::list<WorkItem>& sub_list);
+int playback_chunk_count(const WorkItem* item);
+void advance_work_item_frames(WorkItem* item);

@@ -50,19 +50,38 @@ enum UpdateFlags {
     ExplicitTemperature = 1 << 3,
 };
 
-// Initializes the library and returns the 16-bit framebuffer pointer.
-// dataBuffer/backBuffer optionally supply pre-allocated storage for the
-// image working buffer / full-screen back buffer (e.g. rm2fb's shared
-// framebuffer) instead of letting swtcon allocate its own - see
-// init_statebuffer. skipPidLock skips the /tmp/epd.lock exclusive flock -
-// for a caller (e.g. rm2fb's server) that coordinates mutual exclusion
-// with another, separate swtcon instance itself (e.g. xochitl's own
-// statically-linked swtcon, via SIGSTOP + idle notices - see
-// tools/xochitl-mock-server) rather than relying on this lock, which a
-// second concurrently-running swtcon instance would otherwise always lose.
-uint16_t* swtcon_init(void* dataBuffer = nullptr,
-                       void* backBuffer = nullptr,
-                       bool skipPidLock = false);
+struct InitParams {
+  // Pre-allocated storage for the image/back buffers (e.g. rm2fb's shared
+  // framebuffer) instead of letting swtcon allocate its own - see
+  // init_statebuffer. Caller-owned when set.
+  void* dataBuffer = nullptr;
+  void* backBuffer = nullptr;
+
+  // A caller-supplied fd (e.g. memfd_create()) to mmap as the panel
+  // framebuffer instead of opening /dev/fb0 - see init_framebuffer_with_fd.
+  // Real ioctls issued against it just fail harmlessly, same as any other
+  // ioctl failure - useful for driving worker/display-thread logic in tests
+  // with no real panel.
+  int framebufferFd = -1;
+
+  // Skips the /tmp/epd.lock exclusive flock, for a caller that coordinates
+  // mutual exclusion with another swtcon instance itself (e.g. xochitl's,
+  // via SIGSTOP - see tools/xochitl-mock-server).
+  bool skipPidLock = false;
+
+  // Skips find_waveform_path()'s directory scan + barcode decode and loads
+  // this path directly via load_waveform() instead.
+  const char* waveformPathOverride = nullptr;
+
+  // Skips pthread_create for workerThread/displayThread (and, necessarily,
+  // the blocking startup flash sequence, which needs the worker thread to
+  // service it) - lets a caller drive things by hand instead.
+  bool startThreads = true;
+};
+
+// Initializes the library and returns the 16-bit framebuffer pointer. See
+// InitParams above for the individual fields.
+uint16_t* swtcon_init(const InitParams& params = {});
 
 // Lock, update, unlock/post, and wait.
 void swtcon_lock();

@@ -155,7 +155,10 @@ update_item_ctor(WorkItem* item) {
 // panel's 180-rotated hardware frame - with the y-axis rounded to 8-row
 // blocks (down for y0, up for y1) to match the 8-row-aligned render/dispatch
 // kernels. Output order is {y0,x0,y1,x1}.
-static Rect
+//
+// Non-static (declared in update.h) for direct unit testing - not a hot
+// per-pixel path, so this costs nothing.
+Rect
 clamp_update_rect(const XYRect& in) {
   constexpr int32_t kMaxY = kScreenHeight - 1;
   constexpr int32_t kMaxX = kScreenWidth - 1;
@@ -196,7 +199,9 @@ get_current_temperature() {
 // re-basing by stride*(piece.x0-src.x0) + (piece.y0-src.y0) keeps it
 // pointing at the pixel data for the piece's own top-left corner (see
 // RegionRows).
-static WorkItem*
+//
+// Non-static (declared in update.h) for direct unit testing - not a hot path.
+WorkItem*
 piece_builder(WorkItem* dest, const WorkItem* src, const Rect& piece_rect) {
   CloneWorkItemFieldsInto(dest, src);
 
@@ -237,7 +242,10 @@ extern void* g_pGammaTableNative;
 // Mirrors render_update_kernel's pixelMode==5 ("auto") indirection through
 // g_anPixelModeDispatchTable - confirmed by reading the table's bytes
 // directly out of the loaded library (Ghidra address 0x596b8).
-static int
+//
+// Non-static (declared in update.h) for direct unit testing - called once
+// per work item, outside the per-pixel loop below, not a hot path.
+int
 render_kernel_case(int pixel_mode, int mode) {
   if (pixel_mode == 5) {
     static const int kTable[7] = { 6, 9, 9, 9, 9, 6, 8 };
@@ -252,7 +260,14 @@ render_kernel_case(int pixel_mode, int mode) {
 // Per-pixel formulas, transcribed from the ARM disassembly at 0x4e7b8 (the
 // bitfield extraction, gamma-table add, and div-by-125-then-scale sequences
 // were read directly off the umull/lsr reciprocal-division idiom).
-static uint8_t
+//
+// Non-static (declared in update.h) for direct unit testing - but this is
+// the true hot path (per-pixel, from render_update_kernel's loop below).
+//
+// `always_inline` keeps it inlined there under -Os; `used` is required
+// alongside it or GCC drops the out-of-line copy a test TU needs to link
+// against (both confirmed via objdump on the real armv7 release build).
+[[gnu::always_inline, gnu::used]] inline uint8_t
 render_kernel_formula(int case_, uint16_t src, bool back_active, uint8_t gamma) {
   unsigned lo5 = src & 0x1f;
   unsigned mid6 = (src >> 5) & 0x3f;
@@ -278,7 +293,10 @@ render_kernel_formula(int case_, uint16_t src, bool back_active, uint8_t gamma) 
 // and `backBuffer` are the full-screen working buffers (queue->dataBuffer /
 // queue->backBuffer); item->regionRows must already point at a RegionRows
 // sized for item's own rect (dispatch_update_regions's job).
-static void
+//
+// Non-static (declared in update.h) for direct unit testing - a test needs
+// init_statebuffer() to have populated g_pGammaTableNative first.
+void
 render_update_kernel(WorkItem* item, const uint16_t* dataBuffer, const uint8_t* backBuffer) {
   auto* rr = item->regionRows.get();
   if (!rr->dataPtr)
@@ -350,7 +368,9 @@ dispatch_update_regions(WorkItem* item, void* dataBuffer, void* backBuffer) {
 // axis-aligned strips are emitted (left, top, bottom, right - each only if
 // non-empty), each cloned from the old item via piece_builder, and the
 // old item is replaced by them (in the same position, preserving order).
-static void
+//
+// Non-static (declared in update.h) for direct unit testing - not a hot path.
+void
 subtract_update_region(std::list<WorkItem>& list, const WorkItem* new_item) {
   Rect n{ new_item->rectY0, new_item->rectX0, new_item->rectY1, new_item->rectX1 };
   if (n.y1 < n.y0 || n.x1 < n.x0)

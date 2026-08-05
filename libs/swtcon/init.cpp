@@ -124,6 +124,33 @@ int init_statebuffer(void* dataBuffer, void* backBuffer) {
     return 0;
 }
 
+namespace {
+
+// The fb_var_screeninfo fields init_framebuffer (@0x53c0c) itself sets,
+// shared with init_framebuffer_with_fd below.
+void fill_var_screeninfo(struct fb_var_screeninfo& vinfo, const FbInitParams& fb_info) {
+    vinfo.xres = fb_info.xres;
+    vinfo.yres = fb_info.yres;
+    vinfo.xres_virtual = fb_info.xres;
+    vinfo.yres_virtual = fb_info.yres * (fb_info.frameCount + 1);
+    vinfo.yoffset = fb_info.frameCount * fb_info.yres;
+    vinfo.bits_per_pixel = fb_info.bitsPerPixel;
+    vinfo.pixclock = fb_info.pixclock;
+    vinfo.left_margin = fb_info.leftMargin;
+    vinfo.right_margin = fb_info.rightMargin;
+    vinfo.upper_margin = fb_info.upperMargin;
+    vinfo.lower_margin = fb_info.lowerMargin;
+    vinfo.hsync_len = fb_info.hsyncLen;
+    vinfo.vsync_len = fb_info.vsyncLen;
+}
+
+// One full frame in bytes (bpp*xres*yres/8), shared by both init paths below.
+unsigned int frame_bytes_of(const FbInitParams& fb_info) {
+    return (unsigned int)(fb_info.bitsPerPixel * fb_info.xres * fb_info.yres) >> 3;
+}
+
+} // namespace
+
 int init_framebuffer(const FbInitParams& fb_info) {
     const char* file = "/dev/fb0";
     g_nFbFdNative = open(file, O_RDWR);
@@ -150,30 +177,15 @@ int init_framebuffer(const FbInitParams& fb_info) {
         return -1;
     }
 
-    vinfo.xres = fb_info.xres;
-    vinfo.yres = fb_info.yres;
-    vinfo.xres_virtual = fb_info.xres;
-    vinfo.yres_virtual = fb_info.yres * (fb_info.frameCount + 1);
-    vinfo.yoffset = fb_info.frameCount * fb_info.yres;
-    vinfo.bits_per_pixel = fb_info.bitsPerPixel;
-    vinfo.pixclock = fb_info.pixclock;
-    vinfo.left_margin = fb_info.leftMargin;
-    vinfo.right_margin = fb_info.rightMargin;
-    vinfo.upper_margin = fb_info.upperMargin;
-    vinfo.lower_margin = fb_info.lowerMargin;
-    vinfo.hsync_len = fb_info.hsyncLen;
-    vinfo.vsync_len = fb_info.vsyncLen;
+    fill_var_screeninfo(vinfo, fb_info);
 
     if (ioctl(g_nFbFdNative, FBIOPUT_VSCREENINFO, &vinfo) == -1) {
         std::cerr << "Error writing variable information" << std::endl;
         return -1;
     }
 
-    // g_nFbSizeX is one full frame in bytes (bpp*xres*yres/8); g_nFbSizeY is the
-    // number of stacked frames (frameCount+1). The mmap covers all of them.
     int y_factor = (char)(fb_info.frameCount + 1);
-    unsigned int frame_bytes =
-      (unsigned int)(fb_info.bitsPerPixel * fb_info.xres * fb_info.yres) >> 3;
+    unsigned int frame_bytes = frame_bytes_of(fb_info);
     size_t size = (size_t)y_factor * frame_bytes;
 
     g_pFbAddrNative =
@@ -187,6 +199,25 @@ int init_framebuffer(const FbInitParams& fb_info) {
     g_nFbSizeYNative = y_factor;
 
     return 0;
+}
+
+void init_framebuffer_with_fd(const FbInitParams& fb_info, int fd) {
+    memset(&g_fbFixScreeninfoNative, 0, sizeof(g_fbFixScreeninfoNative));
+    struct fb_var_screeninfo& vinfo = g_fbVarScreeninfoNative;
+    memset(&vinfo, 0, sizeof(vinfo));
+    fill_var_screeninfo(vinfo, fb_info);
+
+    int y_factor = (char)(fb_info.frameCount + 1);
+    unsigned int frame_bytes = frame_bytes_of(fb_info);
+    size_t size = (size_t)y_factor * frame_bytes;
+
+    // A real fd (memfd_create() or a temp file), just not a framebuffer
+    // device - ftruncate it to size so mmap has something to map.
+    ftruncate(fd, size);
+    g_nFbFdNative = fd;
+    g_pFbAddrNative = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    g_nFbSizeXNative = frame_bytes;
+    g_nFbSizeYNative = y_factor;
 }
 
 // Mirrors FUN_00053a30 exactly (constants read from its disassembly — the vector
@@ -458,6 +489,16 @@ const char* const kWaveformSearchDirs[] = {
     "/usr/share/remarkable/",
 };
 
+} // namespace
+
+// Not in the anonymous namespace above (unlike read_factory_barcode below):
+// these five are pure - no hardcoded device paths of their own - so they're
+// declared in init.h and unit-tested directly against synthetic inputs
+// (temp dirs, in-memory barcode strings, small fixture files) instead of
+// only indirectly through find_waveform_path's real /dev/mmcblk2boot1 +
+// kWaveformSearchDirs orchestration, which isn't something a host test can
+// drive at all.
+
 bool has_wbf_suffix(const char* name) {
     size_t len = strlen(name);
     if (len < 4) return false;
@@ -589,12 +630,16 @@ bool decode_barcode(const std::string& barcode, char tft_vid[3], int* fpl_lot) {
     return true;
 }
 
+namespace {
+
 // Mirrors get_waveform_path's own /dev/mmcblk2boot1 read: 4 big-endian
 // length-prefixed fields; field index 3 is the 25-byte factory calibration
 // barcode. Confirmed against a real boot1 dump: field 3 decoded to
 // "EUFZBRAD1V9V00A6TAT -1.39", a well-formed 25-byte barcode whose decode
 // (see decode_barcode/decode_fpl_lot_pair) matches that unit's real
-// waveform file exactly.
+// waveform file exactly. Reads a hardcoded real device path - unlike the
+// five functions above, there's no synthetic-input seam worth adding here,
+// so this one stays internal.
 bool read_factory_barcode(std::string* out_barcode) {
     FILE* f = fopen64("/dev/mmcblk2boot1", "rb");
     if (!f) return false;
@@ -849,6 +894,7 @@ int pan_and_unblank(int frame_idx) {
         return 1;
 
     vinfo->yoffset = frame_idx * vinfo->yres;
+
     if (ioctl(fb->nFbFd, FBIOPUT_VSCREENINFO, vinfo) == -1) {
         std::cerr << "Panning failed! start buffer = " << frame_idx << ", "
                   << strerror(errno) << std::endl;

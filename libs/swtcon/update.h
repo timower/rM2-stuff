@@ -95,7 +95,9 @@ struct RegionRows {
   int32_t stride;  // round_up(y1-y0+1, 16)
   int32_t size;
 };
+#if SWTCON_32BIT_ABI_CHECK
 static_assert(sizeof(RegionRows) == 0x1c, "RegionRows layout drift");
+#endif
 
 // The row-count alignment every RegionRows-shaped buffer's `stride` is
 // rounded up to (dispatch_update_regions's regionRows,
@@ -163,6 +165,7 @@ struct WorkItem {
   uint8_t _pad0x56[2];
   int32_t pixelMode;                              // +0x58
 };
+#if SWTCON_32BIT_ABI_CHECK
 #define WI_ASSERT(field, off) \
   static_assert(offsetof(WorkItem, field) == (off), #field " must land at " #off)
 WI_ASSERT(pixelDataPtr, 0x08);
@@ -198,6 +201,7 @@ static_assert(sizeof(std::shared_ptr<LUTEntry>) == 8, "shared_ptr<T> must be two
 // but pin it anyway as a regression guard against a future libstdc++ vector
 // layout change.
 static_assert(sizeof(std::vector<WorkItem*>) == 0xc, "std::vector<WorkItem*> must be 3 pointers (12 bytes) on this 32-bit ARM target");
+#endif // SWTCON_32BIT_ABI_CHECK
 
 // A work item's containing intrusive-list node - 100 bytes total, matching
 // every `operator_new(100)` / node+8 pattern in the library.
@@ -206,7 +210,9 @@ struct WorkItemNode {
   WorkItemNode* prev;
   WorkItem item;
 };
+#if SWTCON_32BIT_ABI_CHECK
 static_assert(sizeof(WorkItemNode) == 100, "WorkItemNode must match the library's 100-byte list node");
+#endif
 
 // A claimed batch of work items (build_update_batch's output, 0x18 bytes),
 // hooked into the incoming-updates list. `mode` and the "claimed by worker"
@@ -222,10 +228,12 @@ struct BatchNode {
   int32_t count;      // +0x10
   int16_t mode;        // +0x14
 };
+#if SWTCON_32BIT_ABI_CHECK
 static_assert(offsetof(BatchNode, subList) == 0x08, "");
 static_assert(offsetof(BatchNode, count) == 0x10, "");
 static_assert(offsetof(BatchNode, mode) == 0x14, "");
 static_assert(sizeof(BatchNode) == 0x18, "BatchNode layout drift");
+#endif
 
 // True if the worker thread has already claimed this batch (won't be
 // touched again by swtcon_update/unlock_post's subtract/enqueue paths).
@@ -301,6 +309,10 @@ struct UpdateQueueGlobals {
   void* backBuffer;
   std::list<WorkItem> accumList;
   int16_t accumFlag;
+
+  // Whether swtcon_init actually pthread_create'd the threads
+  // (InitParams::startThreads) - swtcon_shutdown must only join those.
+  bool threadsStarted = false;
 };
 
 inline UpdateQueueGlobals*
@@ -341,3 +353,12 @@ WorkItem* update_item_copy(WorkItem* dest, const WorkItem* src);
 // confirmed formulas/addressing. Allocates item's RegionRows blob and fills
 // it from dataBuffer/backBuffer (the full-screen working buffers).
 void dispatch_update_regions(WorkItem* item, void* dataBuffer, void* backBuffer);
+
+// Individual pieces of dispatch_update_regions/swtcon_update, non-static so
+// each can be unit-tested directly - see update.cpp for the full comments.
+Rect clamp_update_rect(const XYRect& in);
+int render_kernel_case(int pixel_mode, int mode);
+uint8_t render_kernel_formula(int case_, uint16_t src, bool back_active, uint8_t gamma);
+void render_update_kernel(WorkItem* item, const uint16_t* dataBuffer, const uint8_t* backBuffer);
+WorkItem* piece_builder(WorkItem* dest, const WorkItem* src, const Rect& piece_rect);
+void subtract_update_region(std::list<WorkItem>& list, const WorkItem* new_item);

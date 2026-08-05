@@ -1,13 +1,14 @@
-# The playback kernels (playback_kernel.s/playback_kernel_aligned.s) are
-# hand-transliterated ARMv7/NEON assembly targeting the reMarkable 2's
-# 32-bit Cortex-A7 - they cannot assemble for any other target, so (like the
-# implementation this replaced) this library only builds when targeting a
-# 32-bit platform.
-if(NOT "${CMAKE_SIZEOF_VOID_P}" STREQUAL "4")
-  return()
-endif()
-
 project(swtcon CXX ASM)
+
+# The ARMv7/NEON asm kernels only assemble for arm; other targets (e.g.
+# dev-host) get playback_kernel_intrinsics.cpp's portable KERNEL_MODE_C.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
+  set(SWTCON_KERNEL_MODE 2) # KERNEL_MODE_ASM
+  set(SWTCON_ASM_SOURCES playback_kernel.s playback_kernel_aligned.s)
+else()
+  set(SWTCON_KERNEL_MODE 1) # KERNEL_MODE_C
+  set(SWTCON_ASM_SOURCES)
+endif()
 
 # The project's "release" preset ships MinSizeRel (-Os, optimize for code
 # size) - a reasonable default for the binary as a whole, but a bad fit for
@@ -26,8 +27,9 @@ add_library(${PROJECT_NAME} STATIC
   update.cpp
   display.cpp
   playback_kernel_intrinsics.cpp
-  playback_kernel.s
-  playback_kernel_aligned.s)
+  ${SWTCON_ASM_SOURCES})
+
+target_compile_definitions(${PROJECT_NAME} PRIVATE SWTCON_KERNEL_MODE=${SWTCON_KERNEL_MODE})
 
 set_property(TARGET ${PROJECT_NAME} PROPERTY POSITION_INDEPENDENT_CODE ON)
 
@@ -44,15 +46,5 @@ target_include_directories(
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_17)
-
-# libqsgepaper.so was built against the C++11 std::string SSO ABI
-# (_GLIBCXX_USE_CXX11_ABI=1): in qsgepaper_init the ModeEntry name string has a
-# 0x18-byte (24) layout and FUN_0004535c reads ModeEntry::luts at offset 0x18.
-# That only lines up if our std::string is also 24 bytes (new ABI). This is the
-# modern default, but pin it so a toolchain default change can't silently break
-# the shared ModeEntry/vector/list layouts. PUBLIC: every TU that links against
-# this library (including the tools/ probes/benchmarks, which pass ModeEntry/
-# LUTEntry/WorkItem across the boundary) must agree on the same ABI.
-target_compile_definitions(${PROJECT_NAME} PUBLIC _GLIBCXX_USE_CXX11_ABI=1)
 
 target_link_libraries(${PROJECT_NAME} PUBLIC pthread dl)

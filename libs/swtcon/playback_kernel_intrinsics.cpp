@@ -10,7 +10,12 @@
 #define KERNEL_MODE_ASM 2
 #define KERNEL_MODE_NEON 3
 
-#define KERNEL_MODE KERNEL_MODE_ASM
+// Set by libs/swtcon/CMakeLists.txt; direct compilations that skip it (e.g.
+// tools/qsgepaper-preload, arm-only) default to the real production kernel.
+#ifndef SWTCON_KERNEL_MODE
+#define SWTCON_KERNEL_MODE KERNEL_MODE_ASM
+#endif
+#define KERNEL_MODE SWTCON_KERNEL_MODE
 
 #if KERNEL_MODE == KERNEL_MODE_NEON && !defined(__ARM_NEON) &&                 \
   !defined(__ARM_NEON__)

@@ -388,7 +388,10 @@ extern void* g_pStateBufferNative;
 // committed/narrowed result); false if it ends up degenerate ("incremental"
 // with literally nothing changed anywhere) and should be destroyed by the
 // caller exactly like an already-degenerate item.
-static bool
+//
+// Non-static (declared in display.h) for direct unit testing, like the rest
+// of this file's un-staticed functions below - none are per-pixel paths.
+bool
 commit_item(WorkItem* item) {
   int rows = item->rectY1 - item->rectY0 + 1;
   int cols = item->rectX1 - item->rectX0 + 1;
@@ -582,7 +585,7 @@ commit_item(WorkItem* item) {
 // identical" check enumerated frameCursor/frameAnchor/phase/rect/sync/
 // lutWidthMinus1 but not +0x44, and zero-filling pixelTransitions' PAYLOAD
 // couldn't help since the kernels never read pixelTransitions.ptr->dataPtr.
-static bool
+bool
 dispatch_processed_regions_native(std::list<WorkItem>& sub_list) {
   bool any_survived = false;
   for (auto it = sub_list.begin(); it != sub_list.end();) {
@@ -624,7 +627,7 @@ copy_init_frame_row(void* frame_slot_addr, int col) {
 // negative for a negative `i` near startup, in which case this reaches
 // backwards past the array's base - a real quirk in the library itself,
 // transcribed verbatim rather than "fixed" (see swtcon_architecture.md §8).
-static void
+void
 stale_row_cleanup() {
   auto* cursor = frame_cursor_globals();
   uint8_t* dirty_gate = backbuffer_dirty_gate();
@@ -652,7 +655,7 @@ stale_row_cleanup() {
 // processed item's deps of entries pointing at the doomed item (the
 // matching teardown for the links build_overlap_dependency_list builds -
 // see §6.2a).
-static void
+void
 gc_processed_updates() {
   auto* queue = update_queue_globals();
 
@@ -677,7 +680,7 @@ gc_processed_updates() {
 // for each item in `sub_list`, rebuilds its deps from scratch against every
 // still-active item in g_pListProcessedUpdates whose rect overlaps and
 // whose lifetime outlasts this item's own frameAnchor.
-static void
+void
 build_overlap_dependency_list(std::list<WorkItem>& sub_list) {
   auto* queue = update_queue_globals();
 
@@ -760,7 +763,7 @@ playback_kernel_dispatch(PlaybackKernelFn kernel_fn,
 // dispatch_processed_regions's merged-X-span<29): 1 unless the item's rect
 // is non-degenerate and its area exceeds 20000px, in which case 1 if its
 // column span is under 10, else 2.
-static int
+int
 playback_chunk_count(const WorkItem* item) {
   if (item->rectY0 <= item->rectY1 && item->rectX0 <= item->rectX1) {
     int32_t width_span = item->rectX1 - item->rectX0;
@@ -856,7 +859,7 @@ dispatch_aligned_kernel(void** frame_slots, WorkItem* item, int frame_count) {
 // there's NO overlap left to track, not when there is. It's an alignment
 // fast path, not an overlap-aware one - see dispatch_aligned_kernel's
 // comment.
-static void
+void
 advance_work_item_frames(WorkItem* item) {
   auto* queue = update_queue_globals();
   auto* cursor = frame_cursor_globals();

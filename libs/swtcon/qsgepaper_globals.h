@@ -32,6 +32,11 @@
 
 #include "swtcon.h"
 
+// Structs below (here and in update.h) pin offsets/sizes to the real 32-bit
+// ARM library's layout via static_assert - meaningless on a 64-bit host, so
+// those checks are guarded by this rather than failing every dev-host build.
+#define SWTCON_32BIT_ABI_CHECK (UINTPTR_MAX == 0xFFFFFFFFu)
+
 // Forward-declared rather than #include "init.h" (which defines
 // ModeEntry) to avoid a header cycle - init.h itself includes this
 // file. A vector of pointers only needs the pointee declared, not complete.
@@ -90,7 +95,9 @@ struct ListHead {
   void* next;
   void* prev;
 };
+#if SWTCON_32BIT_ABI_CHECK
 static_assert(sizeof(ListHead) == 8, "ListHead must be two pointers");
+#endif
 
 // The library's own timestamp ABI (__clock_gettime64 - a Y2038-safe kernel
 // timespec: two 64-bit fields), confirmed via disassembly of
@@ -222,9 +229,11 @@ struct StatebufferGlobals {
   int32_t nSize;         // 0x6d1d8
 };
 constexpr uintptr_t kStatebufferGlobalsAddr = 0x6d1d0;
+#if SWTCON_32BIT_ABI_CHECK
 static_assert(offsetof(StatebufferGlobals, pGammaTable) == 0x6d1d4 - kStatebufferGlobalsAddr, "");
 static_assert(offsetof(StatebufferGlobals, nSize) == 0x6d1d8 - kStatebufferGlobalsAddr, "");
 static_assert(sizeof(StatebufferGlobals) == 0xc, "StatebufferGlobals layout drift");
+#endif
 
 inline StatebufferGlobals*
 statebuffer_globals() {
@@ -248,6 +257,7 @@ struct FramebufferGlobals {
   void* pFbMmap;                           // 0x6d44c
 };
 constexpr uintptr_t kFramebufferGlobalsAddr = 0x6d350;
+#if SWTCON_32BIT_ABI_CHECK
 #define FB_OFFSETOF(field) (offsetof(FramebufferGlobals, field))
 #define FB_ASSERT(field, addr) \
   static_assert(FB_OFFSETOF(field) == (addr) - kFramebufferGlobalsAddr, \
@@ -263,6 +273,7 @@ static_assert(sizeof(FramebufferGlobals) == 0x6d450 - kFramebufferGlobalsAddr,
               "FramebufferGlobals layout drift");
 #undef FB_ASSERT
 #undef FB_OFFSETOF
+#endif
 
 inline FramebufferGlobals*
 framebuffer_globals() {

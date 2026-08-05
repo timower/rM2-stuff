@@ -31,6 +31,30 @@ if(TARGET rm2fb_lib)
                                                 Evdev::Static udev)
 endif()
 
+# swtcon builds on host too (KERNEL_MODE_C fallback) specifically for this.
+if(TARGET swtcon)
+  target_sources(${PROJECT_NAME} PRIVATE TestSwtcon.cpp)
+  target_link_libraries(${PROJECT_NAME} PRIVATE swtcon)
+
+  # assets/test.wbf.tar.xz is a real waveform (pulled from RemEmu) checked
+  # in xz-compressed (~13x smaller) - extract it at build time instead of
+  # storing the 280KB original. `cmake -E tar` uses CMake's own bundled
+  # libarchive, so this needs no external xz/tar binary.
+  set(SWTCON_TEST_WBF_DIR ${CMAKE_CURRENT_BINARY_DIR}/wbf)
+  add_custom_command(
+    OUTPUT ${SWTCON_TEST_WBF_DIR}/test.wbf
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${SWTCON_TEST_WBF_DIR}
+    COMMAND ${CMAKE_COMMAND} -E tar xf
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/test.wbf.tar.xz
+    WORKING_DIRECTORY ${SWTCON_TEST_WBF_DIR}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/test.wbf.tar.xz
+    COMMENT "Extracting swtcon test waveform")
+  add_custom_target(swtcon-test-wbf DEPENDS ${SWTCON_TEST_WBF_DIR}/test.wbf)
+  add_dependencies(${PROJECT_NAME} swtcon-test-wbf)
+  target_compile_definitions(
+    ${PROJECT_NAME} PRIVATE SWTCON_TEST_WBF_DIR="${SWTCON_TEST_WBF_DIR}")
+endif()
+
 # From:
 # https://github.com/catchorg/Catch2/blob/devel/docs/cmake-integration.md#catchcmake-and-catchaddtestscmake
 FetchContent_MakeAvailable(Catch2)

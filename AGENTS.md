@@ -1,5 +1,7 @@
 Be brief.
 Only comment in code if they clarify, explain why not what.
+Try to limit comments to two lines max.
+
 Avoid globals when possible.
 Use `clang-format` to format C++/C files.
 
