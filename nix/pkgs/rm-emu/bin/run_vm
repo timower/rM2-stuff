@@ -18,7 +18,7 @@ if ! [ -f "$root_path" ] && [ -f "$backing_path" ]; then
     echo "No image found, creating new one at $root_path"
     qemu-img create -b "$backing_path" -F qcow2 -f qcow2 "$root_path"
   fi
-  chattr +C "$root_path"
+  chattr +C "$root_path" || echo "chattr +C failed with exit $? (probably unsupported on this filesystem, continuing)"
 fi
 
 load_state=""
