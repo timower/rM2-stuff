@@ -18,8 +18,8 @@
 #include <vector>
 
 #include "init.h"
-#include "update.h"
 #include "qsgepaper_globals.h"
+#include "update.h"
 
 // Native reimplementation of worker_thread_func (0x3ae38) - see AGENTS.md
 // Phase 5 and swtcon_architecture.md §6.1 for the reversing history. This is
@@ -96,6 +96,14 @@ is_worker_suspended() {
 
 void
 swtcon_suspend() {
+  // curFrame==targetFrame alone is a transient snapshot - step 7 re-bumps it
+  // for items still mid-waveform, so also wait for listProcessedUpdates.
+  auto* queue = update_queue_globals();
+  while (queue->workerThreadShutdown == 0 &&
+         (queue->curFrame != queue->targetFrame ||
+          !queue->listProcessedUpdates.empty()))
+    usleep(100);
+
   pthread_mutex_lock(&g_suspendMutex);
   g_workerSuspended = true;
   pthread_mutex_unlock(&g_suspendMutex);
@@ -115,7 +123,6 @@ swtcon_suspend() {
   // here kicks the worker thread out of that wait immediately so the new
   // break condition added to that loop (and the re-check right after it)
   // can catch the suspend request before any hardware-touching step runs.
-  auto* queue = update_queue_globals();
   pthread_mutex_lock(&queue->workerCondMutex);
   pthread_cond_broadcast(&queue->workerCond);
   pthread_mutex_unlock(&queue->workerCondMutex);
@@ -279,23 +286,21 @@ worker_thread_func(void*) {
       float temp = get_current_temperature();
       std::shared_ptr<LUTEntry> lut_sp;
       select_waveform_lut(temp,
-                                 &lut_sp,
-                                 &queue->waveform,
-                                 /*mode=*/0);
+                          &lut_sp,
+                          &queue->waveform,
+                          /*mode=*/0);
 
       if (update_lut_is_valid(lut_sp)) {
         static const uint16_t kFlashPatterns[3] = { 0x0000, 0x5555, 0xaaaa };
         for (int i = 0; i < 3; i++)
-          write_lut_pattern(frame_buffer_addr(i),
-                                   kFlashPatterns[i]);
+          write_lut_pattern(frame_buffer_addr(i), kFlashPatterns[i]);
 
         auto* lut = lut_sp.get();
         pan_and_unblank((int)read_lut_packed_pixel(lut, 0, 0, 0));
         int phase_count =
           lut->size_kb; // doubles as this LUT's frame/phase count
         for (int phase = 1; phase < phase_count; phase++)
-          pan_to_frame(
-            (int)read_lut_packed_pixel(lut, 0, 0, phase));
+          pan_to_frame((int)read_lut_packed_pixel(lut, 0, 0, phase));
         pan_to_frame(0);
         pan_to_frame(kInitFrameSlotIndex);
         blank_fb();
@@ -463,9 +468,10 @@ commit_item(WorkItem* item) {
         uint16_t old = state[(size_t)col * kScreenHeight + row];
         bool is_sentinel = new_raw == kGatedPixelSentinel;
         uint16_t effective_new = is_sentinel ? old : new_raw;
-        uint16_t packed = is_sentinel
-                             ? kPixelTransitionUnchanged
-                             : (uint16_t)((old << kPixelTransitionShift) | effective_new);
+        uint16_t packed =
+          is_sentinel
+            ? kPixelTransitionUnchanged
+            : (uint16_t)((old << kPixelTransitionShift) | effective_new);
         transitionBuf[(size_t)strideRows * localCol + localRow] = packed;
         state[(size_t)col * kScreenHeight + row] = effective_new;
       }
@@ -506,8 +512,9 @@ commit_item(WorkItem* item) {
         uint16_t effective_new = skip ? old : new_raw;
 
         newState[lane] = effective_new;
-        packedVal[lane] = skip ? kPixelTransitionUnchanged
-                                : (uint16_t)((old << kPixelTransitionShift) | effective_new);
+        packedVal[lane] =
+          skip ? kPixelTransitionUnchanged
+               : (uint16_t)((old << kPixelTransitionShift) | effective_new);
         transitionBuf[(size_t)strideRows * localCol + localRow] =
           packedVal[lane];
         if (!skip)
@@ -624,7 +631,8 @@ stale_row_cleanup() {
   int32_t last_panned = cursor->nLastPannedFrame;
 
   for (int32_t i = cursor->nFrameCleanupCursor - (kFrameSlotRingCount - 1);
-       i <= last_panned; i++) {
+       i <= last_panned;
+       i++) {
     int32_t bucket = i % kFrameSlotRingCount;
     uint8_t* row = dirty_gate + (int64_t)bucket * kDirtyGateRowBytes;
     void* frame_slot = frame_buffer_addr(bucket);
@@ -719,10 +727,10 @@ using PlaybackKernelFn = void (*)(void**, WorkItem*, int, int, int);
 // writes, matching the library (no mutex held here either).
 static void
 playback_kernel_dispatch(PlaybackKernelFn kernel_fn,
-                                void** frame_slots,
-                                WorkItem* item,
-                                int frame_count,
-                                int chunk_count) {
+                         void** frame_slots,
+                         WorkItem* item,
+                         int frame_count,
+                         int chunk_count) {
   if (chunk_count < 2) {
     kernel_fn(frame_slots, item, frame_count, 0, 1);
   } else {
@@ -774,12 +782,13 @@ playback_chunk_count(const WorkItem* item) {
 // still produced visible real-hardware artifacts; the literal
 // transliteration fixed them, root cause still unidentified).
 static void
-dispatch_plain_kernel(void** frame_slots,
-                             WorkItem* item,
-                             int frame_count) {
+dispatch_plain_kernel(void** frame_slots, WorkItem* item, int frame_count) {
   int chunk_count = playback_chunk_count(item);
-  playback_kernel_dispatch(
-    playback_kernel_plain_intrinsics, frame_slots, item, frame_count, chunk_count);
+  playback_kernel_dispatch(playback_kernel_plain_intrinsics,
+                           frame_slots,
+                           item,
+                           frame_count,
+                           chunk_count);
 }
 
 // Mirrors FUN_0003f1f0 (0x3f1f0, the "aligned" kernel wrapper - CONFIRMED):
@@ -821,15 +830,13 @@ dispatch_plain_kernel(void** frame_slots,
 // code, provably same output - so no separate native implementation is
 // needed, and the delegates never need reversing at all.
 static void
-dispatch_aligned_kernel(void** frame_slots,
-                               WorkItem* item,
-                               int frame_count) {
+dispatch_aligned_kernel(void** frame_slots, WorkItem* item, int frame_count) {
   int chunk_count = playback_chunk_count(item);
   playback_kernel_dispatch(playback_kernel_aligned_intrinsics,
-                                  frame_slots,
-                                  item,
-                                  frame_count,
-                                  chunk_count);
+                           frame_slots,
+                           item,
+                           frame_count,
+                           chunk_count);
 }
 
 // Mirrors advance_work_item_frames (0x3a984) byte-exactly, re-derived
@@ -919,7 +926,8 @@ advance_work_item_frames(WorkItem* item) {
     uint8_t* dirty_gate = backbuffer_dirty_gate();
     auto* transitions = item->pixelTransitions.get();
     for (int32_t f = start_frame_cursor; f != item->frameCursor; f++) {
-      uint8_t* row = dirty_gate + (int64_t)(f % kFrameSlotRingCount) * kDirtyGateRowBytes;
+      uint8_t* row =
+        dirty_gate + (int64_t)(f % kFrameSlotRingCount) * kDirtyGateRowBytes;
       for (int32_t col = transitions->x0; col <= transitions->x1; col++)
         row[col] = 1;
     }
@@ -1008,8 +1016,7 @@ display_thread_func(void*) {
 
         int32_t gate_target = std::max(max_lifetime, queue->curFrame);
         if (cursor->nFrameCleanupCursor - gate_target > 6) {
-          bool dispatched =
-            dispatch_processed_regions_native(batch.subList);
+          bool dispatched = dispatch_processed_regions_native(batch.subList);
 
           if (dispatched) {
             int32_t target;
@@ -1027,8 +1034,9 @@ display_thread_func(void*) {
                 min_x0 = std::min(min_x0, item.rectX0);
               }
               int32_t budget = (int32_t)workload_sum + 100;
-              int32_t pace_target = (int32_t)(((int64_t)min_x0 + 1) *
-                                              kColumnPaceUsPerColumnX1000 / 1000);
+              int32_t pace_target =
+                (int32_t)(((int64_t)min_x0 + 1) * kColumnPaceUsPerColumnX1000 /
+                          1000);
 
               pthread_mutex_lock(&queue->displayTimingMutex);
               struct timespec now;

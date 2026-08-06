@@ -166,7 +166,7 @@ private:
   void launch(rmlib::AppContext& ctx, App& app);
   void switchApp(pid_t pid);
 
-  void onSignal();
+  void onSignal(rmlib::AppContext& context);
   bool isRunning(pid_t pid) const;
 
   void readApps();
@@ -196,6 +196,7 @@ private:
   int sleepCountdown = -1;
   mutable int inactivityCountdown = default_inactivity_timeout;
   bool visible = true;
+  bool startSleepTimerOnShow = false;
 
   bool modPressed = false;
   unistdpp::FD inhibitorLock;

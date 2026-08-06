@@ -63,6 +63,11 @@ struct FakeClient {
       sendMessage(sock, UnixClientMsg{ Init{ .ownSwtcon = ownSwtcon } });
     REQUIRE(res.has_value());
   }
+
+  void sendIdleUpdate(bool idle) {
+    auto res = sendMessage(sock, UnixClientMsg{ IdleUpdate{ idle } });
+    REQUIRE(res.has_value());
+  }
 };
 
 // Server::poll()'s blocking ::poll() can be interrupted by a signal
@@ -160,4 +165,47 @@ TEST_CASE("Server client-driven front is derived from Init not accept",
   // since this is the only client to ever connect.
   REQUIRE(fakeProcessControl.signals ==
           std::vector<std::pair<pid_t, int>>{ { getpid(), SIGCONT } });
+}
+
+// Regression: resume() used to hardcode a fresh ClientDrivenFront's idle to
+// false, even though pause() only ever runs once idle was confirmed true -
+// so a client that did nothing new after being resumed had no way to ever
+// report idle again, and a later switch away from it deferred forever. Idle
+// now lives on UnixClient (survives pause()/resume() on its own) instead of
+// being reset on every fresh ClientDrivenFront - see requestSwitch().
+TEST_CASE("Client-driven front keeps its confirmed idle state across "
+          "pause()/resume()",
+          "[rm2fb][rm2fb-server]") {
+  const char* lockPath = "/tmp/rm2fb-test-server-idle.lock";
+  const char* sockPath = "/tmp/rm2fb-test-server-idle.sock";
+  unlink(sockPath);
+
+  FakeAddressInfo fakeAddrs;
+  FakeProcessControl fakeProcessControl;
+  Server server(&fakeAddrs, lockPath, sockPath, fakeProcessControl);
+
+  FakeClient client(sockPath);
+  pollUntil(server, [&] { return !server.unixClients.empty(); });
+  client.sendInit(/* ownSwtcon= */ true);
+  pollUntil(server, [&] {
+    return std::holds_alternative<ClientDrivenFront>(server.focus);
+  });
+
+  // Confirm idle, exactly like xochitl reaching its real 3s blank.
+  client.sendIdleUpdate(true);
+  pollUntil(server, [&] { return server.unixClients[0].idle; });
+
+  // pause()+resume() on the same client, exactly what requestSwitch() does
+  // when switching away and back - with no fresh IdleUpdate in between,
+  // matching xochitl doing nothing new after being resumed.
+  server.pause(getpid());
+  server.resume(server.unixClients[0]);
+  REQUIRE(server.unixClients[0].idle);
+
+  // The actual observable bug: a switch request right after resuming, with
+  // no update in between, must not get deferred.
+  server.requestSwitch(getpid());
+  auto* front = std::get_if<ClientDrivenFront>(&server.focus);
+  REQUIRE(front != nullptr);
+  REQUIRE(!front->pendingSwitchTarget.has_value());
 }

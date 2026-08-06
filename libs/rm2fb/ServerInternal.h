@@ -95,11 +95,6 @@ struct ServerDrivenFront {
 struct ClientDrivenFront {
   pid_t pid;
 
-  // Last IdleUpdate value reported by this client. Switching away from a
-  // busy (non-idle) client can't happen immediately - see
-  // pendingSwitchTarget below - so this gates requestSwitch().
-  bool idle = false;
-
   // Switch target requested while this client was busy (non-idle) - see
   // requestSwitch(). Deliberately defers the *whole* switch (not just this
   // client's freeze) until it reports idle: submitting updates to our own
@@ -175,6 +170,12 @@ struct UnixClient {
   // swtcon - and (b) know whether it's still waiting on its first-ever
   // Init reply (see resume()).
   bool hasBeenFront = false;
+
+  // Last IdleUpdate value reported by this client (ownSwtcon clients only) -
+  // lives here rather than on ClientDrivenFront so it survives across being
+  // paused/resumed instead of needing a manual snapshot/restore around every
+  // focus change. Gates requestSwitch() while this client is front.
+  bool idle = false;
 
   // This client's own dedicated framebuffer, allocated once when its Init
   // arrives (readUnixSock()) and held for the connection's lifetime. On
@@ -451,7 +452,6 @@ struct Server : ControlInterface {
         hookAddrs->suspendForXochitl();
       }
       focus = ClientDrivenFront{ .pid = client.pid,
-                                 .idle = false,
                                  .pendingSwitchTarget = std::nullopt };
     } else {
       focus = ServerDrivenFront{ client.pid };
@@ -518,7 +518,9 @@ struct Server : ControlInterface {
     }
 
     if (auto* front = std::get_if<ClientDrivenFront>(&focus)) {
-      if (!front->idle) {
+      auto frontIt = findClient(front->pid);
+      bool idle = frontIt != unixClients.end() && frontIt->idle;
+      if (!idle) {
         front->pendingSwitchTarget = targetPid;
         std::cerr << "Deferring switch to " << targetPid
                   << ", client still busy\n";
@@ -765,7 +767,7 @@ struct Server : ControlInterface {
                 return {};
               }
 
-              front->idle = m.val;
+              client.idle = m.val;
 
               if (m.val && front->pendingSwitchTarget) {
                 pid_t target = *front->pendingSwitchTarget;

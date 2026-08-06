@@ -44,7 +44,7 @@ LauncherState::init(rmlib::AppContext& context,
   auto pipe = unistdpp::fatalOnError(unistdpp::pipe());
   writeFd = std::move(pipe.writePipe);
   signalPipe = std::move(pipe.readPipe);
-  context.listenFd(signalPipe.fd, [&] { modify().onSignal(); });
+  context.listenFd(signalPipe.fd, [&] { modify().onSignal(context); });
 
   struct sigaction sigAct = {};
   sigAct.sa_flags = SA_RESTART; // make sure reading is restatart on switch.
@@ -150,7 +150,10 @@ LauncherState::toggle(rmlib::AppContext& context) {
     stopTimer();
     hide(shouldStartTimer ? &context : nullptr);
   } else {
-    startTimer(context);
+    // Deferred to onSignal()'s SIGCONT - show()'s switchTo() can be held up
+    // server-side until xochitl reports idle, so starting the countdown here
+    // would eat into it before the launcher is even visible.
+    startSleepTimerOnShow = true;
     show();
   }
 }
@@ -216,7 +219,7 @@ LauncherState::launch(rmlib::AppContext& ctx, App& app) {
 }
 
 void
-LauncherState::onSignal() {
+LauncherState::onSignal(rmlib::AppContext& context) {
   auto sigOrErr = signalPipe.readAll<int>();
   if (!sigOrErr.has_value()) {
     return;
@@ -230,6 +233,11 @@ LauncherState::onSignal() {
     background.reset();
   } else if (*sigOrErr == SIGCONT) {
     visible = true;
+
+    if (startSleepTimerOnShow) {
+      startSleepTimerOnShow = false;
+      startTimer(context);
+    }
 
     readApps();
     requestClients();
