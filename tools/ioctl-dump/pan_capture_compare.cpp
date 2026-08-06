@@ -85,8 +85,8 @@ main(int argc, char** argv) {
 
   bool length_mismatch = a.size() != b.size();
   if (length_mismatch) {
-    std::cout << "length mismatch: " << argv[1] << " has " << a.size()
-              << ", " << argv[2] << " has " << b.size() << "\n";
+    std::cout << "length mismatch: " << argv[1] << " has " << a.size() << ", "
+              << argv[2] << " has " << b.size() << "\n";
   }
 
   if (mismatches == 0 && !length_mismatch) {
@@ -96,7 +96,7 @@ main(int argc, char** argv) {
   }
 
   std::cout << "MISMATCH: " << mismatches << " of " << n
-            << " compared positions differ" << (length_mismatch ? "; plus a length mismatch" : "")
-            << "\n";
+            << " compared positions differ"
+            << (length_mismatch ? "; plus a length mismatch" : "") << "\n";
   return 1;
 }

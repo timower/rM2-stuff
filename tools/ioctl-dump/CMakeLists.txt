@@ -24,6 +24,15 @@ install(
   COMPONENT ioctl-dump
   DESTINATION ${OPT_PREFIX}lib)
 
+# Installed alongside the library so the "ioctl-dump" nix component (used to
+# get libioctl-dump.so onto a NixOS-built VM/device) also carries the
+# comparator needed to actually run an A/B check there - see
+# nix/tests/default.nix's swtcon-ab-compare.
+install(
+  TARGETS pan-capture-compare
+  COMPONENT ioctl-dump
+  DESTINATION ${OPT_PREFIX}bin)
+
 install(
   FILES rm2fb_ioctl_dump.conf
   COMPONENT ioctl-dump

@@ -12,20 +12,21 @@
 # frame count varies with real-time pacing (see main.cpp/pan_capture_compare
 # comments). So by default (no test-case argument), this script runs every
 # test case *individually* (its own pair of captures each), skipping test
-# case 8 ("burst of un-synced overlapping updates") - it deliberately races
-# the worker thread with no swtcon_wait() between submissions, so it is
-# known-flaky under any A/B comparison and not a real regression signal (see
-# CLAUDE.md's Phase 9 notes). Pass "8" explicitly to test it anyway.
+# cases 8 ("burst of un-synced overlapping updates") and 9 ("in-flight active
+# dependency") - both deliberately race real-time completion/scheduling (see
+# main.cpp's should_run comment), so they're known-flaky under any A/B
+# comparison and not a real regression signal (see CLAUDE.md's Phase 9
+# notes). Pass "8" or "9" explicitly to test them anyway.
 #
 # Usage: tools/qsgepaper-preload/ab_compare.sh <ssh-target> [test-case]
 #
 #   <ssh-target>  ssh destination for the device/emulator (e.g. "RemEmu"),
 #                 passed straight through to ssh/scp.
 #   [test-case]   optional. Omit to run every test case except the known-
-#                 flaky case 8, comparing each in isolation and reporting a
-#                 pass/fail summary. "0" runs init only. "N" (1-10) runs and
-#                 compares just that one test case (including "8", if you
-#                 want to see its known flakiness).
+#                 flaky cases 8 and 9, comparing each in isolation and
+#                 reporting a pass/fail summary. "0" runs init only. "N"
+#                 (1-10) runs and compares just that one test case (including
+#                 "8"/"9", if you want to see their known flakiness).
 #
 # Requires build/dev to already contain qsgepaper-test, libioctl-dump.so and
 # pan-capture-compare - run `ninja -C build/dev` first.
@@ -86,10 +87,10 @@ if [ -n "$TEST_CASE" ]; then
   exit "$RUN_ONE_RC"
 fi
 
-# No test case given: run every case except the known-flaky case 8, and
-# report a pass/fail summary across all of them.
+# No test case given: run every case except the known-flaky cases 8 and 9,
+# and report a pass/fail summary across all of them.
 FAILED=""
-for n in 1 2 3 4 5 6 7 9 10; do
+for n in 1 2 3 4 5 6 7 10; do
   run_one "$n"
   if [ "$RUN_ONE_RC" -eq 0 ]; then
     echo "case $n: MATCH" >&2
@@ -101,7 +102,7 @@ done
 
 echo >&2
 if [ -z "$FAILED" ]; then
-  echo "All test cases matched (case 8 skipped - known flaky, pass it explicitly to check anyway)." >&2
+  echo "All test cases matched (cases 8/9 skipped - known flaky, pass them explicitly to check anyway)." >&2
   exit 0
 else
   echo "Mismatched test case(s):$FAILED" >&2

@@ -241,6 +241,98 @@ setNames rec {
     ];
   };
 
+  # Black-box A/B correctness check for the native swtcon reimplementation:
+  # for each isolated test case in qsgepaper-test (tools/qsgepaper-preload),
+  # runs it once natively and once with SWTCON_LIBIMPL=1 (the real
+  # libqsgepaper.so), then diffs the two SWTCON_PAN_CAPTURE sequences with
+  # pan-capture-compare - the same technique, and the same environment, as
+  # tools/qsgepaper-preload/ab_compare.sh (see its header comment and
+  # CLAUDE.md's Building/Testing section), just run automatically instead of
+  # by hand against a real device/RemEmu over ssh.
+  #
+  # Deliberately boots the stock rootfs (bootNixos = false, like `installer`)
+  # instead of NixOS: swtcon's waveform lookup
+  # (libs/swtcon/init.cpp's find_waveform_path) and the real
+  # libqsgepaper.so (/usr/lib/plugins/scenegraph/) only exist on the
+  # device's own partitions - under a NixOS boot ("/" is the data partition
+  # there) those are only reachable through xochitl-env's chroot, and even
+  # that chroot doesn't mount every partition qsgepaper-test's standalone
+  # swtcon needs (it mounts what xochitl itself needs). Booting the real
+  # rootfs directly sidesteps all of that, and matches how every "confirmed
+  # on the emulator" result in doc/swtcon_porting.md was actually obtained.
+  swtcon-ab-compare = mkTest {
+    modules = [
+      ../modules/remarkable.nix
+      ../template/config.nix
+    ];
+    bootNixos = false;
+    testScript =
+      let
+        # Cross-built directly for the target, independent of the NixOS
+        # module system above (it isn't what's booted here). Needs the
+        # actual device toolchain (same as flake.nix's "dev-rm2-toolchain"
+        # and CLAUDE.md's device build instructions), not plain nixpkgs
+        # cross (pkgsCross.armv7l-hf-multiplatform) - that links against
+        # nixpkgs' own glibc, whose dynamic linker path only exists under a
+        # NixOS-managed /nix/store, not on the stock rootfs booted here.
+        rm2-toolchain = pkgs.callPackage ../pkgs/rm2-toolchain.nix { };
+        rm2-stuff-cross = pkgs.callPackage ../pkgs/rm2-stuff.nix { toolchain_root = "${rm2-toolchain}"; };
+        sshOpts = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null";
+      in
+      ''
+        REMOTE_DIR=/home/root
+
+        scp -P 2222 ${sshOpts} \
+          ${rm2-stuff-cross.tools}/bin/qsgepaper-test \
+          ${rm2-stuff-cross.ioctl_dump}/lib/libioctl-dump.so \
+          ${rm2-stuff-cross.ioctl_dump}/bin/pan-capture-compare \
+          root@localhost:$REMOTE_DIR/
+
+        # /tmp/epd.lock (libs/swtcon/init.cpp's create_pid_file) can still
+        # be held right after boot by whatever the stock image auto-starts
+        # that also touches the display - it has no real /dev/fb0/epaper
+        # here, so it reliably exits (and releases the lock) within the
+        # first couple seconds, but a qsgepaper-test invocation landing
+        # before that loses the race and exits immediately with no capture.
+        # Retry a quick init-only run (case "0" - init then straight to
+        # shutdown, no interactive cases) until it succeeds before starting
+        # the real loop below.
+        for _ in 1 2 3 4 5; do
+          if in_vm "cd $REMOTE_DIR && ./qsgepaper-test 0 >/dev/null 2>&1"; then
+            break
+          fi
+          sleep 2
+        done
+
+        # Cases 8 ("burst of un-synced overlapping updates") and 9
+        # ("in-flight active dependency") deliberately race real-time
+        # completion/scheduling (see main.cpp's should_run comment), so
+        # they're known-flaky under any A/B comparison and not a real
+        # regression signal (see ab_compare.sh's header comment) - skipped
+        # here just like ab_compare.sh's default (whole-suite) run.
+        #
+        # `yes` (no args - in_vm's own quoting doesn't nest cleanly with an
+        # embedded empty-string argument) just as well satisfies
+        # qsgepaper-test's getchar() prompts between cases as an
+        # empty-string arg would; the byte value doesn't matter, only that
+        # input keeps flowing.
+        FAILED=""
+        for n in 1 2 3 4 5 6 7 10; do
+          in_vm "cd $REMOTE_DIR && yes | LD_PRELOAD=./libioctl-dump.so SWTCON_PAN_CAPTURE=/tmp/native_$n.txt ./qsgepaper-test $n >/dev/null"
+          in_vm "cd $REMOTE_DIR && yes | SWTCON_LIBIMPL=1 LD_PRELOAD=./libioctl-dump.so SWTCON_PAN_CAPTURE=/tmp/lib_$n.txt ./qsgepaper-test $n >/dev/null"
+
+          if ! in_vm "cd $REMOTE_DIR && ./pan-capture-compare /tmp/native_$n.txt /tmp/lib_$n.txt"; then
+            FAILED="$FAILED $n"
+          fi
+        done
+
+        if [ -n "$FAILED" ]; then
+          echo "swtcon A/B mismatch for test case(s):$FAILED" >&2
+          fail
+        fi
+      '';
+  };
+
   installer = mkTest {
     modules = [
       ../modules/remarkable.nix
