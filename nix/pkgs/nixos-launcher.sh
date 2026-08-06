@@ -55,7 +55,14 @@ start_server() {
     sleep 1
   done
 
-  LD_PRELOAD="@rm2fb-client@" "@yaft_reader@" /dev/kmsg &
+  # yaft_reader touches this once it has opened /dev/kmsg and is listening,
+  # i.e. once a write to /dev/kmsg is guaranteed to be seen instead of racing
+  # its lseek(SEEK_END) (which would otherwise silently skip it forever).
+  rm -f /run/yaft-reader-ready
+  LD_PRELOAD="@rm2fb-client@" "@yaft_reader@" /dev/kmsg /run/yaft-reader-ready &
+  while ! test -e /run/yaft-reader-ready; do
+    sleep 1
+  done
 
   # The server has started, let systemd know
   systemd-notify --ready

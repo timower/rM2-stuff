@@ -8,6 +8,7 @@
 #include "unistdpp/file.h"
 
 // stdlib
+#include <fstream>
 #include <unistd.h>
 
 using namespace rmlib;
@@ -18,13 +19,18 @@ class ReaderState;
 
 class Reader : public rmlib::StatefulWidget<Reader> {
 public:
-  Reader(const char* path) : filePath(path) {}
+  Reader(const char* path, const char* readyPath = nullptr)
+    : filePath(path), readyPath(readyPath) {}
 
   static ReaderState createState();
 
 private:
   friend class ReaderState;
   const char* filePath;
+  // Touched once listenFd() below is registered, i.e. once it's safe for a
+  // writer to append to filePath without racing our lseek(SEEK_END) (a
+  // write landing before that point is otherwise lost forever).
+  const char* readyPath;
 };
 
 class ReaderState : public rmlib::StateBase<Reader> {
@@ -82,6 +88,10 @@ public:
         setState([&](auto& self) { self.putTerm(buf.data(), size); });
       }
     });
+
+    if (getWidget().readyPath != nullptr) {
+      std::ofstream(getWidget().readyPath).close();
+    }
   }
 
   auto build(rmlib::AppContext& ctx, const rmlib::BuildContext& _) const {
@@ -102,8 +112,8 @@ Reader::createState() {
 
 int
 main(int argc, char* argv[]) {
-  if (argc != 2) {
-    std::cerr << "Usage: " << argv[0] << " <file>\n";
+  if (argc != 2 && argc != 3) {
+    std::cerr << "Usage: " << argv[0] << " <file> [ready-file]\n";
     return 1;
   }
 
@@ -115,7 +125,8 @@ main(int argc, char* argv[]) {
   }
   std::cerr << "Locale is: " << locale << "\n";
 
-  unistdpp::fatalOnError(runApp(Reader(argv[1])));
+  unistdpp::fatalOnError(
+    runApp(Reader(argv[1], argc == 3 ? argv[2] : nullptr)));
 
   return 0;
 }

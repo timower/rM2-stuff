@@ -71,8 +71,15 @@ let
         ${driver}
       ''
   );
+
+  setNames = lib.mapAttrs (
+    n: v:
+    v.overrideAttrs (o: {
+      name = n;
+    })
+  );
 in
-rec {
+setNames rec {
   tilem = mkTest {
     modules = [
       ../modules/remarkable.nix
@@ -241,10 +248,20 @@ rec {
     ];
     bootNixos = false;
     testScript = ''
+      # "nixctl launch" itself now blocks (via systemd-notify --ready) until
+      # yaft_reader has opened /dev/kmsg and is listening, so this echo can't
+      # race its lseek(SEEK_END) and get silently dropped.
       in_vm nixos/nixctl launch
-      sleep 3
       in_vm 'echo test > /dev/kmsg'
-      wait_for "launch_test.png"
+      # Tolerant compare: unrelated kernel noise (e.g. "hrtimer: interrupt
+      # took ..." warnings under a loaded host) can still land on /dev/kmsg
+      # ahead of our echo and push "test" down a line or more, so a strict
+      # pixel-perfect check against launch_test.png is non-deterministic.
+      # /dev/kmsg writes can't be used to clear the console either - the
+      # kernel hex-escapes control bytes written to it (e.g. ESC becomes the
+      # literal text "\x1b"), specifically to block this kind of terminal
+      # escape-sequence injection.
+      wait_for_tolerant "launch_test.png"
       in_vm reboot
 
       while ! in_nixos true; do
