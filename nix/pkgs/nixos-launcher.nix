@@ -10,8 +10,10 @@ in
 replaceVarsWith {
   src = ./nixos-launcher.sh;
   replacements = {
-    rm2fb-server = lib.getExe' rm2-display "rm2fb_server";
-    rm2fb-client = rm2-display + "/lib/librm2fb_client_no_hook.so";
+    # Always use our own swtcon in the launcher, so we're host version
+    # independent.
+    rm2fb-server = lib.getExe' rm2-display "rm2fb_server_swtcon";
+    rm2fb-client = rm2-display + "/lib/librm2fb_client_swtcon.so";
     yaft_reader = lib.getExe' rm2-yaft "yaft_reader";
   };
 
