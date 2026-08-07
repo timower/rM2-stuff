@@ -42,14 +42,14 @@ let
       };
 
       rm2fb-test = lib.getExe' rm2-stuff.tools "rm2fb-test";
-      vm-nixos = system.config.system.build.vm-nixos.override {
-        setupCommands = ''
-          while ! ssh -o StrictHostKeyChecking=no -i ${./id_ed25519} \
-                      -p 2222 test@localhost systemctl is-active rocket; do
-            sleep 1
-          done
-        '';
-      };
+      # No setupCommands/snapshot here (unlike vm-xochitl below): QEMU
+      # unconditionally disables savevm/migration while a VirtFS 9p export is
+      # mounted in the guest ("Migration is disabled when VirtFS export path
+      # ... is mounted"), and vm-nixos keeps /nix/store mounted via 9p for its
+      # entire runtime - so it always cold-boots instead. The testScript below
+      # waits out that boot itself (via in_nixos), rather than relying on
+      # setupCommands to pre-warm a snapshot.
+      vm-nixos = system.config.system.build.vm-nixos;
 
       vm-xochitl = system.config.system.build.vm-xochitl.override {
         setupCommands = ''
@@ -61,8 +61,17 @@ let
 
       vm = if bootNixos then vm-nixos else vm-xochitl;
 
+      fullTestScript =
+        lib.optionalString bootNixos ''
+          while ! in_nixos systemctl is-active rocket; do
+            sleep 1
+          done
+        ''
+        + testScript;
+
       driver = pkgs.callPackage ./driver.nix {
-        inherit vm testScript golden;
+        inherit vm golden;
+        testScript = fullTestScript;
         inherit (rm2-stuff) tools;
       };
     in

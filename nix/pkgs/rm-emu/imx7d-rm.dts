@@ -34,6 +34,10 @@
 	status = "okay";
 };
 
+&pcie {
+	status = "okay";
+};
+
 &iomuxc {
 	pinctrl_usdhc1: usdhc1grp {
 		fsl,pins = <

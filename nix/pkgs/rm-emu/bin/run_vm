@@ -29,6 +29,16 @@ if qemu-img snapshot -l $root_path | grep -q main; then
   load_state="-loadvm main"
 fi
 
+virtfs_args=""
+if [ -n "${VIRTFS_STORE_PATH:-}" ]; then
+  # security_model=none, not mapped-xattr: the latter hits an ELOOP bug
+  # resolving symlinks (e.g. libfoo.so -> libfoo.so.N) on this old (5.4)
+  # ARM guest kernel's 9p client. None is fine here since we're sharing a
+  # real, already-root-owned, read-only host store - no uid/gid mapping
+  # needed.
+  virtfs_args="-fsdev local,security_model=none,id=fsstore,path=$VIRTFS_STORE_PATH,readonly=on -device virtio-9p-pci,fsdev=fsstore,mount_tag=${VIRTFS_MOUNT_TAG:-nix-store}"
+fi
+
 echo "Staring QEMU..."
 qemu-system-arm \
   -machine mcimx7d-sabre \
@@ -43,4 +53,5 @@ qemu-system-arm \
   -monitor tcp::5555,server=on,wait=off \
   -parallel null -display none \
   $load_state \
+  $virtfs_args \
   "$@"

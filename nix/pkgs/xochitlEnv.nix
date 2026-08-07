@@ -88,8 +88,12 @@ writeShellApplication rec {
     mount --rbind /sys $root/sys
     mount --rbind /proc $root/proc
 
-    # Mount nix stuff, so the LD_PRELOAD library can be found.
-    mount -o bind,ro /nix $root/nix
+    # Mount nix stuff, so the LD_PRELOAD library can be found. Recursive
+    # (--rbind, like /dev,/sys,/proc below): a plain bind doesn't propagate
+    # /nix/store when it's itself a separate mount (e.g. the emulator's
+    # virtio-9p share), leaving it looking empty inside the chroot.
+    mount --rbind /nix $root/nix
+    mount -o remount,ro,bind $root/nix
 
     # /tmp needed for xochitl, and the rm-sync service
     # rm.synchronizer: Synchronizer's libraryLock path="/tmp/library-enumeration.lock"

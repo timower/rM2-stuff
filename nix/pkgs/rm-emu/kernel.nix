@@ -27,6 +27,18 @@ let
 
       # Add uinput, rM has it as a module.
       sed -i 's/CONFIG_INPUT_UINPUT=n/CONFIG_INPUT_UINPUT=y/' $out
+
+      # PCI (imx7d PCIe host) + virtio-9p, to share the host nix store into the VM.
+      echo 'CONFIG_PCI=y' >> $out
+      echo 'CONFIG_PCI_MSI=y' >> $out
+      echo 'CONFIG_PCI_IMX6=y' >> $out
+      echo 'CONFIG_VIRTIO_MENU=y' >> $out
+      echo 'CONFIG_VIRTIO=y' >> $out
+      echo 'CONFIG_VIRTIO_PCI=y' >> $out
+      echo 'CONFIG_NET_9P=y' >> $out
+      echo 'CONFIG_NET_9P_VIRTIO=y' >> $out
+      echo 'CONFIG_NET_9P_DEBUG=y' >> $out
+      echo 'CONFIG_9P_FS=y' >> $out
     '';
   };
 

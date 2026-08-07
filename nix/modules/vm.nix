@@ -20,43 +20,48 @@ let
     modules = [ { systemd.targets.sleep.enable = false; } ];
   };
 
+  # Statically linked: vm-init runs before /nix/store is mounted (that's its
+  # job), so it - and everything it calls - can't depend on the store.
+  busybox-static = pkgs.busybox.override { enableStatic = true; };
+
   vm-init = pkgs.writeScript "vm-stage-1" ''
-    #!${pkgs.runtimeShell}
-    export PATH=${
-      lib.makeBinPath [
-        pkgs.util-linux
-        pkgs.coreutils
-      ]
-    }
+    #!/sbin/busybox sh
+    b=/sbin/busybox
 
-    mkdir -p /proc /sys /dev
-    mount -t proc none /proc
-    mount -t sysfs none /sys
+    $b mkdir -p /proc /sys /dev
+    $b mount -t proc none /proc
+    $b mount -t sysfs none /sys
 
-    mount -t devtmpfs devtmpfs /dev
-    ln -s /proc/self/fd /dev/fd
-    ln -s /proc/self/fd/0 /dev/stdin
-    ln -s /proc/self/fd/1 /dev/stdout
-    ln -s /proc/self/fd/2 /dev/stderr
+    $b mount -t devtmpfs devtmpfs /dev
+    $b ln -s /proc/self/fd /dev/fd
+    $b ln -s /proc/self/fd/0 /dev/stdin
+    $b ln -s /proc/self/fd/1 /dev/stdout
+    $b ln -s /proc/self/fd/2 /dev/stderr
 
-    exec ${vm-config.config.system.build.toplevel}/init
+    $b mkdir -p /nix/store
+    $b mount -t 9p -o trans=virtio,version=9p2000.L,msize=262144,cache=loose,ro nix-store /nix/store
+
+    # The toplevel to boot comes from the kernel command line, not baked in
+    # here - that keeps this script (and so the disk image it's shipped on)
+    # unchanged across nixos config edits, so only the cheap kernel-cmdline
+    # substitution in rm-emu.nix's wrapper needs to rebuild, not the image
+    # itself (which is a whole builder-VM boot via vmTools.runInLinuxVM).
+    for arg in $($b cat /proc/cmdline); do
+      case "$arg" in
+        toplevel=*) toplevel=''${arg#toplevel=} ;;
+      esac
+    done
+
+    exec "$toplevel/init"
   '';
 
-  closure = pkgs.closureInfo {
-    rootPaths = [ vm-config.config.system.build.toplevel ];
-  };
-
   vm-nixos = rm-emu.override (prev: {
-    commandline = "console=ttymxc0 rootfstype=ext4 root=/dev/mmcblk2p4 rw rootwait init=/sbin/vm-init";
+    commandline = "console=ttymxc0 rootfstype=ext4 root=/dev/mmcblk2p4 rw rootwait init=/sbin/vm-init toplevel=${vm-config.config.system.build.toplevel}";
+    virtfsStore = builtins.storeDir;
     rootfs = prev.rootfs.override {
       extraCommands = ''
         mkdir -p /mnt/home/nix/store /mnt/home/sbin
-
-        for i in $(< ${closure}/store-paths); do
-            cp -a "$i" "/mnt/home/''${i:1}"
-        done
-        cp ${closure}/registration /mnt/home/nix-path-registration
-
+        cp ${busybox-static}/bin/busybox /mnt/home/sbin/busybox
         cp ${vm-init} /mnt/home/sbin/vm-init
       '';
     };

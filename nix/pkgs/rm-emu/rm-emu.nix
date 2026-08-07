@@ -22,6 +22,11 @@
   setupCommands ? null,
 
   commandline ? "console=ttymxc0 rootfstype=ext4 root=/dev/mmcblk2p2 rw rootwait init=/sbin/init",
+
+  # Host directory to share into the VM as a virtio-9p drive (e.g. the host
+  # nix store), or null to disable.
+  virtfsStore ? null,
+  virtfsMountTag ? "nix-store",
 }:
 let
   hasSetup = setupCommands != null;
@@ -31,7 +36,7 @@ let
     oldpath=$PATH
     export PATH=$out/bin:$PATH
 
-    run_vm -daemonize
+    run_vm -serial file:$TMPDIR/serial.txt -daemonize
     ${setupCommands}
     save_vm
 
@@ -72,6 +77,10 @@ stdenvNoCC.mkDerivation {
     export DTB_PATH=${kernel}/dtbs/imx7d-rm.dtb
     export SSH_PORT=${toString sshPort}
     export BACKING_IMAGE=${rootfs}
+    ${lib.optionalString (virtfsStore != null) ''
+      export VIRTFS_STORE_PATH=${virtfsStore}
+      export VIRTFS_MOUNT_TAG=${virtfsMountTag}
+    ''}
 
     ${setupScript}
   '';
@@ -82,6 +91,12 @@ stdenvNoCC.mkDerivation {
       --set KERNEL_PATH $KERNEL_PATH \
       --set DTB_PATH $DTB_PATH \
       --set SSH_PORT $SSH_PORT \
+      ${
+        lib.optionalString (virtfsStore != null) ''
+          --set VIRTFS_STORE_PATH ${virtfsStore} \
+          --set VIRTFS_MOUNT_TAG ${virtfsMountTag} \
+        ''
+      } \
       --set PATH ${
         lib.makeBinPath [
           qemu

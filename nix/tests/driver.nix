@@ -28,8 +28,13 @@ writeShellScript "test-driver" ''
   vmAddr="127.0.0.1 8888"
   mkdir -p $out/screensots $out/diffs
 
+  # ssh refuses to use an identity file readable by group/other, but
+  # everything in the nix store is (usually 444) - copy it out first.
+  identity="''${TMPDIR:-/tmp}/id_ed25519"
+  install -m 0600 ${./id_ed25519} "$identity"
+
   in_nixos() {
-    ssh -o StrictHostKeyChecking=no -i ${./id_ed25519} -p 2222 test@localhost "$@"
+    ssh -o StrictHostKeyChecking=no -i "$identity" -p 2222 test@localhost "$@"
   }
 
   fail() {
