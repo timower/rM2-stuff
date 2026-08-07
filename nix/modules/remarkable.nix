@@ -17,6 +17,7 @@
     ./koreader.nix
     ./overlay.nix
     ./console.nix
+    ./etc.nix
   ];
 
   fileSystems."/" = {
@@ -103,12 +104,19 @@
   };
 
   system = {
-    rebuild.enableNg = false;
+    disableInstallerTools = true;
+    # rebuild.enableNg = false;
+
     tools = {
       nixos-generate-config.enable = false;
       nixos-option.enable = false;
     };
   };
+
+  # NixOS's default extras (nano, etc.) aren't needed on an embedded reader
+  # device, and nano alone drags in `file` (~11MB) just for its syntax
+  # highlighting.
+  environment.defaultPackages = lib.mkDefault [ ];
 
   # Cross compile for armv7l on x86_64 by default.
   nixpkgs.hostPlatform.system = "armv7l-linux";

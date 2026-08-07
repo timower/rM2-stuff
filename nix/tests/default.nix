@@ -5,6 +5,12 @@
   buildPlatform ? "x86_64-linux",
 }:
 let
+  # For etc-activation's evalMinimalConfig, mirroring
+  # nixpkgs' own nixos/tests/all-tests.nix helper.
+  nixosLib = import "${pkgs.path}/nixos/lib" { featureFlags.minimalModules = { }; };
+  evalMinimalConfig = module: nixosLib.evalModules { modules = [ module ]; };
+  etcActivationTest = pkgs.callPackage ./etc-activation.nix { inherit evalMinimalConfig; };
+
   mkTest = lib.makeOverridable (
     {
       modules,
@@ -79,7 +85,12 @@ let
     })
   );
 in
-setNames rec {
+{
+  # Upstream nixpkgs' own etcActivationCommands correctness test
+  # (nixos/modules/system/etc/test.nix), run against our Rust setup-etc.
+  etc-activation = etcActivationTest;
+}
+// setNames rec {
   tilem = mkTest {
     modules = [
       ../modules/remarkable.nix

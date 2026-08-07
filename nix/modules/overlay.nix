@@ -8,6 +8,19 @@
       }
       // lib.optionalAttrs prev.stdenv.hostPlatform.isArmv7 {
 
+        # curl's `wcurl` wrapper script keeps the build machine's shebang
+        # (`#!/nix/store/...-bash-.../bin/sh`) in cross builds, since
+        # fixupPhase's patchShebangs runs before the cross output exists to
+        # repoint it at - unusable on the target and drags a whole extra
+        # x86_64 bash + glibc closure into the system for nothing. Fixed
+        # upstream by https://github.com/NixOS/nixpkgs/commit/341ec4198d06f7312d63b970d92292be38ca2b7a,
+        # not yet in nixos-25.11.
+        curl = prev.curl.overrideAttrs (old: {
+          postFixup = (old.postFixup or "") + ''
+            rm -f "$bin/bin/wcurl"
+          '';
+        });
+
         systemd = prev.systemd.override {
           pname = "systemd-minimized";
 

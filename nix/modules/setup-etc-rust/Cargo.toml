@@ -1,0 +1,11 @@
+[package]
+name = "setup-etc"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+nix = { version = "0.31.3", default-features = false, features = ["fs", "user"] }
+uzers = { version = "0.12.2", default-features = false }
+
+[profile.release]
+strip = true
