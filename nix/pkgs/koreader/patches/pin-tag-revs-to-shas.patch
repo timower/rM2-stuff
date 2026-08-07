@@ -1,26 +1,39 @@
-diff --git i/thirdparty/libjpeg-turbo/CMakeLists.txt w/thirdparty/libjpeg-turbo/CMakeLists.txt
-index 92f02525..bbe91fd0 100644
---- i/thirdparty/libjpeg-turbo/CMakeLists.txt
-+++ w/thirdparty/libjpeg-turbo/CMakeLists.txt
-@@ -29,7 +29,7 @@ if(NOT MONOLIBTIC)
+diff --git i/thirdparty/djvulibre/CMakeLists.txt w/thirdparty/djvulibre/CMakeLists.txt
+index e7a0f5eb..246af359 100644
+--- i/thirdparty/djvulibre/CMakeLists.txt
++++ w/thirdparty/djvulibre/CMakeLists.txt
+@@ -19,7 +19,7 @@ list(APPEND BUILD_CMD COMMAND ninja)
+ list(APPEND INSTALL_CMD COMMAND ${CMAKE_COMMAND} --install .)
+ 
+ external_project(
+-    DOWNLOAD GIT release.3.5.30.1-2-g69e23da
++    DOWNLOAD GIT 69e23da9876baa7fc052d6b2e03e62e3095ec2f1
+     https://gitlab.com/koreader/djvulibre.git
+     PATCH_OVERLAY overlay
+     PATCH_FILES ${PATCH_FILES}
+diff --git i/thirdparty/koreader-lfs/CMakeLists.txt w/thirdparty/koreader-lfs/CMakeLists.txt
+index 39bdb022..5728eeee 100644
+--- i/thirdparty/koreader-lfs/CMakeLists.txt
++++ w/thirdparty/koreader-lfs/CMakeLists.txt
+@@ -20,7 +20,7 @@ else()
  endif()
  
  external_project(
--    DOWNLOAD GIT 3.1.1
-+    DOWNLOAD GIT 7723f50f3f66b9da74376e6d8badb6162464212c
-     https://github.com/libjpeg-turbo/libjpeg-turbo.git
+-    DOWNLOAD GIT v1_9_0
++    DOWNLOAD GIT a186cca5833691e830ed255e38ace8ff6b870dbf
+     https://github.com/lunarmodules/luafilesystem
+     PATCH_OVERLAY overlay
      PATCH_FILES ${PATCH_FILES}
-     CMAKE_ARGS ${CMAKE_ARGS}
 diff --git i/thirdparty/lua-Spore/CMakeLists.txt w/thirdparty/lua-Spore/CMakeLists.txt
-index b4e8f52e..8a654175 100644
+index 759e0133..f3403b95 100644
 --- i/thirdparty/lua-Spore/CMakeLists.txt
 +++ w/thirdparty/lua-Spore/CMakeLists.txt
-@@ -8,7 +8,7 @@ append_install_commands(INSTALL_CMD src/Spore.lua DESTINATION common)
+@@ -7,7 +7,7 @@ append_install_commands(INSTALL_CMD src/Spore.lua DESTINATION common)
  append_tree_install_commands(INSTALL_CMD src/Spore common/Spore)
  
  external_project(
--    DOWNLOAD GIT 0.4.0
-+    DOWNLOAD GIT e4223b8c9814721afefd4e1395eb437eee46ca96
+-    DOWNLOAD GIT 0.4.2
++    DOWNLOAD GIT f106f930e4fd6110f714dd89f8886e868c74a583
      https://framagit.org/fperrad/lua-Spore
      PATCH_FILES ${PATCH_FILES}
      INSTALL_COMMAND ${INSTALL_CMD}
@@ -37,11 +50,24 @@ index d60311a7..12001964 100644
      https://github.com/brunoos/luasec
      PATCH_OVERLAY overlay
      PATCH_FILES ${PATCH_FILES}
+diff --git i/thirdparty/lunasvg/CMakeLists.txt w/thirdparty/lunasvg/CMakeLists.txt
+index 60ed8d8c..cab70b07 100644
+--- i/thirdparty/lunasvg/CMakeLists.txt
++++ w/thirdparty/lunasvg/CMakeLists.txt
+@@ -19,7 +19,7 @@ if(NOT MONOLIBTIC)
+ endif()
+ 
+ external_project(
+-    DOWNLOAD GIT v2.3.9
++    DOWNLOAD GIT 610b8bf5148a27489b4e3344b4f5617b81be38c7
+     https://github.com/sammycage/lunasvg.git
+     PATCH_FILES ${PATCH_FILES}
+     CMAKE_ARGS ${CMAKE_ARGS}
 diff --git i/thirdparty/turbo/CMakeLists.txt w/thirdparty/turbo/CMakeLists.txt
-index f9081a34..11fe2cad 100644
+index 8cffcd92..7c57bc96 100644
 --- i/thirdparty/turbo/CMakeLists.txt
 +++ w/thirdparty/turbo/CMakeLists.txt
-@@ -26,7 +26,7 @@ append_install_commands(INSTALL_CMD ${SOURCE_DIR}/turbo.lua ${SOURCE_DIR}/turbov
+@@ -51,7 +51,7 @@ append_install_commands(INSTALL_CMD ${SOURCE_DIR}/turbo.lua DESTINATION common)
  append_tree_install_commands(INSTALL_CMD ${SOURCE_DIR}/turbo common/turbo)
  
  external_project(

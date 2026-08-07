@@ -1,18 +1,18 @@
 diff --git i/thirdparty/cmake_modules/koenv.sh w/thirdparty/cmake_modules/koenv.sh
-index 5c1c186d..20de949e 100644
+index 550a9a29..9041cc72 100644
 --- i/thirdparty/cmake_modules/koenv.sh
 +++ w/thirdparty/cmake_modules/koenv.sh
-@@ -113,6 +113,9 @@ extract_archive() { (
-     cd "${oldpwd}"
-     mv "${sourcedir}.tmp/${root}" "${sourcedir}"
-     rmdir "${sourcedir}.tmp"
+@@ -122,6 +122,9 @@ extract_archive() { (
+     if [ -d "${sourcedir}.tmp" ]; then
+         rmdir "${sourcedir}.tmp"
+     fi
 +    # nix sandboxed builds have no /usr/bin/env; rewrite `#!/usr/bin/env foo`
 +    # shebangs in freshly-extracted sources to the real interpreter path.
 +    [ -z "${PATCH_SHEBANGS:-}" ] || "${PATCH_SHEBANGS}" "${sourcedir}"
  ); }
  
  apply_patches() { (
-@@ -253,6 +256,8 @@ checkout_git_repo() { (
+@@ -262,6 +265,8 @@ checkout_git_repo() { (
      git -C "${tree}" sparse-checkout disable || return 1
      git -C "${tree}" submodule foreach --recursive git sparse-checkout disable || return 1
      git -C "${tree}" -c advice.detachedHead=false checkout --force --recurse-submodules "${revision}" --
