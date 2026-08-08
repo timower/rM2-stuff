@@ -338,17 +338,24 @@ in
         # input keeps flowing.
         FAILED=""
         for n in 1 2 3 4 5 6 7 10; do
-          in_vm "cd $REMOTE_DIR && yes | LD_PRELOAD=./libioctl-dump.so SWTCON_PAN_CAPTURE=/tmp/native_$n.txt ./qsgepaper-test $n >/dev/null"
-          in_vm "cd $REMOTE_DIR && yes | SWTCON_LIBIMPL=1 LD_PRELOAD=./libioctl-dump.so SWTCON_PAN_CAPTURE=/tmp/lib_$n.txt ./qsgepaper-test $n >/dev/null"
+          in_vm "cd $REMOTE_DIR && yes | LD_PRELOAD=./libioctl-dump.so SWTCON_PAN_CAPTURE=/tmp/native_$n.txt ./qsgepaper-test $n >/tmp/full_nat_$n.txt"
+          in_vm "cd $REMOTE_DIR && yes | SWTCON_LIBIMPL=1 LD_PRELOAD=./libioctl-dump.so SWTCON_PAN_CAPTURE=/tmp/lib_$n.txt ./qsgepaper-test $n >/tmp/full_lib_$n.txt"
 
           if ! in_vm "cd $REMOTE_DIR && ./pan-capture-compare /tmp/native_$n.txt /tmp/lib_$n.txt"; then
+            echo "-- lib $n --"
+            in_vm "cat /tmp/lib_$n.txt"
+            in_vm "cat /tmp/full_lib_$n.txt"
+            echo "-- native $n --"
+            in_vm "cat /tmp/native_$n.txt"
+            in_vm "cat /tmp/full_nat_$n.txt"
+            echo "-- end --"
             FAILED="$FAILED $n"
           fi
         done
 
         if [ -n "$FAILED" ]; then
           echo "swtcon A/B mismatch for test case(s):$FAILED" >&2
-          fail
+          exit 1
         fi
       '';
   };
