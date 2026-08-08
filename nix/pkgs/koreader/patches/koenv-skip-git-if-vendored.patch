@@ -1,0 +1,41 @@
+diff --git i/thirdparty/cmake_modules/koenv.sh w/thirdparty/cmake_modules/koenv.sh
+--- i/thirdparty/cmake_modules/koenv.sh
++++ w/thirdparty/cmake_modules/koenv.sh
+@@ -191,6 +191,12 @@
+     mkdir -p "${repo%/*}"
+     (
+         flock 9
++        if [ -d "${repo}" ] && [ ! -e "${repo}/.git" ]; then
++            # Nix already vendored a fully-populated, git-free source tree
++            # (including submodules) at this exact revision; nothing to
++            # clone, checkout, or fetch submodules for.
++            return 0
++        fi
+         # Try the clone 3 times in case there is an odd git clone issue.
+         error=1
+         for timeout in 0 2 4; do
+@@ -257,14 +263,16 @@
+     shift 3
+     rm -rf "${tree}" || return 1
+     (flock 9 && cp -a "${repo}" "${tree}") 9>"${repo}.lock" || return 1
+-    # Same as above in `checkout_git_repo`.
+-    # shellcheck disable=SC2031
+-    export GIT_DIR="${tree}/.git"
+-    # Note: order matters; trying to `checkout --force` without disabling
+-    # the sparse-checkouts first will for some reason deinit submodules…
+-    git -C "${tree}" sparse-checkout disable || return 1
+-    git -C "${tree}" submodule foreach --recursive git sparse-checkout disable || return 1
+-    git -C "${tree}" -c advice.detachedHead=false checkout --force --recurse-submodules "${revision}" --
++    if [ -e "${tree}/.git" ]; then
++        # Same as above in `checkout_git_repo`.
++        # shellcheck disable=SC2031
++        export GIT_DIR="${tree}/.git"
++        # Note: order matters; trying to `checkout --force` without disabling
++        # the sparse-checkouts first will for some reason deinit submodules…
++        git -C "${tree}" sparse-checkout disable || return 1
++        git -C "${tree}" submodule foreach --recursive git sparse-checkout disable || return 1
++        git -C "${tree}" -c advice.detachedHead=false checkout --force --recurse-submodules "${revision}" --
++    fi
+     # See extract_archive() above.
+     [ -z "${PATCH_SHEBANGS:-}" ] || "${PATCH_SHEBANGS}" "${tree}"
+ ); }

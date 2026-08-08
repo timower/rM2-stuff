@@ -208,200 +208,134 @@
     djvulibre = fetchgit {
       url = "https://gitlab.com/koreader/djvulibre.git";
       rev = "69e23da9876baa7fc052d6b2e03e62e3095ec2f1";
-      hash = "sha256-XO3GHRbB4giiFhSRBn5OcujM3IdkunEkQ+NzkIop+3o="; # FIXME: run `nix-prefetch-git --leave-dotGit` and fill in
+      hash = "sha256-Nh/f5dEWKPDnyRwAbXMQK/EOXD1TAtKgMdWBOLYuUfM=";
       fetchSubmodules = true;
-      # koreader-base's own build re-checks out the pinned
-      # revision via git, so it needs a real .git dir.
-      leaveDotGit = true;
     };
     fbink = fetchgit {
       url = "https://github.com/NiLuJe/FBInk.git";
       rev = "92e127008145b2a22fba7c59815d810d716310dd";
-      hash = "sha256-yUdEsFi/9OLKTtKjmldbWMzDsYX644/uIGixFAVamkw="; # FIXME: run `nix-prefetch-git --leave-dotGit` and fill in
+      hash = "sha256-3Sk1it8gp5uYUVAimenkOvEMvv5LPBTjt7cVuT6DKlU=";
       fetchSubmodules = true;
-      # koreader-base's own build re-checks out the pinned
-      # revision via git, so it needs a real .git dir.
-      leaveDotGit = true;
     };
     inkview = fetchgit {
       url = "https://github.com/koreader/pocketbook-inkview.git";
       rev = "4a3e32c39ed14ac7f2e3ca4f8c66a7d5fbe5e0fe";
-      hash = "sha256-xq9JsxLcENBWt0rjDGhu/itT8oPyd5LG2K/TWBiZQSk="; # FIXME: run `nix-prefetch-git --leave-dotGit` and fill in
+      hash = "sha256-J1vb3SO+GjFbvwLsPEHxMSVNttw4TV4BtMXL36oMEBc=";
       fetchSubmodules = true;
-      # koreader-base's own build re-checks out the pinned
-      # revision via git, so it needs a real .git dir.
-      leaveDotGit = true;
     };
     kobo-usbms = fetchgit {
       url = "https://github.com/koreader/KoboUSBMS.git";
       rev = "d1d916655b1406780f12ba0c2442b6a901e75929";
-      hash = "sha256-jYux6/xTC7CISi6TqN9EgQQafGJZNZPtwgdaozXjN3k="; # FIXME: run `nix-prefetch-git --leave-dotGit` and fill in
+      hash = "sha256-EEENLGzdnDv5xH3nwxoZHDqESSRuS89klTyhAbTBl4Q=";
       fetchSubmodules = true;
-      # koreader-base's own build re-checks out the pinned
-      # revision via git, so it needs a real .git dir.
-      leaveDotGit = true;
     };
     koreader-lfs = fetchgit {
       url = "https://github.com/lunarmodules/luafilesystem";
       rev = "a186cca5833691e830ed255e38ace8ff6b870dbf";
-      hash = "sha256-aabznj5k6TMx153VeDBFedv7tFZzvgOkwo4yIEPy0t8="; # FIXME: run `nix-prefetch-git --leave-dotGit` and fill in
+      hash = "sha256-xoNJra/yqxRG11TePcUKrAUU6cwypGnXIoLKZXNaoW0=";
       fetchSubmodules = true;
-      # koreader-base's own build re-checks out the pinned
-      # revision via git, so it needs a real .git dir.
-      leaveDotGit = true;
     };
     libk2pdfopt = fetchgit {
       url = "https://github.com/koreader/libk2pdfopt.git";
       rev = "1fcffeb1e61ec43265d23e2ac77d9a901f8c45d2";
-      hash = "sha256-CuKpGOI7MfoQOsaeuF+8f2muWfXDoul0l3wgqjCQXYQ="; # FIXME: run `nix-prefetch-git --leave-dotGit` and fill in
+      hash = "sha256-T+ZZPcCaHA6+8+Y9ab3AuLN8PSxCFtRyJqTOl0h0Mis=";
       fetchSubmodules = true;
-      # koreader-base's own build re-checks out the pinned
-      # revision via git, so it needs a real .git dir.
-      leaveDotGit = true;
     };
     lj-wpaclient = fetchgit {
       url = "https://github.com/koreader/lj-wpaclient.git";
       rev = "0d5c8ee336b699dbb35850a7336d24e89e1aac24";
-      hash = "sha256-m50+7D+LWl5LTqJttNUrHZnQM1FFXS9RbLglOuR9EQQ="; # FIXME: run `nix-prefetch-git --leave-dotGit` and fill in
+      hash = "sha256-RnDxYtuJVW0jDXOBjLhvk8wWI636kT9Tb8vYBMQOGj8=";
       fetchSubmodules = true;
-      # koreader-base's own build re-checks out the pinned
-      # revision via git, so it needs a real .git dir.
-      leaveDotGit = true;
     };
     lodepng = fetchgit {
       url = "https://github.com/lvandeve/lodepng.git";
       rev = "0b1d9ccfc2093e5d6620cd9a11d03ee6ff6705f5";
-      hash = "sha256-wskSBmAB/jT+t+ArGtLghSbdUAty9gbon8wMnpIeiYU="; # FIXME: run `nix-prefetch-git --leave-dotGit` and fill in
+      hash = "sha256-bz8zOrpADnCHiVMA7bENhXj6pIu21pKQMNmhM6jOOvo=";
       fetchSubmodules = true;
-      # koreader-base's own build re-checks out the pinned
-      # revision via git, so it needs a real .git dir.
-      leaveDotGit = true;
     };
     lua-Spore = fetchgit {
       url = "https://framagit.org/fperrad/lua-Spore";
       rev = "f106f930e4fd6110f714dd89f8886e868c74a583";
-      hash = "sha256-wjXF7oEpdcpt8jmCH2bVj6PijOQpkHJu+22+MS/AbYo="; # FIXME: run `nix-prefetch-git --leave-dotGit` and fill in
+      hash = "sha256-YiYLYSn0iJ2AyJjYKejrb2Ys93Dgz+4lTyXvkSL2Ljo=";
       fetchSubmodules = true;
-      # koreader-base's own build re-checks out the pinned
-      # revision via git, so it needs a real .git dir.
-      leaveDotGit = true;
     };
     lua-htmlparser = fetchgit {
       url = "https://github.com/msva/lua-htmlparser";
       rev = "5ce9a775a345cf458c0388d7288e246bb1b82bff";
-      hash = "sha256-kMhS7uUVeYRYrJU7VsbRH0aC54F/jaVWh7pdelLmasQ="; # FIXME: run `nix-prefetch-git --leave-dotGit` and fill in
+      hash = "sha256-aSTLSfqz/MIDFVRwtBlDNBUhPb7KqOl32/Y62Hdec1s=";
       fetchSubmodules = true;
-      # koreader-base's own build re-checks out the pinned
-      # revision via git, so it needs a real .git dir.
-      leaveDotGit = true;
     };
     lua-rapidjson = fetchgit {
       url = "https://github.com/NiLuJe/lua-rapidjson";
       rev = "e84973356255bde06a70ce6263a3a0ef5c8f4ad4";
-      hash = "sha256-xsbf8AYTmGcKgNefFdQJ197aj9Z7BHvAYVgbjhAMfJ0="; # FIXME: run `nix-prefetch-git --leave-dotGit` and fill in
+      hash = "sha256-SZ6iJ5J7k4vj9ubY5FNkcfgimWzvckNXeT3zTuDkJDU=";
       fetchSubmodules = true;
-      # koreader-base's own build re-checks out the pinned
-      # revision via git, so it needs a real .git dir.
-      leaveDotGit = true;
     };
     luajit = fetchgit {
       url = "https://github.com/LuaJIT/LuaJIT";
       rev = "3c4f9fe2052b8d08a917ac0d5f38563f0297b5a3";
-      hash = "sha256-cR240fEr6Oodl+acT+I/d1YjwKzgX/9P949jbDAOgFM="; # FIXME: run `nix-prefetch-git --leave-dotGit` and fill in
+      hash = "sha256-lEe/97aujbBWsnMjmatU5Ms+F9FDtqW4GM9zCvjFEqg=";
       fetchSubmodules = true;
-      # koreader-base's own build re-checks out the pinned
-      # revision via git, so it needs a real .git dir.
-      leaveDotGit = true;
     };
     luajson = fetchgit {
       url = "https://github.com/harningt/luajson.git";
       rev = "6ecaf9bea8b121a9ffca5a470a2080298557b55d";
-      hash = "sha256-Y2GpaMWXoiGtbjlO8/NP/35PgRuzTkwXmxIetE8D+IM="; # FIXME: run `nix-prefetch-git --leave-dotGit` and fill in
+      hash = "sha256-56G0NqIpavKHMQWUxy+Bp7G4ZKrQwUZ2C5e7GJxUJeg=";
       fetchSubmodules = true;
-      # koreader-base's own build re-checks out the pinned
-      # revision via git, so it needs a real .git dir.
-      leaveDotGit = true;
     };
     luasec = fetchgit {
       url = "https://github.com/brunoos/luasec";
       rev = "4c06287052d68fdbe7429b8f967cdc8ee94aa44a";
-      hash = "sha256-sZu6acBs3Gy1h74sK7wU2NvPOd3kDaqeIeBKJ/pJv/E="; # FIXME: run `nix-prefetch-git --leave-dotGit` and fill in
+      hash = "sha256-o3uiZQnn/ID1qAgpZAqA4R3fWWk+Ajcgx++iNu1yLWc=";
       fetchSubmodules = true;
-      # koreader-base's own build re-checks out the pinned
-      # revision via git, so it needs a real .git dir.
-      leaveDotGit = true;
     };
     luasocket = fetchgit {
       url = "https://github.com/lunarmodules/luasocket";
       rev = "e3ca4a767a68d127df548d82669aba3689bd84f4";
-      hash = "sha256-OFz07+Wdhiz/JhQ7AZjsklzM15Z9kJz2KUQpvcVnGsk="; # FIXME: run `nix-prefetch-git --leave-dotGit` and fill in
+      hash = "sha256-RWNJmezZvqZ36XTqTOf5hKbD+mreis62KFNlJRr5Q8o=";
       fetchSubmodules = true;
-      # koreader-base's own build re-checks out the pinned
-      # revision via git, so it needs a real .git dir.
-      leaveDotGit = true;
     };
     lunasvg = fetchgit {
       url = "https://github.com/sammycage/lunasvg.git";
       rev = "610b8bf5148a27489b4e3344b4f5617b81be38c7";
-      hash = "sha256-2kTGIkrcPsAcrCvUtUzUcgpqtCuCuLzs2Z0ImAlq00Y="; # FIXME: run `nix-prefetch-git --leave-dotGit` and fill in
+      hash = "sha256-A/ONhRQ+NVw3tVlKq8HEz/wMSH+xT5WJO3w6wdH/2jc=";
       fetchSubmodules = true;
-      # koreader-base's own build re-checks out the pinned
-      # revision via git, so it needs a real .git dir.
-      leaveDotGit = true;
     };
     minizip = fetchgit {
       url = "https://github.com/nmoinvaz/minizip";
       rev = "aa4758baea16e9dc03583340e62b370ea1140df9";
-      hash = "sha256-scxgbWbZUTKRhbTeYCWkm7CLp0NOkGHSZleZHEv8VAc="; # FIXME: run `nix-prefetch-git --leave-dotGit` and fill in
+      hash = "sha256-OIBxGG4ehVjjr7QkSWXJtM0kblIGJtQP2MHajw7J8PM=";
       fetchSubmodules = true;
-      # koreader-base's own build re-checks out the pinned
-      # revision via git, so it needs a real .git dir.
-      leaveDotGit = true;
     };
     nanosvg = fetchgit {
       url = "https://github.com/memononen/nanosvg.git";
       rev = "ea6a6aca009422bba0dbad4c80df6e6ba0c82183";
-      hash = "sha256-zop4QF6gawQjjsVPb9xqfMqUSawACR6/qjArT1Noqu4="; # FIXME: run `nix-prefetch-git --leave-dotGit` and fill in
+      hash = "sha256-QCjfaSm1/hstVGzkJc0gFnYhnU5I3oHSCTkAVG5gTt8=";
       fetchSubmodules = true;
-      # koreader-base's own build re-checks out the pinned
-      # revision via git, so it needs a real .git dir.
-      leaveDotGit = true;
     };
     openlipclua = fetchgit {
       url = "https://github.com/notmarek/openlipclua.git";
       rev = "96c2d16696a482664b4e84eb3b6d851f807a44d1";
-      hash = "sha256-oHHMXCZVuZp2CTqUOOjZ6UiDNK1eSa1w9TSDgi7+Yis="; # FIXME: run `nix-prefetch-git --leave-dotGit` and fill in
+      hash = "sha256-6H9iyO25AOFU4u9jdaxGtsAxeYXKdJFz6LzzatTFblg=";
       fetchSubmodules = true;
-      # koreader-base's own build re-checks out the pinned
-      # revision via git, so it needs a real .git dir.
-      leaveDotGit = true;
     };
     popen-noshell = fetchgit {
       url = "https://github.com/famzah/popen-noshell.git";
       rev = "e715396a4951ee91c40a98d2824a130f158268bb";
-      hash = "sha256-oIAL6fMw6UfjG2CnV5zK1cZIkCdt68hEbq45dTRpSEM="; # FIXME: run `nix-prefetch-git --leave-dotGit` and fill in
+      hash = "sha256-JeBZMsg6ZUGSnyZ4eds4w63gM/L73EsAnLaHOPpL6iM=";
       fetchSubmodules = true;
-      # koreader-base's own build re-checks out the pinned
-      # revision via git, so it needs a real .git dir.
-      leaveDotGit = true;
     };
     turbo = fetchgit {
       url = "https://github.com/kernelsauce/turbo";
       rev = "7fe88c2b99ff9bd6d6df3ee3c4077ea8a7d1e6a3";
-      hash = "sha256-4QbgBs/sUlaQ/SBQMUm/yvWnrjEUR1tQf1CHW8POO2g="; # FIXME: run `nix-prefetch-git --leave-dotGit` and fill in
+      hash = "sha256-vBRkFdc5a0FIt15HBz3TnqMZ+GGsqjEefnfJEpuVTBs=";
       fetchSubmodules = true;
-      # koreader-base's own build re-checks out the pinned
-      # revision via git, so it needs a real .git dir.
-      leaveDotGit = true;
     };
     zsync2 = fetchgit {
       url = "https://github.com/NiLuJe/zsync2.git";
       rev = "e281e1eb4466ff6b3866c25dbe62a3e150fa5bfd";
-      hash = "sha256-p7nV17YfSPGi5A/L4h/T9HQJOmMqQNZv+iKvi3N2R9Y="; # FIXME: run `nix-prefetch-git --leave-dotGit` and fill in
+      hash = "sha256-guZo3icFzCl6fMv6jlol2+HRfBlZlLfaFVrE8uQNpDA=";
       fetchSubmodules = true;
-      # koreader-base's own build re-checks out the pinned
-      # revision via git, so it needs a real .git dir.
-      leaveDotGit = true;
     };
   };
 }

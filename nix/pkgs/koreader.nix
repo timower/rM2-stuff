@@ -175,6 +175,7 @@ stdenv.mkDerivation {
     patch -p1 -d base < ${./koreader/patches/luajit-host-cc32.patch}
     patch -p1 -d base < ${./koreader/patches/pin-tag-revs-to-shas.patch}
     patch -p1 -d base < ${./koreader/patches/koenv-patchshebangs.patch}
+    patch -p1 -d base < ${./koreader/patches/koenv-skip-git-if-vendored.patch}
   ''
   + vendorThirdparty {
     name = "zlib";

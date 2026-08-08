@@ -107,13 +107,8 @@ def main() -> None:
         print(f"    {name} = fetchgit {{")
         print(f"      url = {nix_str(data['url'])};")
         print(f"      rev = {nix_str(data['rev'])};")
-        print(
-            '      hash = ""; # FIXME: run `nix-prefetch-git --leave-dotGit` and fill in'
-        )
+        print('      hash = ""; # FIXME: run `nix-prefetch-git` and fill in')
         print("      fetchSubmodules = true;")
-        print("      # koreader-base's own build re-checks out the pinned")
-        print("      # revision via git, so it needs a real .git dir.")
-        print("      leaveDotGit = true;")
         print("    };")
     print("  };")
     print("}")
