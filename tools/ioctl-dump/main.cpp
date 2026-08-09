@@ -57,7 +57,7 @@ fnv1a(const void* data, size_t len) {
 
 std::ofstream*
 pan_capture_stream() {
-  static std::ofstream* f = [] () -> std::ofstream* {
+  static std::ofstream* f = []() -> std::ofstream* {
     const char* path = getenv("SWTCON_PAN_CAPTURE");
     if (!path)
       return nullptr;
@@ -82,7 +82,7 @@ pan_capture_stream() {
 // implementations against each other on identical (emulated) hardware.
 std::ofstream*
 pan_capture_all_stream() {
-  static std::ofstream* f = [] () -> std::ofstream* {
+  static std::ofstream* f = []() -> std::ofstream* {
     const char* path = getenv("SWTCON_PAN_CAPTURE_ALL");
     if (!path)
       return nullptr;

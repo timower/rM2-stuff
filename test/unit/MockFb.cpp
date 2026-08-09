@@ -23,8 +23,10 @@ std::unordered_map<unsigned long, int> g_failIoctlCounts;
 
 } // namespace
 
-extern "C" int __real_open(const char* path, int flags, ...);
-extern "C" int __real_ioctl(int fd, unsigned long request, ...);
+extern "C" int
+__real_open(const char* path, int flags, ...);
+extern "C" int
+__real_ioctl(int fd, unsigned long request, ...);
 
 // Only intercepts the exact literal path init_framebuffer() itself opens -
 // everything else (including every other test's own file I/O) passes
@@ -65,7 +67,8 @@ __wrap_open(const char* path, int flags, ...) {
     return fd;
   }
 
-  return (flags & O_CREAT) ? __real_open(path, flags, mode) : __real_open(path, flags);
+  return (flags & O_CREAT) ? __real_open(path, flags, mode)
+                           : __real_open(path, flags);
 }
 
 extern "C" int

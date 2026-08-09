@@ -66,8 +66,8 @@ struct AddressInfo : public AddressInfoBase {
     // resumeForXochitl() (SIGSTOP/SIGCONT-coordinated, see Server.cpp's
     // pause()/resume()) for mutual exclusion instead.
     if (swtcon_init({ .dataBuffer = fb.getFb(),
-                       .backBuffer = fb.getGrayBuffer(),
-                       .skipPidLock = true }) == nullptr) {
+                      .backBuffer = fb.getGrayBuffer(),
+                      .skipPidLock = true }) == nullptr) {
       std::cerr << "swtcon_init failed\n";
       std::exit(EXIT_FAILURE);
     }

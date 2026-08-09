@@ -131,14 +131,18 @@ static_assert(sizeof(Timespec64) == 16, "Timespec64 must be two 64-bit fields");
 // thread); bWorkerThreadBusy/nLastPannedFrame are written by the worker
 // thread and read cross-thread by the display thread's frame-pacing logic.
 struct FrameCursorGlobals {
-  int32_t nFrameCleanupCursor;  // 0x66dd4
-  uint8_t bWorkerThreadBusy;    // 0x66dd8 (byte flag, not int32)
+  int32_t nFrameCleanupCursor; // 0x66dd4
+  uint8_t bWorkerThreadBusy;   // 0x66dd8 (byte flag, not int32)
   uint8_t _pad[3];
-  int32_t nLastPannedFrame;     // 0x66ddc
+  int32_t nLastPannedFrame; // 0x66ddc
 };
 constexpr uintptr_t kFrameCursorGlobalsAddr = 0x66dd4;
-static_assert(offsetof(FrameCursorGlobals, bWorkerThreadBusy) == 0x66dd8 - kFrameCursorGlobalsAddr, "");
-static_assert(offsetof(FrameCursorGlobals, nLastPannedFrame) == 0x66ddc - kFrameCursorGlobalsAddr, "");
+static_assert(offsetof(FrameCursorGlobals, bWorkerThreadBusy) ==
+                0x66dd8 - kFrameCursorGlobalsAddr,
+              "");
+static_assert(offsetof(FrameCursorGlobals, nLastPannedFrame) ==
+                0x66ddc - kFrameCursorGlobalsAddr,
+              "");
 static_assert(sizeof(FrameCursorGlobals) >= 0x66de0 - kFrameCursorGlobalsAddr,
               "FrameCursorGlobals layout drift");
 
@@ -180,15 +184,20 @@ constexpr int32_t kDirtyGateBucketCount = kFrameSlotRingCount;
 // Fully contiguous, all three pointers/size wired together at init
 // (swtcon_init) and torn down together (free_statebuffer).
 struct StatebufferGlobals {
-  void* pStatebuffer;   // 0x6d1d0
-  void* pGammaTable;    // 0x6d1d4
-  int32_t nSize;         // 0x6d1d8
+  void* pStatebuffer; // 0x6d1d0
+  void* pGammaTable;  // 0x6d1d4
+  int32_t nSize;      // 0x6d1d8
 };
 constexpr uintptr_t kStatebufferGlobalsAddr = 0x6d1d0;
 #if SWTCON_32BIT_ABI_CHECK
-static_assert(offsetof(StatebufferGlobals, pGammaTable) == 0x6d1d4 - kStatebufferGlobalsAddr, "");
-static_assert(offsetof(StatebufferGlobals, nSize) == 0x6d1d8 - kStatebufferGlobalsAddr, "");
-static_assert(sizeof(StatebufferGlobals) == 0xc, "StatebufferGlobals layout drift");
+static_assert(offsetof(StatebufferGlobals, pGammaTable) ==
+                0x6d1d4 - kStatebufferGlobalsAddr,
+              "");
+static_assert(offsetof(StatebufferGlobals, nSize) ==
+                0x6d1d8 - kStatebufferGlobalsAddr,
+              "");
+static_assert(sizeof(StatebufferGlobals) == 0xc,
+              "StatebufferGlobals layout drift");
 #endif
 
 // --- Framebuffer + LUT state ---------------------------------------------
@@ -196,21 +205,21 @@ static_assert(sizeof(StatebufferGlobals) == 0xc, "StatebufferGlobals layout drif
 // and nFbFd (its size is exact: nFbFd's address is independently known, so
 // the gap is pinned even though its contents aren't).
 struct FramebufferGlobals {
-  void* pLUT;                       // 0x6d350
+  void* pLUT; // 0x6d350
   uint8_t _reserved_0x6d354[4];
-  int32_t nFbFd;                     // 0x6d358
-  struct fb_fix_screeninfo fbFix;     // 0x6d35c
-  struct fb_var_screeninfo fbVar;      // 0x6d3a0
-  int32_t nFbSizeX;                     // 0x6d440 bytes per frame slot
-  int32_t nFbSizeY;                      // 0x6d444 number of frame slots
-  int32_t nIsFbBlanked;                   // 0x6d448
-  void* pFbMmap;                           // 0x6d44c
+  int32_t nFbFd;                  // 0x6d358
+  struct fb_fix_screeninfo fbFix; // 0x6d35c
+  struct fb_var_screeninfo fbVar; // 0x6d3a0
+  int32_t nFbSizeX;               // 0x6d440 bytes per frame slot
+  int32_t nFbSizeY;               // 0x6d444 number of frame slots
+  int32_t nIsFbBlanked;           // 0x6d448
+  void* pFbMmap;                  // 0x6d44c
 };
 constexpr uintptr_t kFramebufferGlobalsAddr = 0x6d350;
 #if SWTCON_32BIT_ABI_CHECK
 #define FB_OFFSETOF(field) (offsetof(FramebufferGlobals, field))
-#define FB_ASSERT(field, addr) \
-  static_assert(FB_OFFSETOF(field) == (addr) - kFramebufferGlobalsAddr, \
+#define FB_ASSERT(field, addr)                                                 \
+  static_assert(FB_OFFSETOF(field) == (addr) - kFramebufferGlobalsAddr,        \
                 #field " must land at " #addr)
 FB_ASSERT(nFbFd, 0x6d358);
 FB_ASSERT(fbFix, 0x6d35c);
@@ -231,10 +240,17 @@ static_assert(sizeof(FramebufferGlobals) == 0x6d450 - kFramebufferGlobalsAddr,
 // (which embeds these structs as members), not here: they need SwtconState
 // complete, and SwtconState needs WorkItem/Batch complete, both of which are
 // only available once update.h itself has been included.
-FrameCursorGlobals* frame_cursor_globals();
-StatebufferGlobals* statebuffer_globals();
-FramebufferGlobals* framebuffer_globals();
-float* cached_temperature_ptr();
-pthread_mutex_t* temperature_mutex();
-int* seq_counter_ptr();
-uint8_t* backbuffer_dirty_gate();
+FrameCursorGlobals*
+frame_cursor_globals();
+StatebufferGlobals*
+statebuffer_globals();
+FramebufferGlobals*
+framebuffer_globals();
+float*
+cached_temperature_ptr();
+pthread_mutex_t*
+temperature_mutex();
+int*
+seq_counter_ptr();
+uint8_t*
+backbuffer_dirty_gate();

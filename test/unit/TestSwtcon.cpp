@@ -2,11 +2,11 @@
 
 #include "TempFiles.h"
 
+#include "MockFb.h"
+#include "SwtconFixture.h"
 #include "display.h"
 #include "init.h"
 #include "update.h"
-#include "MockFb.h"
-#include "SwtconFixture.h"
 
 #include <algorithm>
 #include <chrono>
@@ -36,7 +36,12 @@ make_item(int y0, int x0, int y1, int x1) {
 // `fillValue` - for commit_item tests, which read the rendered pixel through
 // item->pixelDataPtr/regionRows->stride.
 WorkItem
-make_rendered_item(int y0, int x0, int y1, int x1, uint8_t sync, uint8_t fillValue) {
+make_rendered_item(int y0,
+                   int x0,
+                   int y1,
+                   int x1,
+                   uint8_t sync,
+                   uint8_t fillValue) {
   WorkItem item{};
   item.rectY0 = y0;
   item.rectX0 = x0;
@@ -46,7 +51,8 @@ make_rendered_item(int y0, int x0, int y1, int x1, uint8_t sync, uint8_t fillVal
 
   int rows = y1 - y0 + 1;
   int cols = x1 - x0 + 1;
-  int stride = (rows + kRegionRowsStrideAlign - 1) & ~(kRegionRowsStrideAlign - 1);
+  int stride =
+    (rows + kRegionRowsStrideAlign - 1) & ~(kRegionRowsStrideAlign - 1);
   size_t size = (size_t)stride * cols;
 
   auto* rr = new RegionRows{};
@@ -104,7 +110,8 @@ TEST_CASE("list_wbf_files: missing directory is silently skipped", "[swtcon]") {
 // real device's barcode/waveform pairing - see init.cpp's own comment.
 TEST_CASE("decode_fpl_lot_pair", "[swtcon]") {
   CHECK(decode_fpl_lot_pair('A', 'D') == 333);
-  CHECK(decode_fpl_lot_pair('0', '0') == -1); // explicitly rejected special case
+  CHECK(decode_fpl_lot_pair('0', '0') ==
+        -1); // explicitly rejected special case
   CHECK(decode_fpl_lot_pair('0', '1') == 1);
   CHECK(decode_fpl_lot_pair('9', '9') == 99);
   CHECK(decode_fpl_lot_pair('!', '0') == -1); // not a digit/valid letter at all
@@ -136,16 +143,25 @@ TEST_CASE("decode_barcode", "[swtcon]") {
   }
 }
 
-TEST_CASE("decode_fpl_lot_pair: covers every first/second-letter alphabet range", "[swtcon]") {
-  CHECK(decode_fpl_lot_pair('J', '5') != -1); // first letter J-N -> digit second char
-  CHECK(decode_fpl_lot_pair('J', 'B') == -1); // first letter J-N -> non-digit second char rejected
-  CHECK(decode_fpl_lot_pair('Q', '3') != -1); // first letter Q-Z -> digit second char
-  CHECK(decode_fpl_lot_pair('A', 'J') != -1); // first letter digit/A-H, second letter J-N
-  CHECK(decode_fpl_lot_pair('A', 'Q') != -1); // first letter digit/A-H, second letter Q-Z
-  CHECK(decode_fpl_lot_pair('A', 'I') == -1); // first letter digit/A-H, second char unmatched
+TEST_CASE(
+  "decode_fpl_lot_pair: covers every first/second-letter alphabet range",
+  "[swtcon]") {
+  CHECK(decode_fpl_lot_pair('J', '5') !=
+        -1); // first letter J-N -> digit second char
+  CHECK(decode_fpl_lot_pair('J', 'B') ==
+        -1); // first letter J-N -> non-digit second char rejected
+  CHECK(decode_fpl_lot_pair('Q', '3') !=
+        -1); // first letter Q-Z -> digit second char
+  CHECK(decode_fpl_lot_pair('A', 'J') !=
+        -1); // first letter digit/A-H, second letter J-N
+  CHECK(decode_fpl_lot_pair('A', 'Q') !=
+        -1); // first letter digit/A-H, second letter Q-Z
+  CHECK(decode_fpl_lot_pair('A', 'I') ==
+        -1); // first letter digit/A-H, second char unmatched
 }
 
-TEST_CASE("create_pid_file: acquires an exclusive lock, rejects a second acquire, then releases",
+TEST_CASE("create_pid_file: acquires an exclusive lock, rejects a second "
+          "acquire, then releases",
           "[swtcon]") {
   REQUIRE(create_pid_file() == 0);
   // A second open+flock against the same path contends with the first
@@ -153,14 +169,17 @@ TEST_CASE("create_pid_file: acquires an exclusive lock, rejects a second acquire
   // per open-file-description, not per-process.
   CHECK(create_pid_file() == -1);
   unlock_pid_file();
-  swtcon_state()->nPidFd = -1; // don't leave a stale closed fd for later tests' shutdown to touch
+  swtcon_state()->nPidFd =
+    -1; // don't leave a stale closed fd for later tests' shutdown to touch
 }
 
-TEST_CASE("unlock_pid_file: reports (but survives) a flock failure on an already-invalid fd",
+TEST_CASE("unlock_pid_file: reports (but survives) a flock failure on an "
+          "already-invalid fd",
           "[swtcon]") {
   swtcon_state()->nPidFd = 123456; // not a fd this process actually owns
   REQUIRE_NOTHROW(unlock_pid_file());
-  swtcon_state()->nPidFd = -1; // don't leave a bogus fd for a later test's swtcon_shutdown to touch
+  swtcon_state()->nPidFd =
+    -1; // don't leave a bogus fd for a later test's swtcon_shutdown to touch
 }
 
 TEST_CASE("read_wbf_match_fields", "[swtcon]") {
@@ -179,7 +198,8 @@ TEST_CASE("read_wbf_match_fields", "[swtcon]") {
   }
 
   SECTION("real waveform file parses") {
-    CHECK(read_wbf_match_fields(swtcon_test::test_wbf_path().string(), &fpl_lot, tft_vid));
+    CHECK(read_wbf_match_fields(
+      swtcon_test::test_wbf_path().string(), &fpl_lot, tft_vid));
   }
 }
 
@@ -188,7 +208,8 @@ TEST_CASE("read_temperature_raw", "[swtcon]") {
   TemporaryDirectory dir;
 
   SECTION("missing file fails") {
-    CHECK_FALSE(read_temperature_raw((dir.dir / "missing").string().c_str(), &value));
+    CHECK_FALSE(
+      read_temperature_raw((dir.dir / "missing").string().c_str(), &value));
   }
 
   SECTION("empty file fails") {
@@ -258,19 +279,21 @@ TEST_CASE("load_waveform", "[swtcon]") {
 // priming) - hand-verified against a few deterministic word offsets, chosen
 // so the OR/AND base pattern, the pattern-parameter bits, and the
 // end-to-end block-replication loop are all independently checked.
-TEST_CASE("write_lut_pattern: dither-fill pattern matches the byte-verified formula",
-          "[swtcon]") {
+TEST_CASE(
+  "write_lut_pattern: dither-fill pattern matches the byte-verified formula",
+  "[swtcon]") {
   std::vector<uint8_t> buf(kLutBlobSize);
   auto* words = (uint32_t*)buf.data();
 
   write_lut_pattern(buf.data(), 0);
-  CHECK(words[0] == 0x430000u);      // base fill, outside every OR/AND range
-  CHECK(words[0x28] == 0x450000u);   // inside both the OR [0x14,0x8e] and AND [0x28,0x66] ranges
-  CHECK(words[0x326] == 0x510000u);  // third init_lut_sub block, param==0
+  CHECK(words[0] == 0x430000u); // base fill, outside every OR/AND range
+  CHECK(words[0x28] ==
+        0x450000u); // inside both the OR [0x14,0x8e] and AND [0x28,0x66] ranges
+  CHECK(words[0x326] == 0x510000u); // third init_lut_sub block, param==0
 
   write_lut_pattern(buf.data(), 0xABCD);
-  CHECK(words[0] == 0x430000u);        // pattern-independent region unaffected
-  CHECK(words[0x326] == 0x51ABCDu);    // pattern's low 16 bits ORed in here
+  CHECK(words[0] == 0x430000u);     // pattern-independent region unaffected
+  CHECK(words[0x326] == 0x51ABCDu); // pattern's low 16 bits ORed in here
   // Every later 0x104-word block from buf+0x410 up to the end is a verbatim
   // copy of the buf+0x30c block - check the second block and the very last
   // one so both the replication loop's start and its end are covered.
@@ -278,12 +301,14 @@ TEST_CASE("write_lut_pattern: dither-fill pattern matches the byte-verified form
   CHECK(words[0x594fc + 0x1a] == words[0x326]);
 }
 
-TEST_CASE("prime_display: already-unblanked panel skips the real pan/reblank sequence",
-          "[swtcon]") {
+TEST_CASE(
+  "prime_display: already-unblanked panel skips the real pan/reblank sequence",
+  "[swtcon]") {
   SwtconFixture fx;
   framebuffer_globals()->nIsFbBlanked = 0;
   REQUIRE_NOTHROW(prime_display());
-  CHECK(framebuffer_globals()->nIsFbBlanked == 0); // early-return path leaves it untouched
+  CHECK(framebuffer_globals()->nIsFbBlanked ==
+        0); // early-return path leaves it untouched
 }
 
 // --- update.cpp: clamp_update_rect (180-degree reflection + 8-row align) ---
@@ -310,7 +335,7 @@ TEST_CASE("clamp_update_rect: y-axis rounds out to 8-row groups", "[swtcon]") {
 // --- update.cpp: render_kernel_case (pixelMode==5 "auto" indirection) ---
 
 TEST_CASE("render_kernel_case", "[swtcon]") {
-  CHECK(render_kernel_case(9, 0) == 9);  // pixel_mode != 5: passed through
+  CHECK(render_kernel_case(9, 0) == 9); // pixel_mode != 5: passed through
   CHECK(render_kernel_case(5, 1) == 6);
   CHECK(render_kernel_case(5, 2) == 9);
   CHECK(render_kernel_case(5, 5) == 9);
@@ -328,23 +353,25 @@ TEST_CASE("render_kernel_formula", "[swtcon]") {
   };
   uint16_t src = make_src(5, 10, 3); // lo5+mid6+hi5 == 18
 
-  CHECK(render_kernel_formula(6, src, true, 150) == 30);  // (18+150)/125*30
-  CHECK(render_kernel_formula(8, src, true, 150) == 30);  // case 8 == case 6
+  CHECK(render_kernel_formula(6, src, true, 150) == 30); // (18+150)/125*30
+  CHECK(render_kernel_formula(8, src, true, 150) == 30); // case 8 == case 6
 
   SECTION("case 7 gates on backBuffer activity") {
     CHECK(render_kernel_formula(7, src, false, 150) == kGatedPixelSentinel);
-    CHECK(render_kernel_formula(7, src, true, 150) == 30); // same formula as 6/8
+    CHECK(render_kernel_formula(7, src, true, 150) ==
+          30); // same formula as 6/8
   }
 
-  CHECK(render_kernel_formula(9, src, true, 150) == 6);    // ((18*15+150)/125)<<1
+  CHECK(render_kernel_formula(9, src, true, 150) == 6); // ((18*15+150)/125)<<1
   CHECK(render_kernel_formula(0xd, src, true, 150) == 0x1e); // fixed constant
-  CHECK(render_kernel_formula(0, src, true, 150) == 4);    // default: (18>>3)<<1
+  CHECK(render_kernel_formula(0, src, true, 150) == 4); // default: (18>>3)<<1
 }
 
 // --- update.cpp: subtract_update_region (overlap clipping / splitting) ---
 
-TEST_CASE("subtract_update_region: full containment removes the old item outright",
-          "[swtcon]") {
+TEST_CASE(
+  "subtract_update_region: full containment removes the old item outright",
+  "[swtcon]") {
   std::list<WorkItem> list;
   list.push_back(make_item(700, 600, 1100, 900));
 
@@ -367,12 +394,14 @@ TEST_CASE("subtract_update_region: no overlap leaves the old item untouched",
   CHECK(list.front().rectX1 == 100);
 }
 
-TEST_CASE("subtract_update_region: hole punched in the middle yields four strips",
-          "[swtcon]") {
+TEST_CASE(
+  "subtract_update_region: hole punched in the middle yields four strips",
+  "[swtcon]") {
   std::list<WorkItem> list;
   list.push_back(make_item(200, 200, 1600, 1200));
 
-  WorkItem punch = make_item(600, 500, 1200, 800); // strictly inside on every edge
+  WorkItem punch =
+    make_item(600, 500, 1200, 800); // strictly inside on every edge
   subtract_update_region(list, &punch);
 
   REQUIRE(list.size() == 4);
@@ -410,8 +439,9 @@ TEST_CASE("subtract_update_region: hole punched in the middle yields four strips
   CHECK(right.rectX1 == 1200);
 }
 
-TEST_CASE("subtract_update_region: single-edge overlap yields exactly one piece",
-          "[swtcon]") {
+TEST_CASE(
+  "subtract_update_region: single-edge overlap yields exactly one piece",
+  "[swtcon]") {
   std::list<WorkItem> list;
   list.push_back(make_item(300, 300, 1400, 900));
 
@@ -424,7 +454,8 @@ TEST_CASE("subtract_update_region: single-edge overlap yields exactly one piece"
   CHECK(list.front().rectX1 == 699); // clipped to just before the overlap
 }
 
-TEST_CASE("subtract_update_region: degenerate new rect is a no-op", "[swtcon]") {
+TEST_CASE("subtract_update_region: degenerate new rect is a no-op",
+          "[swtcon]") {
   std::list<WorkItem> list;
   list.push_back(make_item(0, 0, 100, 100));
 
@@ -435,7 +466,9 @@ TEST_CASE("subtract_update_region: degenerate new rect is a no-op", "[swtcon]") 
   CHECK(list.front().rectY1 == 100);
 }
 
-TEST_CASE("list_insert_before / list_unhook: circular intrusive list primitives", "[swtcon]") {
+TEST_CASE(
+  "list_insert_before / list_unhook: circular intrusive list primitives",
+  "[swtcon]") {
   struct Node {
     void* next;
     void* prev;
@@ -468,7 +501,8 @@ TEST_CASE("BatchNodeClaimed: reads the claimed byte at +0x15", "[swtcon]") {
   CHECK(BatchNodeClaimed(&node));
 }
 
-TEST_CASE("render_update_kernel: no-op when regionRows has no data buffer", "[swtcon]") {
+TEST_CASE("render_update_kernel: no-op when regionRows has no data buffer",
+          "[swtcon]") {
   SwtconFixture fx; // provides statebuffer_globals()->pGammaTable
   WorkItem item{};
   item.rectY0 = 0;
@@ -485,7 +519,8 @@ TEST_CASE("render_update_kernel: no-op when regionRows has no data buffer", "[sw
   REQUIRE_NOTHROW(render_update_kernel(&item, dataBuffer, backBuffer));
 }
 
-TEST_CASE("update_lut_is_valid: rejects null data / non-positive fields", "[swtcon]") {
+TEST_CASE("update_lut_is_valid: rejects null data / non-positive fields",
+          "[swtcon]") {
   auto lut = std::make_shared<LUTEntry>();
 
   lut->data = nullptr;
@@ -539,7 +574,13 @@ TEST_CASE("SwtconFixture: init produces a working image buffer", "[swtcon]") {
 
 namespace {
 update_data
-rect_req(int y0, int x0, int y1, int x1, int mode, int pixel_mode, int flags = 0) {
+rect_req(int y0,
+         int x0,
+         int y1,
+         int x1,
+         int mode,
+         int pixel_mode,
+         int flags = 0) {
   return update_data{ y0, x0, y1, x1, flags, mode, 0, pixel_mode };
 }
 } // namespace
@@ -556,7 +597,8 @@ TEST_CASE("swtcon_update: single request queues as one item", "[swtcon]") {
   CHECK(queue->listIncomingUpdates.front().subList.size() == 1);
 }
 
-TEST_CASE("swtcon_update: two non-overlapping regions batch together", "[swtcon]") {
+TEST_CASE("swtcon_update: two non-overlapping regions batch together",
+          "[swtcon]") {
   SwtconFixture fx;
   swtcon_lock();
   update_data r1 = rect_req(0, 0, 800, 600, 2, 9);
@@ -584,7 +626,8 @@ TEST_CASE("swtcon_update: hole punched in a pending region splits it into four",
 
   auto* queue = update_queue_globals();
   REQUIRE(queue->listIncomingUpdates.size() == 1);
-  CHECK(queue->listIncomingUpdates.front().subList.size() == 5); // 4 pieces + punch
+  CHECK(queue->listIncomingUpdates.front().subList.size() ==
+        5); // 4 pieces + punch
 }
 
 TEST_CASE("swtcon_update: out-of-range mode is silently dropped", "[swtcon]") {
@@ -598,7 +641,8 @@ TEST_CASE("swtcon_update: out-of-range mode is silently dropped", "[swtcon]") {
   swtcon_unlock_post();
 }
 
-TEST_CASE("swtcon_update: rect that clamps to invalid (x0>x1) is dropped", "[swtcon]") {
+TEST_CASE("swtcon_update: rect that clamps to invalid (x0>x1) is dropped",
+          "[swtcon]") {
   SwtconFixture fx;
   swtcon_lock();
   update_data req = rect_req(0, 100, 0, 50, 2, 9); // x0=100 > x1=50: inverted
@@ -609,22 +653,27 @@ TEST_CASE("swtcon_update: rect that clamps to invalid (x0>x1) is dropped", "[swt
   swtcon_unlock_post();
 }
 
-TEST_CASE("swtcon_update: ExplicitTemperature flag uses the caller-supplied temperature",
+TEST_CASE("swtcon_update: ExplicitTemperature flag uses the caller-supplied "
+          "temperature",
           "[swtcon]") {
   SwtconFixture fx;
   swtcon_lock();
-  update_data req{ 0, 0, 100, 100, ExplicitTemperature, 2, 10, 9 }; // zero=10 (explicit temp)
+  update_data req{
+    0, 0, 100, 100, ExplicitTemperature, 2, 10, 9
+  }; // zero=10 (explicit temp)
   swtcon_update(&req);
   swtcon_unlock_post();
 
   auto* queue = update_queue_globals();
   REQUIRE(queue->listIncomingUpdates.size() == 1);
   REQUIRE(queue->listIncomingUpdates.front().subList.size() == 1);
-  CHECK(queue->listIncomingUpdates.front().subList.front().temperature == 10.0f);
+  CHECK(queue->listIncomingUpdates.front().subList.front().temperature ==
+        10.0f);
 }
 
 TEST_CASE("swtcon_update: subtracts overlapping region from an already-batched "
-          "(unclaimed) update", "[swtcon]") {
+          "(unclaimed) update",
+          "[swtcon]") {
   SwtconFixture fx;
   swtcon_lock();
   update_data r1 = rect_req(200, 200, 1600, 1200, 2, 9);
@@ -633,13 +682,16 @@ TEST_CASE("swtcon_update: subtracts overlapping region from an already-batched "
 
   swtcon_lock();
   update_data punch = rect_req(600, 500, 1200, 800, 2, 9);
-  swtcon_update(&punch); // must also subtract from the already-queued batch above
+  swtcon_update(
+    &punch); // must also subtract from the already-queued batch above
   swtcon_unlock_post();
 
   auto* queue = update_queue_globals();
   REQUIRE(queue->listIncomingUpdates.size() == 2);
-  CHECK(queue->listIncomingUpdates.front().subList.size() == 4); // r1 split into 4 pieces
-  CHECK(queue->listIncomingUpdates.back().subList.size() == 1);  // punch's own batch
+  CHECK(queue->listIncomingUpdates.front().subList.size() ==
+        4); // r1 split into 4 pieces
+  CHECK(queue->listIncomingUpdates.back().subList.size() ==
+        1); // punch's own batch
 }
 
 // --- Real worker/display threads (SwtconFixture(startThreads=true)) against
@@ -647,9 +699,11 @@ TEST_CASE("swtcon_update: subtracts overlapping region from an already-batched "
 // timing-sensitive; run_with_timeout turns a hang into a failure instead of
 // blocking the whole test binary. ---
 
-TEST_CASE("swtcon threads: init/shutdown round-trip completes promptly", "[swtcon]") {
+TEST_CASE("swtcon threads: init/shutdown round-trip completes promptly",
+          "[swtcon]") {
   auto fx = std::make_unique<SwtconFixture>(/*startThreads=*/true);
-  bool finished = run_with_timeout([&] { fx.reset(); }, std::chrono::seconds(5));
+  bool finished =
+    run_with_timeout([&] { fx.reset(); }, std::chrono::seconds(5));
   CHECK(finished);
 }
 
@@ -658,24 +712,30 @@ TEST_CASE("swtcon threads: suspend/resume then shutdown completes promptly",
   auto fx = std::make_unique<SwtconFixture>(/*startThreads=*/true);
   swtcon_suspend();
   swtcon_resume();
-  bool finished = run_with_timeout([&] { fx.reset(); }, std::chrono::seconds(5));
+  bool finished =
+    run_with_timeout([&] { fx.reset(); }, std::chrono::seconds(5));
   CHECK(finished);
 }
 
 // --- swtcon.cpp: debug dump helpers + save_statebuffer/shutdown edge cases ---
 
-TEST_CASE("swtcon_runtime_offset: reports zero when SWTCON_LIBIMPL isn't compiled in "
-          "(non-armv7 host)", "[swtcon]") {
+TEST_CASE(
+  "swtcon_runtime_offset: reports zero when SWTCON_LIBIMPL isn't compiled in "
+  "(non-armv7 host)",
+  "[swtcon]") {
   CHECK(swtcon_runtime_offset() == 0);
 }
 
-TEST_CASE("swtcon_wait: returns immediately when nothing is queued", "[swtcon]") {
+TEST_CASE("swtcon_wait: returns immediately when nothing is queued",
+          "[swtcon]") {
   SwtconFixture fx;
   REQUIRE_NOTHROW(swtcon_wait());
 }
 
-TEST_CASE("swtcon_init: no waveform override falls through to find_waveform_path, "
-          "which fails on this host", "[swtcon]") {
+TEST_CASE(
+  "swtcon_init: no waveform override falls through to find_waveform_path, "
+  "which fails on this host",
+  "[swtcon]") {
   int fd = swtcon_test::make_anon_fd();
   REQUIRE(fd >= 0);
   InitParams params;
@@ -687,7 +747,8 @@ TEST_CASE("swtcon_init: no waveform override falls through to find_waveform_path
   CHECK(swtcon_init(params) == nullptr);
 }
 
-TEST_CASE("swtcon_init: a bad waveform path override fails via load_waveform", "[swtcon]") {
+TEST_CASE("swtcon_init: a bad waveform path override fails via load_waveform",
+          "[swtcon]") {
   int fd = swtcon_test::make_anon_fd();
   REQUIRE(fd >= 0);
   InitParams params;
@@ -698,25 +759,30 @@ TEST_CASE("swtcon_init: a bad waveform path override fails via load_waveform", "
   CHECK(swtcon_init(params) == nullptr);
 }
 
-TEST_CASE("swtcon_dump_waveform / swtcon_dump_buffers: debug dumps run without crashing",
+TEST_CASE("swtcon_dump_waveform / swtcon_dump_buffers: debug dumps run without "
+          "crashing",
           "[swtcon]") {
   SwtconFixture fx;
   REQUIRE_NOTHROW(swtcon_dump_waveform());
   REQUIRE_NOTHROW(swtcon_dump_buffers());
 }
 
-TEST_CASE("save_statebuffer: writes the persisted statebuffer to the given path", "[swtcon]") {
+TEST_CASE(
+  "save_statebuffer: writes the persisted statebuffer to the given path",
+  "[swtcon]") {
   SwtconFixture fx;
 
   // save_statebuffer takes the destination path as a raw pointer-sized int
   // (uintptr_t), mirroring the original 32-bit ARM ABI - lossless on this
   // 64-bit host too now, so an ordinary stack/heap address works directly.
-  std::string path =
-    (std::filesystem::temp_directory_path() / "swtcon-test-save-statebuffer.bin").string();
+  std::string path = (std::filesystem::temp_directory_path() /
+                      "swtcon-test-save-statebuffer.bin")
+                       .string();
 
   auto* sb = statebuffer_globals();
   std::vector<uint8_t> expected((const uint8_t*)sb->pStatebuffer,
-                                 (const uint8_t*)sb->pStatebuffer + kStatebufferSize);
+                                (const uint8_t*)sb->pStatebuffer +
+                                  kStatebufferSize);
 
   save_statebuffer((uintptr_t)path.c_str());
 
@@ -730,7 +796,8 @@ TEST_CASE("save_statebuffer: writes the persisted statebuffer to the given path"
   std::filesystem::remove(path);
 }
 
-TEST_CASE("swtcon_shutdown: non-zero state pointer saves state, and blanks an unblanked panel",
+TEST_CASE("swtcon_shutdown: non-zero state pointer saves state, and blanks an "
+          "unblanked panel",
           "[swtcon]") {
   int fd = swtcon_test::make_anon_fd();
   REQUIRE(fd >= 0);
@@ -749,13 +816,15 @@ TEST_CASE("swtcon_shutdown: non-zero state pointer saves state, and blanks an un
   framebuffer_globals()->nIsFbBlanked = 0;
 
   std::string path =
-    (std::filesystem::temp_directory_path() / "swtcon-test-shutdown-state.bin").string();
+    (std::filesystem::temp_directory_path() / "swtcon-test-shutdown-state.bin")
+      .string();
 
   // Snapshot before shutdown - pStatebuffer is freed as part of teardown, so
   // it can't be read back afterward.
   auto* sb = statebuffer_globals();
   std::vector<uint8_t> expected((const uint8_t*)sb->pStatebuffer,
-                                 (const uint8_t*)sb->pStatebuffer + kStatebufferSize);
+                                (const uint8_t*)sb->pStatebuffer +
+                                  kStatebufferSize);
 
   swtcon_shutdown((uintptr_t)path.c_str());
 
@@ -772,9 +841,11 @@ TEST_CASE("swtcon_shutdown: non-zero state pointer saves state, and blanks an un
 // --- display.cpp: commit_item / dispatch_processed_regions_native (per-item
 // state-buffer diffing + pixelTransitions packing) ---
 
-TEST_CASE("commit_item: force path writes every pixel unconditionally", "[swtcon]") {
+TEST_CASE("commit_item: force path writes every pixel unconditionally",
+          "[swtcon]") {
   SwtconFixture fx;
-  WorkItem item = make_rendered_item(100, 100, 107, 101, /*sync=*/1, /*fillValue=*/50);
+  WorkItem item =
+    make_rendered_item(100, 100, 107, 101, /*sync=*/1, /*fillValue=*/50);
 
   REQUIRE(commit_item(&item));
   CHECK(item.rectY0 == 100); // force path never narrows
@@ -801,18 +872,25 @@ TEST_CASE("commit_item: incremental path", "[swtcon]") {
 
   SECTION("no change anywhere leaves the item degenerate") {
     // The neutral statebuffer fill is 0x1e (30) per pixel.
-    WorkItem item = make_rendered_item(200, 200, 207, 201, /*sync=*/0, /*fillValue=*/30);
+    WorkItem item =
+      make_rendered_item(200, 200, 207, 201, /*sync=*/0, /*fillValue=*/30);
     CHECK_FALSE(commit_item(&item));
   }
 
   SECTION("gated (sentinel) pixels don't count as a change") {
     WorkItem item =
-      make_rendered_item(200, 200, 207, 201, /*sync=*/0, /*fillValue=*/(uint8_t)kGatedPixelSentinel);
+      make_rendered_item(200,
+                         200,
+                         207,
+                         201,
+                         /*sync=*/0,
+                         /*fillValue=*/(uint8_t)kGatedPixelSentinel);
     CHECK_FALSE(commit_item(&item));
   }
 
   SECTION("a real change survives and reports its rect back") {
-    WorkItem item = make_rendered_item(200, 200, 207, 201, /*sync=*/0, /*fillValue=*/50);
+    WorkItem item =
+      make_rendered_item(200, 200, 207, 201, /*sync=*/0, /*fillValue=*/50);
     REQUIRE(commit_item(&item));
     CHECK(item.rectY0 == 200);
     CHECK(item.rectY1 == 207);
@@ -821,8 +899,10 @@ TEST_CASE("commit_item: incremental path", "[swtcon]") {
   }
 }
 
-TEST_CASE("commit_item: a single changed pixel widens the narrowed rect to its whole "
-          "8-row group", "[swtcon]") {
+TEST_CASE(
+  "commit_item: a single changed pixel widens the narrowed rect to its whole "
+  "8-row group",
+  "[swtcon]") {
   SwtconFixture fx;
   WorkItem item{};
   item.rectY0 = 300;
@@ -841,7 +921,7 @@ TEST_CASE("commit_item: a single changed pixel widens the narrowed rect to its w
   rr->size = stride;
   rr->dataPtr = new uint8_t[stride];
   std::fill_n(rr->dataPtr, stride, (uint8_t)30); // neutral everywhere...
-  rr->dataPtr[3] = 50;                           // ...except local row 3 (absolute row 303)
+  rr->dataPtr[3] = 50; // ...except local row 3 (absolute row 303)
   item.regionRows = std::shared_ptr<RegionRows>(rr, [](RegionRows* p) {
     delete[] p->dataPtr;
     delete p;
@@ -850,13 +930,16 @@ TEST_CASE("commit_item: a single changed pixel widens the narrowed rect to its w
 
   REQUIRE(commit_item(&item));
   CHECK(item.rectY0 == 300);
-  CHECK(item.rectY1 == 307); // whole group widened even though only row 303 changed
+  CHECK(item.rectY1 ==
+        307); // whole group widened even though only row 303 changed
   CHECK(item.rectX0 == 300);
   CHECK(item.rectX1 == 300);
 }
 
-TEST_CASE("dispatch_processed_regions_native: erases degenerate/unchanged items, "
-          "keeps survivors", "[swtcon]") {
+TEST_CASE(
+  "dispatch_processed_regions_native: erases degenerate/unchanged items, "
+  "keeps survivors",
+  "[swtcon]") {
   SwtconFixture fx;
   std::list<WorkItem> sub_list;
 
@@ -865,7 +948,8 @@ TEST_CASE("dispatch_processed_regions_native: erases degenerate/unchanged items,
   degenerate.rectY1 = 2; // y1 < y0: degenerate on entry
   sub_list.push_back(std::move(degenerate));
 
-  sub_list.push_back(make_rendered_item(400, 400, 407, 401, /*sync=*/1, /*fillValue=*/60));
+  sub_list.push_back(
+    make_rendered_item(400, 400, 407, 401, /*sync=*/1, /*fillValue=*/60));
 
   bool any_survived = dispatch_processed_regions_native(sub_list);
   CHECK(any_survived);
@@ -873,8 +957,10 @@ TEST_CASE("dispatch_processed_regions_native: erases degenerate/unchanged items,
   CHECK(sub_list.front().rectY0 == 400);
 }
 
-TEST_CASE("stale_row_cleanup: restores + clears dirty-gate rows that fall out of the "
-          "live window", "[swtcon]") {
+TEST_CASE(
+  "stale_row_cleanup: restores + clears dirty-gate rows that fall out of the "
+  "live window",
+  "[swtcon]") {
   SwtconFixture fx;
   auto* cursor = frame_cursor_globals();
   cursor->nFrameCleanupCursor = 0;
@@ -892,12 +978,15 @@ TEST_CASE("stale_row_cleanup: restores + clears dirty-gate rows that fall out of
   auto* src = (const uint8_t*)framebuffer_globals()->pLUT + 0xc30;
 
   REQUIRE_NOTHROW(stale_row_cleanup());
-  CHECK(gate[0] == 0);                                  // cleared
-  CHECK(cursor->nFrameCleanupCursor == kFrameSlotRingCount); // advanced by one bucket
-  CHECK(std::memcmp(dest, src, 0x410) == 0); // the dirty row was actually restored
+  CHECK(gate[0] == 0); // cleared
+  CHECK(cursor->nFrameCleanupCursor ==
+        kFrameSlotRingCount); // advanced by one bucket
+  CHECK(std::memcmp(dest, src, 0x410) ==
+        0); // the dirty row was actually restored
 }
 
-TEST_CASE("gc_processed_updates: expires lifetime-elapsed items and scrubs dangling deps",
+TEST_CASE("gc_processed_updates: expires lifetime-elapsed items and scrubs "
+          "dangling deps",
           "[swtcon]") {
   SwtconFixture fx;
   auto* queue = update_queue_globals();
@@ -920,10 +1009,12 @@ TEST_CASE("gc_processed_updates: expires lifetime-elapsed items and scrubs dangl
 
   REQUIRE(queue->listProcessedUpdates.size() == 1);
   CHECK(queue->listProcessedUpdates.front().lutWidthMinus1 == 100);
-  CHECK(queue->listProcessedUpdates.front().deps.empty()); // dangling dep scrubbed
+  CHECK(
+    queue->listProcessedUpdates.front().deps.empty()); // dangling dep scrubbed
 }
 
-TEST_CASE("build_overlap_dependency_list: links only overlapping, still-live prior items",
+TEST_CASE("build_overlap_dependency_list: links only overlapping, still-live "
+          "prior items",
           "[swtcon]") {
   SwtconFixture fx;
   auto* queue = update_queue_globals();
@@ -940,12 +1031,14 @@ TEST_CASE("build_overlap_dependency_list: links only overlapping, still-live pri
 
   WorkItem alreadyExpired = make_item(0, 0, 100, 100);
   alreadyExpired.frameAnchor = 0;
-  alreadyExpired.lutWidthMinus1 = 5; // dead well before the new item's frameAnchor below
+  alreadyExpired.lutWidthMinus1 =
+    5; // dead well before the new item's frameAnchor below
   queue->listProcessedUpdates.push_back(alreadyExpired);
 
   std::list<WorkItem> sub_list;
-  WorkItem newItem = make_item(50, 50, 150, 150); // overlaps stillActive/alreadyExpired
-  newItem.frameAnchor = 20;                       // > alreadyExpired's frameAnchor+lutWidthMinus1
+  WorkItem newItem =
+    make_item(50, 50, 150, 150); // overlaps stillActive/alreadyExpired
+  newItem.frameAnchor = 20; // > alreadyExpired's frameAnchor+lutWidthMinus1
   sub_list.push_back(newItem);
 
   build_overlap_dependency_list(sub_list);
@@ -956,27 +1049,33 @@ TEST_CASE("build_overlap_dependency_list: links only overlapping, still-live pri
   CHECK(deps.front()->lutWidthMinus1 == 50); // only `stillActive` tracked
 }
 
-TEST_CASE("build_overlap_dependency_list: skips degenerate rects on either side",
-          "[swtcon]") {
+TEST_CASE(
+  "build_overlap_dependency_list: skips degenerate rects on either side",
+  "[swtcon]") {
   SwtconFixture fx;
   auto* queue = update_queue_globals();
 
-  WorkItem degenerateOther = make_item(0, 0, -1, -1); // other.rectY1 < other.rectY0
+  WorkItem degenerateOther =
+    make_item(0, 0, -1, -1); // other.rectY1 < other.rectY0
   queue->listProcessedUpdates.push_back(degenerateOther);
 
   std::list<WorkItem> sub_list;
   WorkItem degenerateNew = make_item(5, 5, 2, 2); // item's own rect degenerate
   sub_list.push_back(degenerateNew);
-  sub_list.push_back(make_item(0, 0, 100, 100)); // valid, but only overlaps the degenerate other
+  sub_list.push_back(
+    make_item(0, 0, 100, 100)); // valid, but only overlaps the degenerate other
 
   build_overlap_dependency_list(sub_list);
 
   REQUIRE(sub_list.size() == 2);
-  CHECK(sub_list.front().deps.empty()); // degenerate item skipped before any scan
-  CHECK(sub_list.back().deps.empty());  // valid item, but the only prior item is degenerate
+  CHECK(
+    sub_list.front().deps.empty()); // degenerate item skipped before any scan
+  CHECK(sub_list.back()
+          .deps.empty()); // valid item, but the only prior item is degenerate
 }
 
-TEST_CASE("playback_chunk_count: 1 unless area exceeds 20000px and columns are wide enough",
+TEST_CASE("playback_chunk_count: 1 unless area exceeds 20000px and columns are "
+          "wide enough",
           "[swtcon]") {
   WorkItem item = make_item(5, 0, 2, 0); // degenerate
   CHECK(playback_chunk_count(&item) == 1);
@@ -996,17 +1095,21 @@ TEST_CASE("playback_chunk_count: 1 unless area exceeds 20000px and columns are w
 // where the exact rendered pixel content is irrelevant - only that
 // commit_item can read it back at all.
 
-TEST_CASE("advance_work_item_frames: aligned kernel path advances phase/frameCursor "
-          "when no active dependency exists", "[swtcon]") {
+TEST_CASE(
+  "advance_work_item_frames: aligned kernel path advances phase/frameCursor "
+  "when no active dependency exists",
+  "[swtcon]") {
   SwtconFixture fx;
   auto* queue = update_queue_globals();
 
-  WorkItem item = make_rendered_item(0, 0, 63, 63, /*sync=*/1, /*fillValue=*/50);
+  WorkItem item =
+    make_rendered_item(0, 0, 63, 63, /*sync=*/1, /*fillValue=*/50);
   item.pixelMode = 9;
   item.mode = 2;
   item.temperature = 25.0f;
 
-  select_waveform_lut(item.temperature, &item.lut, &queue->waveform, (unsigned)item.mode);
+  select_waveform_lut(
+    item.temperature, &item.lut, &queue->waveform, (unsigned)item.mode);
   REQUIRE(update_lut_is_valid(item.lut));
   auto* lutWords = (const int32_t*)item.lut.get();
   item.lutWidthMinus1 = (int16_t)(lutWords[0] - 1);
@@ -1015,7 +1118,8 @@ TEST_CASE("advance_work_item_frames: aligned kernel path advances phase/frameCur
   std::list<WorkItem> sub_list;
   sub_list.push_back(std::move(item));
 
-  build_overlap_dependency_list(sub_list); // no prior processed items -> empty deps
+  build_overlap_dependency_list(
+    sub_list); // no prior processed items -> empty deps
   REQUIRE(dispatch_processed_regions_native(sub_list));
   REQUIRE(sub_list.size() == 1);
 
@@ -1034,17 +1138,21 @@ TEST_CASE("advance_work_item_frames: aligned kernel path advances phase/frameCur
   CHECK(queue->targetFrame == committed.frameCursor);
 }
 
-TEST_CASE("advance_work_item_frames: plain-kernel path aborts when the dependency "
-          "bound leaves no budget", "[swtcon]") {
+TEST_CASE(
+  "advance_work_item_frames: plain-kernel path aborts when the dependency "
+  "bound leaves no budget",
+  "[swtcon]") {
   SwtconFixture fx;
   auto* queue = update_queue_globals();
 
-  WorkItem item = make_rendered_item(0, 0, 63, 63, /*sync=*/1, /*fillValue=*/50);
+  WorkItem item =
+    make_rendered_item(0, 0, 63, 63, /*sync=*/1, /*fillValue=*/50);
   item.pixelMode = 9;
   item.mode = 2;
   item.temperature = 25.0f;
 
-  select_waveform_lut(item.temperature, &item.lut, &queue->waveform, (unsigned)item.mode);
+  select_waveform_lut(
+    item.temperature, &item.lut, &queue->waveform, (unsigned)item.mode);
   REQUIRE(update_lut_is_valid(item.lut));
   auto* lutWords = (const int32_t*)item.lut.get();
   item.lutWidthMinus1 = (int16_t)(lutWords[0] - 1);
@@ -1076,17 +1184,21 @@ TEST_CASE("advance_work_item_frames: plain-kernel path aborts when the dependenc
   CHECK(committed.phase == 0);
 }
 
-TEST_CASE("advance_work_item_frames: plain kernel path actually dispatches when "
-          "phase is mid-alignment", "[swtcon]") {
+TEST_CASE(
+  "advance_work_item_frames: plain kernel path actually dispatches when "
+  "phase is mid-alignment",
+  "[swtcon]") {
   SwtconFixture fx;
   auto* queue = update_queue_globals();
 
-  WorkItem item = make_rendered_item(0, 0, 63, 63, /*sync=*/1, /*fillValue=*/50);
+  WorkItem item =
+    make_rendered_item(0, 0, 63, 63, /*sync=*/1, /*fillValue=*/50);
   item.pixelMode = 9;
   item.mode = 2;
   item.temperature = 25.0f;
 
-  select_waveform_lut(item.temperature, &item.lut, &queue->waveform, (unsigned)item.mode);
+  select_waveform_lut(
+    item.temperature, &item.lut, &queue->waveform, (unsigned)item.mode);
   REQUIRE(update_lut_is_valid(item.lut));
   auto* lutWords = (const int32_t*)item.lut.get();
   item.lutWidthMinus1 = (int16_t)(lutWords[0] - 1);
@@ -1094,13 +1206,15 @@ TEST_CASE("advance_work_item_frames: plain kernel path actually dispatches when 
 
   std::list<WorkItem> sub_list;
   sub_list.push_back(std::move(item));
-  build_overlap_dependency_list(sub_list); // no prior processed items -> empty deps
+  build_overlap_dependency_list(
+    sub_list); // no prior processed items -> empty deps
   REQUIRE(dispatch_processed_regions_native(sub_list));
 
   WorkItem& committed = sub_list.front();
   committed.frameCursor = 0;
   committed.frameAnchor = 0;
-  committed.phase = 1; // not 8-aligned -> forces the "plain" kernel path even with no deps
+  committed.phase =
+    1; // not 8-aligned -> forces the "plain" kernel path even with no deps
   frame_cursor_globals()->nFrameCleanupCursor = 1000;
 
   advance_work_item_frames(&committed);
@@ -1109,8 +1223,10 @@ TEST_CASE("advance_work_item_frames: plain kernel path actually dispatches when 
   CHECK(committed.phase > 1);
 }
 
-TEST_CASE("advance_work_item_frames: marks the backbuffer dirty-gate columns for "
-          "each newly-advanced frame slot", "[swtcon]") {
+TEST_CASE(
+  "advance_work_item_frames: marks the backbuffer dirty-gate columns for "
+  "each newly-advanced frame slot",
+  "[swtcon]") {
   SwtconFixture fx;
   auto* queue = update_queue_globals();
 
@@ -1118,12 +1234,14 @@ TEST_CASE("advance_work_item_frames: marks the backbuffer dirty-gate columns for
   // process-wide static that outlives any single SwtconFixture, so reusing
   // a range another test already marked dirty would make this test's own
   // "clean before" precondition unreliable.
-  WorkItem item = make_rendered_item(0, 900, 63, 910, /*sync=*/1, /*fillValue=*/50);
+  WorkItem item =
+    make_rendered_item(0, 900, 63, 910, /*sync=*/1, /*fillValue=*/50);
   item.pixelMode = 9;
   item.mode = 2;
   item.temperature = 25.0f;
 
-  select_waveform_lut(item.temperature, &item.lut, &queue->waveform, (unsigned)item.mode);
+  select_waveform_lut(
+    item.temperature, &item.lut, &queue->waveform, (unsigned)item.mode);
   REQUIRE(update_lut_is_valid(item.lut));
   auto* lutWords = (const int32_t*)item.lut.get();
   item.lutWidthMinus1 = (int16_t)(lutWords[0] - 1);
@@ -1140,8 +1258,9 @@ TEST_CASE("advance_work_item_frames: marks the backbuffer dirty-gate columns for
   committed.phase = 0;
   frame_cursor_globals()->nFrameCleanupCursor = 1000;
 
-  uint8_t* bucket0 = backbuffer_dirty_gate(); // start_frame_cursor(0) % kFrameSlotRingCount == 0
-  REQUIRE(bucket0[900] == 0);                 // clean before - see the column-range note above
+  uint8_t* bucket0 =
+    backbuffer_dirty_gate(); // start_frame_cursor(0) % kFrameSlotRingCount == 0
+  REQUIRE(bucket0[900] == 0); // clean before - see the column-range note above
   REQUIRE(bucket0[910] == 0);
 
   advance_work_item_frames(&committed);
@@ -1160,18 +1279,21 @@ TEST_CASE("advance_work_item_frames: marks the backbuffer dirty-gate columns for
   CHECK(bucket0[911] == 0);
 }
 
-TEST_CASE("advance_work_item_frames: aligned path with insufficient budget falls "
-          "through without dispatching, warning if the generator has fallen behind",
-          "[swtcon]") {
+TEST_CASE(
+  "advance_work_item_frames: aligned path with insufficient budget falls "
+  "through without dispatching, warning if the generator has fallen behind",
+  "[swtcon]") {
   SwtconFixture fx;
   auto* queue = update_queue_globals();
 
-  WorkItem item = make_rendered_item(0, 0, 63, 63, /*sync=*/1, /*fillValue=*/50);
+  WorkItem item =
+    make_rendered_item(0, 0, 63, 63, /*sync=*/1, /*fillValue=*/50);
   item.pixelMode = 9;
   item.mode = 2;
   item.temperature = 25.0f;
 
-  select_waveform_lut(item.temperature, &item.lut, &queue->waveform, (unsigned)item.mode);
+  select_waveform_lut(
+    item.temperature, &item.lut, &queue->waveform, (unsigned)item.mode);
   REQUIRE(update_lut_is_valid(item.lut));
   auto* lutWords = (const int32_t*)item.lut.get();
   item.lutWidthMinus1 = (int16_t)(lutWords[0] - 1);
@@ -1199,7 +1321,9 @@ TEST_CASE("advance_work_item_frames: aligned path with insufficient budget falls
 // (per-column/per-8-row-group LUT playback into frame slots; KERNEL_MODE_C
 // on this non-ARM host) ---
 
-TEST_CASE("playback_kernel_plain_intrinsics: degenerate/empty rects are a no-op", "[swtcon]") {
+TEST_CASE(
+  "playback_kernel_plain_intrinsics: degenerate/empty rects are a no-op",
+  "[swtcon]") {
   WorkItem item{};
   void* frame_slots[1] = { nullptr };
 
@@ -1207,15 +1331,19 @@ TEST_CASE("playback_kernel_plain_intrinsics: degenerate/empty rects are a no-op"
   item.rectY1 = 2; // y1 < y0
   item.rectX0 = 0;
   item.rectX1 = 0;
-  REQUIRE_NOTHROW(playback_kernel_plain_intrinsics(frame_slots, &item, 1, 0, 1));
+  REQUIRE_NOTHROW(
+    playback_kernel_plain_intrinsics(frame_slots, &item, 1, 0, 1));
 
   item.rectY0 = 0;
   item.rectY1 = 2; // span < 8 rows -> num_groups == 0
-  REQUIRE_NOTHROW(playback_kernel_plain_intrinsics(frame_slots, &item, 1, 0, 1));
+  REQUIRE_NOTHROW(
+    playback_kernel_plain_intrinsics(frame_slots, &item, 1, 0, 1));
 }
 
-TEST_CASE("playback_kernel_plain_intrinsics: transposes 8 LUT rows into per-subphase "
-          "words and ORs them into up to frame_count frame slots", "[swtcon]") {
+TEST_CASE(
+  "playback_kernel_plain_intrinsics: transposes 8 LUT rows into per-subphase "
+  "words and ORs them into up to frame_count frame slots",
+  "[swtcon]") {
   WorkItem item{};
   item.rectY0 = 0;
   item.rectX0 = 0;
@@ -1234,7 +1362,9 @@ TEST_CASE("playback_kernel_plain_intrinsics: transposes 8 LUT rows into per-subp
   rr->stride = 1;
   item.pixelTransitions = rr;
 
-  uint16_t transitions[8] = { 0, 0, 0, 0, 0, 0, 0, 0 }; // all rows -> lut word index 0
+  uint16_t transitions[8] = {
+    0, 0, 0, 0, 0, 0, 0, 0
+  }; // all rows -> lut word index 0
   item.transitionDataPtr = transitions;
 
   std::vector<uint8_t> frame_buf[8];
@@ -1257,7 +1387,8 @@ TEST_CASE("playback_kernel_plain_intrinsics: transposes 8 LUT rows into per-subp
   }
 }
 
-TEST_CASE("playback_kernel_aligned_intrinsics: delegates to the plain kernel on this host",
+TEST_CASE("playback_kernel_aligned_intrinsics: delegates to the plain kernel "
+          "on this host",
           "[swtcon]") {
   WorkItem item{};
   item.rectY0 = 5;
@@ -1265,7 +1396,8 @@ TEST_CASE("playback_kernel_aligned_intrinsics: delegates to the plain kernel on 
   item.rectX0 = 0;
   item.rectX1 = 0;
   void* frame_slots[1] = { nullptr };
-  REQUIRE_NOTHROW(playback_kernel_aligned_intrinsics(frame_slots, &item, 1, 0, 1));
+  REQUIRE_NOTHROW(
+    playback_kernel_aligned_intrinsics(frame_slots, &item, 1, 0, 1));
 }
 
 // --- Mocked /dev/fb0 + ioctl (MockFb.h) - unlike every SwtconFixture-based
@@ -1352,7 +1484,8 @@ TEST_CASE("init_framebuffer: reports failure at every real-hardware error site",
 
 TEST_CASE("pan_and_unblank / blank_fb: succeed against a mocked framebuffer fd",
           "[swtcon]") {
-  SwtconFixture fx; // startThreads=false; wires framebuffer_globals() up to fx.fd
+  SwtconFixture
+    fx; // startThreads=false; wires framebuffer_globals() up to fx.fd
   swtcon_test::MockFramebuffer mockFb;
   swtcon_test::MockFramebuffer::registerFd(fx.fd);
 
@@ -1371,9 +1504,11 @@ TEST_CASE("pan_and_unblank / blank_fb: succeed against a mocked framebuffer fd",
   CHECK(st.blanked);
 }
 
-TEST_CASE("pan_and_advance_frame: pans to curFrame % kFrameSlotRingCount, not a fixed slot",
+TEST_CASE("pan_and_advance_frame: pans to curFrame % kFrameSlotRingCount, not "
+          "a fixed slot",
           "[swtcon]") {
-  SwtconFixture fx; // startThreads=false; wires framebuffer_globals() up to fx.fd
+  SwtconFixture
+    fx; // startThreads=false; wires framebuffer_globals() up to fx.fd
   swtcon_test::MockFramebuffer mockFb;
   swtcon_test::MockFramebuffer::registerFd(fx.fd);
 
@@ -1399,8 +1534,10 @@ TEST_CASE("pan_and_advance_frame: pans to curFrame % kFrameSlotRingCount, not a 
   CHECK(queue->curFrame == kFrameSlotRingCount + 4);
 }
 
-TEST_CASE("swtcon threads: a queued update is processed and drives real pan/blank "
-          "activity through the worker/display threads", "[swtcon]") {
+TEST_CASE(
+  "swtcon threads: a queued update is processed and drives real pan/blank "
+  "activity through the worker/display threads",
+  "[swtcon]") {
   swtcon_test::MockFramebuffer mockFb;
   int fd = swtcon_test::make_anon_fd();
   REQUIRE(fd >= 0);
@@ -1428,7 +1565,8 @@ TEST_CASE("swtcon threads: a queued update is processed and drives real pan/blan
   // synchronously within that same tick) - poll briefly afterward for the
   // worker thread's own next tick to actually issue the resulting real
   // pan/blank ioctls, rather than assuming a fixed delay is enough.
-  bool drained = run_with_timeout([&] { swtcon_wait(); }, std::chrono::seconds(5));
+  bool drained =
+    run_with_timeout([&] { swtcon_wait(); }, std::chrono::seconds(5));
   REQUIRE(drained);
 
   auto* queue = update_queue_globals();
@@ -1452,6 +1590,7 @@ TEST_CASE("swtcon threads: a queued update is processed and drives real pan/blan
   }
   CHECK(panned); // the worker thread issued a real (mocked) pan ioctl
 
-  bool finished = run_with_timeout([] { swtcon_shutdown(0); }, std::chrono::seconds(5));
+  bool finished =
+    run_with_timeout([] { swtcon_shutdown(0); }, std::chrono::seconds(5));
   CHECK(finished);
 }

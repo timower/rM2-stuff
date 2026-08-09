@@ -127,12 +127,11 @@ ControlServer::handleMsg() {
 
 unistdpp::Result<void>
 ControlClient::init(const char* path) {
-  sock = TRY(unistdpp::socket(AF_UNIX, SOCK_DGRAM |SOCK_CLOEXEC, 0));
+  sock = TRY(unistdpp::socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0));
 
   return unistdpp::bind(sock, unistdpp::Address::fromUnixPath(nullptr))
     .and_then([this, path] {
-      return unistdpp::connect(
-        sock, unistdpp::Address::fromUnixPath(path));
+      return unistdpp::connect(sock, unistdpp::Address::fromUnixPath(path));
     })
     .or_else([this](auto err) -> unistdpp::Result<void> {
       sock.close();

@@ -184,10 +184,10 @@ compute_shared_subphase_words(const uint16_t lut_words[8], uint16_t shared[8]) {
 
 void
 playback_kernel_plain_intrinsics(void** frame_slots,
-                             WorkItem* item,
-                             int frame_count,
-                             int chunk_index,
-                             int chunk_count) {
+                                 WorkItem* item,
+                                 int frame_count,
+                                 int chunk_index,
+                                 int chunk_count) {
   if (item->rectY1 < item->rectY0 || item->rectX1 < item->rectX0)
     return;
 
@@ -287,10 +287,10 @@ playback_kernel_plain_intrinsics(void** frame_slots,
 }
 void
 playback_kernel_aligned_intrinsics(void** frame_slots,
-                               WorkItem* item,
-                               int frame_count,
-                               int chunk_index,
-                               int chunk_count) {
+                                   WorkItem* item,
+                                   int frame_count,
+                                   int chunk_index,
+                                   int chunk_count) {
   playback_kernel_plain_intrinsics(
     frame_slots, item, frame_count, chunk_index, chunk_count);
 }
@@ -313,20 +313,20 @@ playback_kernel_aligned(void** frame_slots,
 
 void
 playback_kernel_plain_intrinsics(void** frame_slots,
-                             WorkItem* item,
-                             int frame_count,
-                             int chunk_index,
-                             int chunk_count) {
+                                 WorkItem* item,
+                                 int frame_count,
+                                 int chunk_index,
+                                 int chunk_count) {
   playback_kernel_plain(
     frame_slots, item, frame_count, chunk_index, chunk_count);
 }
 
 void
 playback_kernel_aligned_intrinsics(void** frame_slots,
-                               WorkItem* item,
-                               int frame_count,
-                               int chunk_index,
-                               int chunk_count) {
+                                   WorkItem* item,
+                                   int frame_count,
+                                   int chunk_index,
+                                   int chunk_count) {
   playback_kernel_aligned(
     frame_slots, item, frame_count, chunk_index, chunk_count);
 }

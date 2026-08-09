@@ -2,14 +2,16 @@
 #include <stdint.h>
 
 struct update_data {
-    int y0;
-    int x0;
-    int y1; // was misleadingly named "height" - it's the bottom-right corner's y, not a size
-    int x1; // was misleadingly named "width" - it's the bottom-right corner's x, not a size
-    int flags;
-    int update_mode;
-    int zero;
-    int pixel_mode;
+  int y0;
+  int x0;
+  int y1; // was misleadingly named "height" - it's the bottom-right corner's y,
+          // not a size
+  int x1; // was misleadingly named "width" - it's the bottom-right corner's x,
+          // not a size
+  int flags;
+  int update_mode;
+  int zero;
+  int pixel_mode;
 };
 
 // update_data::flags bit values.
@@ -45,9 +47,9 @@ struct update_data {
 // plausible-sounding rationalization built on the wrong name, not
 // independent evidence.
 enum UpdateFlags {
-    Sync = 1 << 0,
-    FastDraw = 1 << 1,
-    ExplicitTemperature = 1 << 3,
+  Sync = 1 << 0,
+  FastDraw = 1 << 1,
+  ExplicitTemperature = 1 << 3,
 };
 
 struct InitParams {
@@ -81,13 +83,18 @@ struct InitParams {
 
 // Initializes the library and returns the 16-bit framebuffer pointer. See
 // InitParams above for the individual fields.
-uint16_t* swtcon_init(const InitParams& params = {});
+uint16_t*
+swtcon_init(const InitParams& params = {});
 
 // Lock, update, unlock/post, and wait.
-void swtcon_lock();
-void swtcon_update(update_data* data);
-void swtcon_unlock_post();
-void swtcon_wait();
+void
+swtcon_lock();
+void
+swtcon_update(update_data* data);
+void
+swtcon_unlock_post();
+void
+swtcon_wait();
 
 // Suspends/resumes worker_thread_func's autonomous housekeeping (including
 // its periodic ~60s reprime, which touches the panel - see prime_display -
@@ -102,20 +109,26 @@ void swtcon_wait();
 // hardware, then resume without a fresh swtcon_init(). Only valid after
 // swtcon_init() has returned; a redundant call (e.g. resume when not
 // suspended) is a no-op.
-void swtcon_suspend();
-void swtcon_resume();
+void
+swtcon_suspend();
+void
+swtcon_resume();
 
 // Re-implemented natively. state_ptr_or_zero is 0, or a raw pointer-sized
 // int naming the file to save the statebuffer to (see save_statebuffer's
 // own comment in init.h) - uintptr_t rather than int32_t so the round-trip
 // stays lossless on a 64-bit host too.
-void swtcon_shutdown(uintptr_t state_ptr_or_zero);
+void
+swtcon_shutdown(uintptr_t state_ptr_or_zero);
 
 // Runtime load bias of libqsgepaper.so: ghidra_addr = runtime_pc - offset.
-uintptr_t swtcon_runtime_offset();
+uintptr_t
+swtcon_runtime_offset();
 
 // Debug: dump the loaded waveform LUTs (metadata + data checksum).
-void swtcon_dump_waveform();
+void
+swtcon_dump_waveform();
 
 // Debug: checksum the fixed init tables (LUT, gamma, statebuffer).
-void swtcon_dump_buffers();
+void
+swtcon_dump_buffers();

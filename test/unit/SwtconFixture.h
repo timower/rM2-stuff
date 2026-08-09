@@ -52,7 +52,8 @@ make_anon_fd() {
 #else
   char path[] = "/tmp/swtcon-test-fb-XXXXXX";
   int fd = mkstemp(path);
-  if (fd >= 0) unlink(path);
+  if (fd >= 0)
+    unlink(path);
   return fd;
 #endif
 }

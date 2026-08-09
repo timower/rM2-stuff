@@ -77,16 +77,22 @@ CloneWorkItemFieldsInto(WorkItem* dest, const WorkItem* src) {
 
   // pixelDataPtr, rect, seq id, frameCursor/frameAnchor, phase, LUT-width
   // shorts - every scalar field between regionRows and lut.
-  memcpy(&dest->pixelDataPtr, &src->pixelDataPtr, offsetof(WorkItem, lut) - offsetof(WorkItem, pixelDataPtr));
+  memcpy(&dest->pixelDataPtr,
+         &src->pixelDataPtr,
+         offsetof(WorkItem, lut) - offsetof(WorkItem, pixelDataPtr));
 
   dest->lut = src->lut;
 
   // mode, pad, temperature.
-  memcpy(&dest->mode, &src->mode, offsetof(WorkItem, pixelTransitions) - offsetof(WorkItem, mode));
+  memcpy(&dest->mode,
+         &src->mode,
+         offsetof(WorkItem, pixelTransitions) - offsetof(WorkItem, mode));
 
   dest->pixelTransitions = src->pixelTransitions;
 
-  dest->transitionDataPtr = src->transitionDataPtr; // +0x44 cached pixelTransitions buffer ptr (see WorkItem def)
+  dest->transitionDataPtr =
+    src->transitionDataPtr; // +0x44 cached pixelTransitions buffer ptr (see
+                            // WorkItem def)
 
   dest->deps = src->deps;
 
@@ -130,9 +136,15 @@ update_item_ctor(WorkItem* item) {
   // memset'ing over a live shared_ptr/vector would bypass its assignment
   // operator, so those spans are skipped here rather than blitted over
   // directly.
-  memset(&item->pixelDataPtr, 0, offsetof(WorkItem, lut) - offsetof(WorkItem, pixelDataPtr));
-  memset(&item->mode, 0, offsetof(WorkItem, pixelTransitions) - offsetof(WorkItem, mode));
-  memset(&item->transitionDataPtr, 0, offsetof(WorkItem, deps) - offsetof(WorkItem, transitionDataPtr));
+  memset(&item->pixelDataPtr,
+         0,
+         offsetof(WorkItem, lut) - offsetof(WorkItem, pixelDataPtr));
+  memset(&item->mode,
+         0,
+         offsetof(WorkItem, pixelTransitions) - offsetof(WorkItem, mode));
+  memset(&item->transitionDataPtr,
+         0,
+         offsetof(WorkItem, deps) - offsetof(WorkItem, transitionDataPtr));
   memset(&item->sync, 0, sizeof(WorkItem) - offsetof(WorkItem, sync));
 
   item->rectY1 = -1;
@@ -220,7 +232,8 @@ piece_builder(WorkItem* dest, const WorkItem* src, const Rect& piece_rect) {
   dest->seqId = ++(*seq_counter);
 
   if (dest->regionRows) {
-    dest->pixelDataPtr += dest->regionRows->stride * (piece_rect.x0 - src_x0) + (piece_rect.y0 - src_y0);
+    dest->pixelDataPtr += dest->regionRows->stride * (piece_rect.x0 - src_x0) +
+                          (piece_rect.y0 - src_y0);
   }
 
   return dest;
@@ -269,7 +282,10 @@ render_kernel_case(int pixel_mode, int mode) {
 // alongside it or GCC drops the out-of-line copy a test TU needs to link
 // against (both confirmed via objdump on the real armv7 release build).
 [[gnu::always_inline, gnu::used]] inline uint8_t
-render_kernel_formula(int case_, uint16_t src, bool back_active, uint8_t gamma) {
+render_kernel_formula(int case_,
+                      uint16_t src,
+                      bool back_active,
+                      uint8_t gamma) {
   unsigned lo5 = src & 0x1f;
   unsigned mid6 = (src >> 5) & 0x3f;
   unsigned hi5 = src >> 11;
@@ -299,23 +315,27 @@ render_kernel_formula(int case_, uint16_t src, bool back_active, uint8_t gamma) 
 // init_statebuffer() to have populated statebuffer_globals()->pGammaTable
 // first.
 void
-render_update_kernel(WorkItem* item, const uint16_t* dataBuffer, const uint8_t* backBuffer) {
+render_update_kernel(WorkItem* item,
+                     const uint16_t* dataBuffer,
+                     const uint8_t* backBuffer) {
   auto* rr = item->regionRows.get();
   if (!rr->dataPtr)
     return;
-  const uint8_t* gammaTable = (const uint8_t*)statebuffer_globals()->pGammaTable;
+  const uint8_t* gammaTable =
+    (const uint8_t*)statebuffer_globals()->pGammaTable;
   int case_ = render_kernel_case(item->pixelMode, item->mode);
 
   for (int32_t y_screen = item->rectY0; y_screen <= item->rectY1; y_screen++) {
     int row = y_screen - item->rectY0;
     int src_y = (kScreenHeight - 1) - y_screen;
-    for (int32_t x_screen = item->rectX0; x_screen <= item->rectX1; x_screen++) {
+    for (int32_t x_screen = item->rectX0; x_screen <= item->rectX1;
+         x_screen++) {
       int col = x_screen - item->rectX0;
       int src_x = (kScreenWidth - 1) - x_screen;
       int srcIdx = src_y * kScreenWidth + src_x;
       uint8_t gamma = gammaTable[(src_x & 0x7f) + (src_y & 0x7f) * 0x88];
-      uint8_t out =
-        render_kernel_formula(case_, dataBuffer[srcIdx], backBuffer[srcIdx] != 0, gamma);
+      uint8_t out = render_kernel_formula(
+        case_, dataBuffer[srcIdx], backBuffer[srcIdx] != 0, gamma);
       rr->dataPtr[(int64_t)col * rr->stride + row] = out;
     }
   }
@@ -356,7 +376,8 @@ dispatch_update_regions(WorkItem* item, void* dataBuffer, void* backBuffer) {
   item->pixelDataPtr = (uintptr_t)rr->dataPtr;
 
   if (item->rectY0 <= item->rectY1 && item->rectX0 <= item->rectX1)
-    render_update_kernel(item, (const uint16_t*)dataBuffer, (const uint8_t*)backBuffer);
+    render_update_kernel(
+      item, (const uint16_t*)dataBuffer, (const uint8_t*)backBuffer);
 }
 
 // Native reimplementation of subtract_update_region (0x3be10): clips the
@@ -374,7 +395,9 @@ dispatch_update_regions(WorkItem* item, void* dataBuffer, void* backBuffer) {
 // Non-static (declared in update.h) for direct unit testing - not a hot path.
 void
 subtract_update_region(std::list<WorkItem>& list, const WorkItem* new_item) {
-  Rect n{ new_item->rectY0, new_item->rectX0, new_item->rectY1, new_item->rectX1 };
+  Rect n{
+    new_item->rectY0, new_item->rectX0, new_item->rectY1, new_item->rectX1
+  };
   if (n.y1 < n.y0 || n.x1 < n.x0)
     return; // degenerate new rect - nothing to subtract
 
@@ -400,15 +423,20 @@ subtract_update_region(std::list<WorkItem>& list, const WorkItem* new_item) {
     int piece_count = 0;
     WorkItem tmp;
 
-    bool full_containment = cut.y0 == o.y0 && cut.x0 == o.x0 && cut.y1 == o.y1 && cut.x1 == o.x1;
+    bool full_containment =
+      cut.y0 == o.y0 && cut.x0 == o.x0 && cut.y1 == o.y1 && cut.x1 == o.x1;
 
     if (!full_containment) {
       update_item_copy(&tmp, &old); // preserve LUT/mode/temp/flags
 
-      if (o.x0 < cut.x0) pieces[piece_count++] = { o.y0, o.x0, o.y1, cut.x0 - 1 };
-      if (o.y0 < cut.y0) pieces[piece_count++] = { o.y0, cut.x0, cut.y0 - 1, cut.x1 };
-      if (cut.y1 < o.y1) pieces[piece_count++] = { cut.y1 + 1, cut.x0, o.y1, cut.x1 };
-      if (cut.x1 < o.x1) pieces[piece_count++] = { o.y0, cut.x1 + 1, o.y1, o.x1 };
+      if (o.x0 < cut.x0)
+        pieces[piece_count++] = { o.y0, o.x0, o.y1, cut.x0 - 1 };
+      if (o.y0 < cut.y0)
+        pieces[piece_count++] = { o.y0, cut.x0, cut.y0 - 1, cut.x1 };
+      if (cut.y1 < o.y1)
+        pieces[piece_count++] = { cut.y1 + 1, cut.x0, o.y1, cut.x1 };
+      if (cut.x1 < o.x1)
+        pieces[piece_count++] = { o.y0, cut.x1 + 1, o.y1, o.x1 };
     }
 
     // Erase the old element; `insert_pos` is what followed it (the
@@ -441,8 +469,10 @@ subtract_update_region(std::list<WorkItem>& list, const WorkItem* new_item) {
 // behaviorally identical - see subtract_update_region's similar
 // move-based erase for the same reasoning applied elsewhere in this file).
 static void
-build_update_batch(std::list<Batch>& incoming, std::list<Batch>::iterator pos,
-                          std::list<WorkItem>& accum, int16_t accum_flag) {
+build_update_batch(std::list<Batch>& incoming,
+                   std::list<Batch>::iterator pos,
+                   std::list<WorkItem>& accum,
+                   int16_t accum_flag) {
   Batch batch;
   for (auto& item : accum)
     batch.subList.push_back(std::move(item));
@@ -462,8 +492,10 @@ build_update_batch(std::list<Batch>& incoming, std::list<Batch>::iterator pos,
 // update_item_ctor uses) if `mode` is out of range or its ModeEntry
 // has no LUTs at all.
 void
-select_waveform_lut(float temp, std::shared_ptr<LUTEntry>* out,
-                           std::vector<ModeEntry*>* waveform, unsigned mode) {
+select_waveform_lut(float temp,
+                    std::shared_ptr<LUTEntry>* out,
+                    std::vector<ModeEntry*>* waveform,
+                    unsigned mode) {
   if (mode < waveform->size()) {
     ModeEntry* m = (*waveform)[mode];
     auto& luts = m->luts;
@@ -550,8 +582,8 @@ swtcon_update(update_data* data) {
     // Select the LUT and move the returned shared_ptr into the item -
     // assignment releases whatever was there before (empty after the ctor).
     std::shared_ptr<LUTEntry> selected;
-    select_waveform_lut(temp, &selected, &queue->waveform,
-                                (unsigned)(int)item.mode);
+    select_waveform_lut(
+      temp, &selected, &queue->waveform, (unsigned)(int)item.mode);
     item.lut = selected;
 
     if (update_lut_is_valid(item.lut)) {
@@ -605,7 +637,8 @@ swtcon_unlock_post() {
 
   // Move the accumulated regions into a fresh batch hooked before `pos`,
   // then clear whatever's left of the (now moved-from) originals.
-  build_update_batch(queue->listIncomingUpdates, pos, queue->accumList, queue->accumFlag);
+  build_update_batch(
+    queue->listIncomingUpdates, pos, queue->accumList, queue->accumFlag);
   queue->accumList.clear();
   queue->accumFlag = 0;
 

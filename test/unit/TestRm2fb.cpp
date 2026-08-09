@@ -1,9 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
+#include <fcntl.h>
 #include <future>
 #include <string>
 #include <sys/un.h>
 #include <unistd.h>
-#include <fcntl.h>
 
 #include "rm2fb/ControlSocket.h"
 
@@ -61,9 +61,8 @@ TEST_CASE("ControlSocket", "[rm2fb]") {
   REQUIRE(client.init(socket_path.c_str()).has_value());
 
   SECTION("getClients") {
-    auto server_future = std::async(std::launch::async, [&] {
-      return server.handleMsg();
-    });
+    auto server_future =
+      std::async(std::launch::async, [&] { return server.handleMsg(); });
 
     auto clients = client.getClients();
     server_future.get(); // wait for server to finish
@@ -79,9 +78,8 @@ TEST_CASE("ControlSocket", "[rm2fb]") {
   }
 
   SECTION("switchTo") {
-    auto server_future = std::async(std::launch::async, [&] {
-      return server.handleMsg();
-    });
+    auto server_future =
+      std::async(std::launch::async, [&] { return server.handleMsg(); });
 
     auto result = client.switchTo(123);
     server_future.get();
@@ -91,9 +89,8 @@ TEST_CASE("ControlSocket", "[rm2fb]") {
   }
 
   SECTION("setLauncher") {
-    auto server_future = std::async(std::launch::async, [&] {
-      return server.handleMsg();
-    });
+    auto server_future =
+      std::async(std::launch::async, [&] { return server.handleMsg(); });
 
     auto result = client.setLauncher(456);
     server_future.get();
@@ -103,9 +100,8 @@ TEST_CASE("ControlSocket", "[rm2fb]") {
   }
 
   SECTION("getFramebuffer") {
-    auto server_future = std::async(std::launch::async, [&] {
-      return server.handleMsg();
-    });
+    auto server_future =
+      std::async(std::launch::async, [&] { return server.handleMsg(); });
 
     auto fd = client.getFramebuffer(789);
     server_future.get();

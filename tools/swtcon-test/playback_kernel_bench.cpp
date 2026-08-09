@@ -27,11 +27,11 @@
 // (per the user's request) is a reasonable way to gauge how much NEON work
 // is worth it before burning a hardware round-trip.
 #include <chrono>
+#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <csignal>
 #include <dlfcn.h>
 #include <string>
 #include <ucontext.h>
@@ -92,9 +92,16 @@ segv_handler(int sig, siginfo_t* si, void* ucv) {
   auto* uc = (ucontext_t*)ucv;
   unsigned long pc = uc->uc_mcontext.arm_pc;
   unsigned long lr = uc->uc_mcontext.arm_lr;
-  fprintf(stderr, "\n*** SIGSEGV: fault_addr=%p pc=0x%lx lr=0x%lx\n", si->si_addr, pc, lr);
-  fprintf(stderr, "*** ghidra: pc=0x%lx lr=0x%lx (runtime_offset=0x%lx)\n", pc - g_runtime_offset,
-          lr - g_runtime_offset, (unsigned long)g_runtime_offset);
+  fprintf(stderr,
+          "\n*** SIGSEGV: fault_addr=%p pc=0x%lx lr=0x%lx\n",
+          si->si_addr,
+          pc,
+          lr);
+  fprintf(stderr,
+          "*** ghidra: pc=0x%lx lr=0x%lx (runtime_offset=0x%lx)\n",
+          pc - g_runtime_offset,
+          lr - g_runtime_offset,
+          (unsigned long)g_runtime_offset);
   fflush(stderr);
   signal(sig, SIG_DFL);
   raise(sig);
@@ -106,16 +113,23 @@ segv_handler(int sig, siginfo_t* si, void* ucv) {
 // A/B optimization passes afterward).
 static bool
 try_load_library(uintptr_t* offset_out) {
-  void* handle = dlopen("/usr/lib/plugins/scenegraph/libqsgepaper.so", RTLD_NOW | RTLD_GLOBAL);
+  void* handle = dlopen("/usr/lib/plugins/scenegraph/libqsgepaper.so",
+                        RTLD_NOW | RTLD_GLOBAL);
   if (!handle)
     handle = dlopen("./libqsgepaper.so", RTLD_NOW | RTLD_GLOBAL);
   if (!handle) {
-    fprintf(stderr, "note: libqsgepaper.so not found (%s) - skipping library comparison\n", dlerror());
+    fprintf(
+      stderr,
+      "note: libqsgepaper.so not found (%s) - skipping library comparison\n",
+      dlerror());
     return false;
   }
   void* instance_func = dlsym(handle, "_ZN13EPFramebuffer8instanceEv");
   if (!instance_func) {
-    fprintf(stderr, "note: known export symbol not found (%s) - skipping library comparison\n", dlerror());
+    fprintf(stderr,
+            "note: known export symbol not found (%s) - skipping library "
+            "comparison\n",
+            dlerror());
     return false;
   }
   *offset_out = (uintptr_t)instance_func - INSTANCE_ADDR;
@@ -133,10 +147,10 @@ lut_data_words(int mode_width, int bit_depth, int lut_width) {
 }
 
 // A self-contained synthetic WorkItem - only the fields
-// playback_kernel_plain_intrinsics actually reads (rect, phase, lut, pixelTransitions.stride,
-// transitionDataPtr; see its definition in display.cpp) need to be valid,
-// so unlike playback_kernel_probe.cpp's build_item this needs no
-// WorkItemNode/regionRows/intList scaffolding.
+// playback_kernel_plain_intrinsics actually reads (rect, phase, lut,
+// pixelTransitions.stride, transitionDataPtr; see its definition in
+// display.cpp) need to be valid, so unlike playback_kernel_probe.cpp's
+// build_item this needs no WorkItemNode/regionRows/intList scaffolding.
 // LUTEntry (init.h) already frees `data` in its own destructor
 // (init.cpp: `if (data) free(data)`) - do NOT also free it here. This
 // is the exact double-free gotcha playback_kernel_probe.cpp's build_item hit
@@ -151,7 +165,14 @@ struct BenchItem {
 };
 
 static void
-build_item(BenchItem& bi, int y0, int x0, int y1, int x1, int mode_width, int bit_depth, int lut_width,
+build_item(BenchItem& bi,
+           int y0,
+           int x0,
+           int y1,
+           int x1,
+           int mode_width,
+           int bit_depth,
+           int lut_width,
            uint32_t seed) {
   int rows = y1 - y0 + 1;
   int cols = x1 - x0 + 1;
@@ -169,7 +190,8 @@ build_item(BenchItem& bi, int y0, int x0, int y1, int x1, int mode_width, int bi
   // update.
   bi.transitions.assign((size_t)strideRows * cols, 0);
   for (auto& v : bi.transitions)
-    v = (uint16_t)((next_rand() % mode_width) * mode_width + (next_rand() % mode_width));
+    v = (uint16_t)((next_rand() % mode_width) * mode_width +
+                   (next_rand() % mode_width));
 
   bi.transitionsRr.dataPtr = (uint8_t*)bi.transitions.data();
   bi.transitionsRr.y0 = y0;
@@ -180,7 +202,8 @@ build_item(BenchItem& bi, int y0, int x0, int y1, int x1, int mode_width, int bi
   bi.transitionsRr.size = strideRows * cols * (int)sizeof(uint16_t);
 
   size_t lut_words = lut_data_words(mode_width, bit_depth, lut_width);
-  bi.lut.size_kb = lut_width; // size_kb doubles as phase count, see load_waveform
+  bi.lut.size_kb =
+    lut_width; // size_kb doubles as phase count, see load_waveform
   bi.lut.mode_width = mode_width;
   bi.lut.temperature = 0;
   bi.lut.bit_depth = bit_depth;
@@ -197,7 +220,8 @@ build_item(BenchItem& bi, int y0, int x0, int y1, int x1, int mode_width, int bi
   bi.item.lutWidthMinus1 = (int16_t)(lut_width - 1);
   bi.item.lut = non_owning_sp(&bi.lut);
   bi.item.pixelTransitions = non_owning_sp(&bi.transitionsRr);
-  bi.item.transitionDataPtr = bi.transitions.data(); // no rebase needed: already item-rect-relative
+  bi.item.transitionDataPtr =
+    bi.transitions.data(); // no rebase needed: already item-rect-relative
 }
 
 struct Result {
@@ -210,7 +234,7 @@ struct Result {
 // hit the time floor; slow scenarios (full-screen refreshes) hit the
 // iteration floor - either way this settles quickly without needing
 // per-scenario tuning.
-template <typename Fn>
+template<typename Fn>
 static Result
 run_bench(Fn&& fn, long min_iterations = 20, double min_ms = 300.0) {
   using Clock = std::chrono::steady_clock;
@@ -223,8 +247,10 @@ run_bench(Fn&& fn, long min_iterations = 20, double min_ms = 300.0) {
   do {
     fn();
     r.iterations++;
-    elapsed_ms = std::chrono::duration<double, std::milli>(Clock::now() - start).count();
-  } while ((r.iterations < min_iterations || elapsed_ms < min_ms) && r.iterations < 2'000'000);
+    elapsed_ms =
+      std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+  } while ((r.iterations < min_iterations || elapsed_ms < min_ms) &&
+           r.iterations < 2'000'000);
   r.ns_per_call = elapsed_ms * 1e6 / (double)r.iterations;
   return r;
 }
@@ -241,8 +267,14 @@ print_row(const char* label, const BenchItem& bi, const Result& r) {
   int rows = bi.item.rectY1 - bi.item.rectY0 + 1;
   double mpix_per_sec = (double)cols * rows / (r.ns_per_call * 1e-9) / 1e6;
   double pct_of_tick = (r.ns_per_call / 1000.0) / kPanelFrameTickUs * 100.0;
-  printf("    %-10s %10.1f ns/call  %8.1f Mpix/s  %6.2f%% of a %.2fms panel tick  (%ld iters)\n", label,
-         r.ns_per_call, mpix_per_sec, pct_of_tick, kPanelFrameTickUs / 1000.0, r.iterations);
+  printf("    %-10s %10.1f ns/call  %8.1f Mpix/s  %6.2f%% of a %.2fms panel "
+         "tick  (%ld iters)\n",
+         label,
+         r.ns_per_call,
+         mpix_per_sec,
+         pct_of_tick,
+         kPanelFrameTickUs / 1000.0,
+         r.iterations);
 }
 
 int
@@ -263,9 +295,12 @@ main(int argc, char** argv) {
   PlaybackKernelFn lib_plain = nullptr;
   PlaybackKernelFn lib_aligned = nullptr;
   if (have_lib) {
-    lib_plain = (PlaybackKernelFn)(g_runtime_offset + PLAIN_PLAYBACK_KERNEL_ADDR);
-    lib_aligned = (PlaybackKernelFn)(g_runtime_offset + ALIGNED_PLAYBACK_KERNEL_ADDR);
-    printf("Library loaded, runtime_offset=0x%lx - will benchmark FUN_0004a140/FUN_0004a234 too\n\n",
+    lib_plain =
+      (PlaybackKernelFn)(g_runtime_offset + PLAIN_PLAYBACK_KERNEL_ADDR);
+    lib_aligned =
+      (PlaybackKernelFn)(g_runtime_offset + ALIGNED_PLAYBACK_KERNEL_ADDR);
+    printf("Library loaded, runtime_offset=0x%lx - will benchmark "
+           "FUN_0004a140/FUN_0004a234 too\n\n",
            (unsigned long)g_runtime_offset);
   } else {
     printf("Running native-only (no library comparison)\n\n");
@@ -290,27 +325,51 @@ main(int argc, char** argv) {
     { "text-row 256x16 (2 groups)", 0, 0, 15, 255, 8 },
     { "menu 400x128 (16 groups)", 0, 0, 127, 399, 8 },
     { "half-screen 700x936 (117 groups)", 0, 0, 935, 699, 8 },
-    { "full-screen 1404x1872 (234 groups) fc=8", 0, 0, kScreenHeight - 1, kScreenWidth - 1, 8 },
-    { "full-screen 1404x1872 (234 groups) fc=1", 0, 0, kScreenHeight - 1, kScreenWidth - 1, 1 },
+    { "full-screen 1404x1872 (234 groups) fc=8",
+      0,
+      0,
+      kScreenHeight - 1,
+      kScreenWidth - 1,
+      8 },
+    { "full-screen 1404x1872 (234 groups) fc=1",
+      0,
+      0,
+      kScreenHeight - 1,
+      kScreenWidth - 1,
+      1 },
   };
 
   for (auto& sc : scenarios) {
     printf("=== %s, frameCount=%d ===\n", sc.name, sc.frame_count);
     BenchItem bi;
-    build_item(bi, sc.y0, sc.x0, sc.y1, sc.x1, /*mode_width=*/32, /*bit_depth=*/2, /*lut_width=*/16,
+    build_item(bi,
+               sc.y0,
+               sc.x0,
+               sc.y1,
+               sc.x1,
+               /*mode_width=*/32,
+               /*bit_depth=*/2,
+               /*lut_width=*/16,
                /*seed=*/0xC0FFEEu + sc.y1);
 
     clear_slots();
     auto native_result = run_bench([&] {
-      playback_kernel_plain_intrinsics(frame_slots, &bi.item, sc.frame_count, /*chunk_index=*/0,
-                                    /*chunk_count=*/1);
+      playback_kernel_plain_intrinsics(frame_slots,
+                                       &bi.item,
+                                       sc.frame_count,
+                                       /*chunk_index=*/0,
+                                       /*chunk_count=*/1);
     });
     print_row("native", bi, native_result);
 
     if (have_lib) {
       clear_slots();
       auto lib_plain_result = run_bench([&] {
-        lib_plain(frame_slots, &bi.item, sc.frame_count, /*chunk_index=*/0, /*chunk_count=*/1);
+        lib_plain(frame_slots,
+                  &bi.item,
+                  sc.frame_count,
+                  /*chunk_index=*/0,
+                  /*chunk_count=*/1);
       });
       print_row("lib-plain", bi, lib_plain_result);
       printf("    -> native is %.2fx the library plain kernel's time\n",
@@ -321,7 +380,11 @@ main(int argc, char** argv) {
       // this synthetic item's phase=0 satisfies that.
       clear_slots();
       auto lib_aligned_result = run_bench([&] {
-        lib_aligned(frame_slots, &bi.item, sc.frame_count, /*chunk_index=*/0, /*chunk_count=*/1);
+        lib_aligned(frame_slots,
+                    &bi.item,
+                    sc.frame_count,
+                    /*chunk_index=*/0,
+                    /*chunk_count=*/1);
       });
       print_row("lib-aligned", bi, lib_aligned_result);
       printf("    -> native is %.2fx the library aligned kernel's time\n",
@@ -330,12 +393,14 @@ main(int argc, char** argv) {
     printf("\n");
   }
 
-  printf(
-    "Note: absolute ns/call numbers are only meaningful within this single run/machine - the\n"
-    "native-vs-library ratios are the portable signal. The %.2fms figure is the whole display\n"
-    "pipeline's per-frame-tick pacing budget (display.cpp), not this kernel's own budget\n"
-    "in isolation - shown for scale, not as a hard per-call target.\n",
-    kPanelFrameTickUs / 1000.0);
+  printf("Note: absolute ns/call numbers are only meaningful within this "
+         "single run/machine - the\n"
+         "native-vs-library ratios are the portable signal. The %.2fms figure "
+         "is the whole display\n"
+         "pipeline's per-frame-tick pacing budget (display.cpp), not this "
+         "kernel's own budget\n"
+         "in isolation - shown for scale, not as a hard per-call target.\n",
+         kPanelFrameTickUs / 1000.0);
 
   return 0;
 }

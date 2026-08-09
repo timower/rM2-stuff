@@ -93,9 +93,9 @@ struct XYRect {
 // - see its comment)
 // free it via a custom deleter on the owning shared_ptr instead.
 struct RegionRows {
-  uint8_t* dataPtr;  // size = stride * (x1-x0+1)
+  uint8_t* dataPtr; // size = stride * (x1-x0+1)
   int32_t y0, x0, y1, x1;
-  int32_t stride;  // round_up(y1-y0+1, 16)
+  int32_t stride; // round_up(y1-y0+1, 16)
   int32_t size;
 };
 #if SWTCON_32BIT_ABI_CHECK
@@ -113,7 +113,8 @@ constexpr int32_t kRegionRowsStrideAlign = 16;
 // The library's internal "update work item", 0x5c bytes. Mirrors
 // update_item_ctor (0x3ffd0). Lives embedded at +8 inside a WorkItemNode.
 struct WorkItem {
-  std::shared_ptr<RegionRows> regionRows; // +0x00 (dispatch_update_regions's output)
+  std::shared_ptr<RegionRows>
+    regionRows; // +0x00 (dispatch_update_regions's output)
   // +0x08 cached RegionRows::dataPtr (the newly-rendered per-pixel byte),
   // rebased to this item's rect origin (see piece_builder). Stored as
   // uintptr_t rather than a typed pointer, to match the real library's ABI -
@@ -130,27 +131,31 @@ struct WorkItem {
   // normal swtcon_update -> [worker/display threads] -> commit_item
   // pipeline on this platform before this field widened.
   uintptr_t pixelDataPtr;
-  int32_t rectY0;               // +0x0c
-  int32_t rectX0;                // +0x10
-  int32_t rectY1;                 // +0x14
-  int32_t rectX1;                  // +0x18
-  int32_t seqId;                    // +0x1c
-  int32_t frameCursor;               // +0x20 [confirmed] next display-frame index this item's waveform should render into (advance_work_item_frames/FUN_0003ec78)
-  int32_t frameAnchor;                // +0x24 [confirmed] frame this item's playback started on; frameAnchor+lutWidthMinus1 = last active frame
-  int16_t phase;                       // +0x28 [confirmed] frames of this item's waveform already rendered; lutWidthMinus1-phase = frames remaining
-  int16_t lutWidthMinus1;               // +0x2a
-  std::shared_ptr<LUTEntry> lut;          // +0x2c (selected waveform LUT)
-  int16_t mode;                           // +0x34
+  int32_t rectY0;      // +0x0c
+  int32_t rectX0;      // +0x10
+  int32_t rectY1;      // +0x14
+  int32_t rectX1;      // +0x18
+  int32_t seqId;       // +0x1c
+  int32_t frameCursor; // +0x20 [confirmed] next display-frame index this item's
+                       // waveform should render into
+                       // (advance_work_item_frames/FUN_0003ec78)
+  int32_t frameAnchor; // +0x24 [confirmed] frame this item's playback started
+                       // on; frameAnchor+lutWidthMinus1 = last active frame
+  int16_t phase; // +0x28 [confirmed] frames of this item's waveform already
+                 // rendered; lutWidthMinus1-phase = frames remaining
+  int16_t lutWidthMinus1;        // +0x2a
+  std::shared_ptr<LUTEntry> lut; // +0x2c (selected waveform LUT)
+  int16_t mode;                  // +0x34
   int16_t _pad0x36;
-  float temperature;                       // +0x38
+  float temperature; // +0x38
   // +0x3c [confirmed] a second per-pixel buffer distinct from regionRows,
   // holding a packed uint16_t "(oldState<<5)|newState" transition value per
   // pixel (0x0400 as the "unchanged" sentinel - see commit_item),
   // NOT a snapshot of screen state itself (that's the unrelated
   // statebuffer_globals()->pStatebuffer/`state`, indexed screen-wide by
-  // column/row, not by item - don't confuse the two). advance_work_item_frames reads
-  // pixelTransitions->x0/x1 directly (RegionRows' own offsets) to mark the
-  // backBuffer dirty-gate array, and the still-library display-commit
+  // column/row, not by item - don't confuse the two). advance_work_item_frames
+  // reads pixelTransitions->x0/x1 directly (RegionRows' own offsets) to mark
+  // the backBuffer dirty-gate array, and the still-library display-commit
   // kernels (FUN_0004f8f0/FUN_0004e680, §6.3) write into it.
   std::shared_ptr<RegionRows> pixelTransitions;
   // +0x44 [confirmed] the u16 pixelTransitions buffer REBASED to the item's
@@ -177,15 +182,16 @@ struct WorkItem {
   // plain std::vector<WorkItem*> of non-owning back-pointers is both simpler
   // and, unlike the original std::list<int> mimicry, doesn't need to match
   // any real ABI at all.
-  std::vector<WorkItem*> deps;                // +0x48
-  uint8_t sync;                                 // +0x54
-  uint8_t fastDraw;                              // +0x55 (update_data's FastDraw flag - see swtcon.h)
+  std::vector<WorkItem*> deps; // +0x48
+  uint8_t sync;                // +0x54
+  uint8_t fastDraw; // +0x55 (update_data's FastDraw flag - see swtcon.h)
   uint8_t _pad0x56[2];
-  int32_t pixelMode;                              // +0x58
+  int32_t pixelMode; // +0x58
 };
 #if SWTCON_32BIT_ABI_CHECK
-#define WI_ASSERT(field, off) \
-  static_assert(offsetof(WorkItem, field) == (off), #field " must land at " #off)
+#define WI_ASSERT(field, off)                                                  \
+  static_assert(offsetof(WorkItem, field) == (off),                            \
+                #field " must land at " #off)
 WI_ASSERT(pixelDataPtr, 0x08);
 WI_ASSERT(rectY0, 0x0c);
 WI_ASSERT(rectX0, 0x10);
@@ -212,13 +218,17 @@ static_assert(sizeof(WorkItem) == 0x5c, "WorkItem layout drift");
 // libstdc++ headers (bits/shared_ptr_base.h) - so swapping in real
 // shared_ptr fields here doesn't change any offset above. Guards against a
 // future libstdc++ ABI change silently growing WorkItem.
-static_assert(sizeof(std::shared_ptr<RegionRows>) == 8, "shared_ptr<T> must be two pointers");
-static_assert(sizeof(std::shared_ptr<LUTEntry>) == 8, "shared_ptr<T> must be two pointers");
+static_assert(sizeof(std::shared_ptr<RegionRows>) == 8,
+              "shared_ptr<T> must be two pointers");
+static_assert(sizeof(std::shared_ptr<LUTEntry>) == 8,
+              "shared_ptr<T> must be two pointers");
 // deps's offset/size only need to hold sync/fastDraw/pixelMode at their
 // asserted offsets above - no real ABI to match (see deps's own comment) -
 // but pin it anyway as a regression guard against a future libstdc++ vector
 // layout change.
-static_assert(sizeof(std::vector<WorkItem*>) == 0xc, "std::vector<WorkItem*> must be 3 pointers (12 bytes) on this 32-bit ARM target");
+static_assert(sizeof(std::vector<WorkItem*>) == 0xc,
+              "std::vector<WorkItem*> must be 3 pointers (12 bytes) on this "
+              "32-bit ARM target");
 #endif // SWTCON_32BIT_ABI_CHECK
 
 // A work item's containing intrusive-list node - 100 bytes total, matching
@@ -229,7 +239,8 @@ struct WorkItemNode {
   WorkItem item;
 };
 #if SWTCON_32BIT_ABI_CHECK
-static_assert(sizeof(WorkItemNode) == 100, "WorkItemNode must match the library's 100-byte list node");
+static_assert(sizeof(WorkItemNode) == 100,
+              "WorkItemNode must match the library's 100-byte list node");
 #endif
 
 // A claimed batch of work items (build_update_batch's output, 0x18 bytes),
@@ -242,9 +253,9 @@ static_assert(sizeof(WorkItemNode) == 100, "WorkItemNode must match the library'
 struct BatchNode {
   BatchNode* next;
   BatchNode* prev;
-  ListHead subList;  // +0x08, head of a WorkItemNode circular list
-  int32_t count;      // +0x10
-  int16_t mode;        // +0x14
+  ListHead subList; // +0x08, head of a WorkItemNode circular list
+  int32_t count;    // +0x10
+  int16_t mode;     // +0x14
 };
 #if SWTCON_32BIT_ABI_CHECK
 static_assert(offsetof(BatchNode, subList) == 0x08, "");
@@ -449,39 +460,56 @@ backbuffer_dirty_gate() {
 // bookkeeping + work-item cloning/teardown, since display_thread_func
 // manipulates the exact same lists swtcon_update does) - see
 // update.cpp for definitions.
-float get_current_temperature();
-void select_waveform_lut(float temp, std::shared_ptr<LUTEntry>* out,
-                                std::vector<ModeEntry*>* waveform, unsigned mode);
-bool update_lut_is_valid(const std::shared_ptr<LUTEntry>& lut);
+float
+get_current_temperature();
+void
+select_waveform_lut(float temp,
+                    std::shared_ptr<LUTEntry>* out,
+                    std::vector<ModeEntry*>* waveform,
+                    unsigned mode);
+bool
+update_lut_is_valid(const std::shared_ptr<LUTEntry>& lut);
 
 // Inserts `node` immediately before `pos` in a circular intrusive list (see
 // update.cpp's definition for the full comment) - works for any
 // ListHead-shaped sentinel/node (WorkItemNode, BatchNode). Kept for the
 // probe tools (see BatchNode's comment); production code uses real
 // std::list<T> operations instead.
-void list_insert_before(void* pos, void* node);
+void
+list_insert_before(void* pos, void* node);
 
 // Unhooks `node` from whatever circular intrusive list it's currently in.
 // Kept for the probe tools, same rationale as list_insert_before.
-void list_unhook(void* node);
+void
+list_unhook(void* node);
 
 // Deep-copies a work item's shared_ptrs/list/scalars, preserving the
 // source's rect and sequence id (see CloneWorkItemFieldsInto for the
 // shared cloning body, also used by the rect-splitting piece-builder).
-WorkItem* update_item_copy(WorkItem* dest, const WorkItem* src);
+WorkItem*
+update_item_copy(WorkItem* dest, const WorkItem* src);
 
 // Native reimplementation of dispatch_update_regions (0x4fff8) and its
 // per-pixel kernel render_update_kernel (0x4e7b8) - see update.cpp
 // for the full comment and swtcon_architecture.md §5.1/§5.2 for the
 // confirmed formulas/addressing. Allocates item's RegionRows blob and fills
 // it from dataBuffer/backBuffer (the full-screen working buffers).
-void dispatch_update_regions(WorkItem* item, void* dataBuffer, void* backBuffer);
+void
+dispatch_update_regions(WorkItem* item, void* dataBuffer, void* backBuffer);
 
 // Individual pieces of dispatch_update_regions/swtcon_update, non-static so
 // each can be unit-tested directly - see update.cpp for the full comments.
-Rect clamp_update_rect(const XYRect& in);
-int render_kernel_case(int pixel_mode, int mode);
-uint8_t render_kernel_formula(int case_, uint16_t src, bool back_active, uint8_t gamma);
-void render_update_kernel(WorkItem* item, const uint16_t* dataBuffer, const uint8_t* backBuffer);
-WorkItem* piece_builder(WorkItem* dest, const WorkItem* src, const Rect& piece_rect);
-void subtract_update_region(std::list<WorkItem>& list, const WorkItem* new_item);
+Rect
+clamp_update_rect(const XYRect& in);
+int
+render_kernel_case(int pixel_mode, int mode);
+uint8_t
+render_kernel_formula(int case_, uint16_t src, bool back_active, uint8_t gamma);
+void
+render_update_kernel(WorkItem* item,
+                     const uint16_t* dataBuffer,
+                     const uint8_t* backBuffer);
+WorkItem*
+piece_builder(WorkItem* dest, const WorkItem* src, const Rect& piece_rect);
+void
+subtract_update_region(std::list<WorkItem>& list, const WorkItem* new_item);

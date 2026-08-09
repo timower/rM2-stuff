@@ -25,7 +25,7 @@ using Ptr = T*;
 
 class PreloadHook {
   using HookTuple = std::tuple<
-#define HOOK_TY(id, res, name, ...) res (*)(res(*)(__VA_ARGS__), __VA_ARGS__),
+#define HOOK_TY(id, res, name, ...) res (*)(res (*)(__VA_ARGS__), __VA_ARGS__),
     HOOKS(HOOK_TY) std::nullptr_t>;
 
 public:
