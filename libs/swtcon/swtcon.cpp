@@ -442,20 +442,12 @@ swtcon_shutdown(uintptr_t state_ptr_or_zero) {
     pthread_mutex_lock(&queue->workerCondMutex);
     pthread_cond_broadcast(&queue->workerCond);
     pthread_mutex_unlock(&queue->workerCondMutex);
-    // If the worker thread is currently parked in swtcon_suspend()'s gate
-    // (a separate condvar from workerCond above), the broadcast above alone
-    // wouldn't reach it and this pthread_join would hang forever. Only the
-    // gate itself needs waking here - NOT swtcon_resume(), which would also
-    // force nIsFbBlanked=1 and so make the "if (is_fb_blanked() == 0)
-    // blank_fb();" check below always skip a real blank on an ordinary
-    // shutdown that was never actually suspended. wake_suspend_gate() is
-    // safe regardless of which condvar the worker thread is actually blocked
-    // on - whichever one it's not waiting on is just a no-op - and it'll
-    // exit immediately via the shutdown check right after the gate, since
-    // workerThreadShutdown is already set above, before any pan/blank code
-    // runs - so there's no next pan cycle for nIsFbBlanked's staleness to
-    // affect either way.
-    wake_suspend_gate();
+    // Whether the worker thread is parked in swtcon_suspend()'s gate (step
+    // 1) or the frame-target wait (step 5), both block on this same
+    // workerCond/workerCondMutex now, so the one broadcast above reaches
+    // whichever it's actually in. No need for swtcon_resume()'s
+    // nIsFbBlanked=1 force here either way - both waits re-check
+    // workerThreadShutdown (already set above) and exit immediately.
     pthread_join(queue->workerThread, nullptr);
   }
 

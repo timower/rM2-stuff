@@ -1,6 +1,7 @@
 #include "display.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -74,16 +75,15 @@ pan_and_advance_frame(UpdateQueueGlobals* queue,
 }
 
 // swtcon_suspend/swtcon_resume's gate - see swtcon.h for the full
-// rationale. A plain condvar-guarded flag, independent of any of the
-// UpdateQueueGlobals/FrameCursorGlobals state above (those get torn down
-// and recreated across swtcon_init/swtcon_shutdown cycles; this doesn't
-// need to, and default-initializing to "not suspended" keeps every
-// existing caller - qsgepaper-test, ServerSwtcon.cpp - working unchanged
-// without ever having to call swtcon_resume() themselves).
+// rationale. Rides on queue->workerCond/workerCondMutex (the same condvar
+// steps 1 and 5 already share below) rather than a condvar of its own:
+// swtcon_suspend()/swtcon_resume() are documented (swtcon.h) as only valid
+// after swtcon_init() has returned, so there's no need for this to outlive
+// that condvar's own init/shutdown lifecycle. The flag itself stays atomic
+// so is_worker_suspended() can be polled from inside step 5's loop while
+// workerCondMutex is already held there, without relocking it.
 namespace {
-pthread_mutex_t g_suspendMutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t g_suspendCond = PTHREAD_COND_INITIALIZER;
-bool g_workerSuspended = false;
+std::atomic<bool> g_workerSuspended{ false };
 
 // Peeks the suspend flag without blocking - used by worker_thread_func at
 // points other than the main gate (step 1) to notice a suspend request
@@ -91,10 +91,7 @@ bool g_workerSuspended = false;
 // swtcon_suspend()'s comment for why the gate alone isn't sufficient.
 bool
 is_worker_suspended() {
-  pthread_mutex_lock(&g_suspendMutex);
-  bool suspended = g_workerSuspended;
-  pthread_mutex_unlock(&g_suspendMutex);
-  return suspended;
+  return g_workerSuspended.load(std::memory_order_relaxed);
 }
 } // namespace
 
@@ -108,9 +105,7 @@ swtcon_suspend() {
           !queue->listProcessedUpdates.empty()))
     usleep(100);
 
-  pthread_mutex_lock(&g_suspendMutex);
-  g_workerSuspended = true;
-  pthread_mutex_unlock(&g_suspendMutex);
+  g_workerSuspended.store(true, std::memory_order_relaxed);
 
   // The gate at the top of worker_thread_func's outer loop (step 1) is the
   // only place that actually blocks on g_workerSuspended - but the worker
@@ -135,10 +130,11 @@ swtcon_suspend() {
 // See display.h - only wakes the gate, doesn't touch nIsFbBlanked.
 void
 wake_suspend_gate() {
-  pthread_mutex_lock(&g_suspendMutex);
-  g_workerSuspended = false;
-  pthread_cond_broadcast(&g_suspendCond);
-  pthread_mutex_unlock(&g_suspendMutex);
+  g_workerSuspended.store(false, std::memory_order_relaxed);
+  auto* queue = update_queue_globals();
+  pthread_mutex_lock(&queue->workerCondMutex);
+  pthread_cond_broadcast(&queue->workerCond);
+  pthread_mutex_unlock(&queue->workerCondMutex);
 }
 
 void
@@ -160,9 +156,10 @@ swtcon_resume() {
   //
   // Only correct here because the worker thread is about to resume real,
   // ongoing per-frame operation (steps 2/7/8/10 below) that will actually
-  // observe and act on this flag. swtcon_shutdown() (swtcon.cpp) needs the
-  // gate woken too but must NOT go through this force - see
-  // wake_suspend_gate(), which it calls instead.
+  // observe and act on this flag. swtcon_shutdown() (swtcon.cpp) also wakes
+  // the gate but must NOT go through this force - it does so with a plain
+  // workerCond broadcast instead, since exiting doesn't care about
+  // nIsFbBlanked's staleness.
   framebuffer_globals()->nIsFbBlanked = 1;
   wake_suspend_gate();
 }
@@ -176,10 +173,15 @@ worker_thread_func(void*) {
     // Suspend gate: while suspended, block here doing nothing at all - no
     // housekeeping, no reprime, no pan - see swtcon_suspend's comment in
     // swtcon.h. Checked first, before anything below touches hardware.
-    pthread_mutex_lock(&g_suspendMutex);
-    while (g_workerSuspended && queue->workerThreadShutdown == 0)
-      pthread_cond_wait(&g_suspendCond, &g_suspendMutex);
-    pthread_mutex_unlock(&g_suspendMutex);
+    // Shares workerCond/workerCondMutex with step 5 below - a spurious
+    // wakeup from some unrelated broadcast (new work, flash, shutdown) just
+    // re-checks this loop's own predicate and goes back to waiting if still
+    // suspended, same as any other condvar user.
+    pthread_mutex_lock(&queue->workerCondMutex);
+    while (g_workerSuspended.load(std::memory_order_relaxed) &&
+           queue->workerThreadShutdown == 0)
+      pthread_cond_wait(&queue->workerCond, &queue->workerCondMutex);
+    pthread_mutex_unlock(&queue->workerCondMutex);
 
     if (queue->workerThreadShutdown != 0)
       pthread_exit(nullptr);

@@ -43,11 +43,10 @@ request_flash_and_wait();
 void*
 display_thread_func(void* arg);
 
-// Wakes worker_thread_func's suspend gate (g_suspendCond in display.cpp)
+// Wakes worker_thread_func's suspend gate (queue->workerCond in display.cpp)
 // without forcing framebuffer_globals()->nIsFbBlanked=1 the way the public
 // swtcon_resume() does - see swtcon_resume()'s comment for why that force
-// is needed for a real resume, and swtcon_shutdown()'s call site (the only
-// caller) for why it must NOT do that same force on the shutdown path.
+// is needed for a real resume.
 void
 wake_suspend_gate();
 
