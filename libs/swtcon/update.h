@@ -12,12 +12,15 @@
 // static_asserts below are a safety net, not evidence the layout only works
 // because of implicit compiler padding - there isn't any.
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <list>
 #include <memory>
+#include <new>
 #include <pthread.h>
 #include <semaphore.h>
+#include <string>
 #include <vector>
 
 #include "init.h" // ModeEntry
@@ -143,9 +146,9 @@ struct WorkItem {
   // +0x3c [confirmed] a second per-pixel buffer distinct from regionRows,
   // holding a packed uint16_t "(oldState<<5)|newState" transition value per
   // pixel (0x0400 as the "unchanged" sentinel - see commit_item),
-  // NOT a snapshot of screen state itself (that's the unrelated global
-  // g_pStateBufferNative/`state`, indexed screen-wide by column/row, not by
-  // item - don't confuse the two). advance_work_item_frames reads
+  // NOT a snapshot of screen state itself (that's the unrelated
+  // statebuffer_globals()->pStatebuffer/`state`, indexed screen-wide by
+  // column/row, not by item - don't confuse the two). advance_work_item_frames reads
   // pixelTransitions->x0/x1 directly (RegionRows' own offsets) to mark the
   // backBuffer dirty-gate array, and the still-library display-commit
   // kernels (FUN_0004f8f0/FUN_0004e680, §6.3) write into it.
@@ -322,6 +325,15 @@ struct UpdateQueueGlobals {
   pthread_t workerThread;
   void* dataBuffer;
   void* backBuffer;
+  // Whether dataBuffer/backBuffer were malloc'd/calloc'd by init_statebuffer
+  // (and so need freeing at shutdown) versus supplied externally by the
+  // caller (e.g. rm2fb's server passing in its own mmap'd shared
+  // framebuffer - see swtcon_init's dataBuffer/backBuffer params). free()ing
+  // an externally-supplied buffer would hand a non-heap pointer to the
+  // allocator - confirmed on real hardware as an immediate "free(): invalid
+  // pointer" abort in swtcon_shutdown.
+  bool dataBufferOwned = false;
+  bool backBufferOwned = false;
   std::list<WorkItem> accumList;
   int16_t accumFlag;
 
@@ -330,10 +342,106 @@ struct UpdateQueueGlobals {
   bool threadsStarted = false;
 };
 
+// All of this codebase's own module-level state, gathered into one place -
+// see doc/swtcon_3.27_diff.md, which found the real library itself moved to
+// exactly this shape (a single `g_pSwtconState` blob) by version 3.27.
+// Every field below used to be its own function-local-static singleton
+// (declared next to the struct it returns, e.g. StatebufferGlobals's own
+// statebuffer_globals()) or a loose extern global (swtcon.cpp/init.cpp's
+// `g_*Native` variables) - consolidated here so swtcon_init only has one
+// thing to (re)initialize instead of several.
+struct SwtconState {
+  UpdateQueueGlobals queue;
+  StatebufferGlobals statebuffer;
+  FramebufferGlobals framebuffer;
+  FrameCursorGlobals frameCursor;
+
+  // NOT zero-initialized in the real library: g_flCachedTemperature's
+  // initial bytes in libqsgepaper.so's own data image are 0x41c80000
+  // (25.0f), a genuine initialized default (room temperature), not .bss -
+  // see cached_temperature_ptr's old comment (git blame) for the full
+  // real-vs-emulator divergence this default fixes.
+  float cachedTemperature = 25.0f;
+  // Zero-initialized, matching the library's own .bss state before
+  // swtcon_init explicitly pthread_mutex_init's it.
+  pthread_mutex_t temperatureMutex{};
+  int seqCounter = 0;
+
+  // backBuffer dirty-gate array: one bucket per frame-slot ring position
+  // (kFrameSlotRingCount), each kScreenWidth bytes, one byte per column -
+  // see backbuffer_dirty_gate()'s old comment (git blame) for why the first
+  // kDirtyGateBucketCount*kDirtyGateRowBytes bytes are padding rather than
+  // part of the live array.
+  uint8_t backbufferDirtyGate[2 * kDirtyGateBucketCount * kDirtyGateRowBytes]{};
+
+  // swtcon_suspend/swtcon_resume's gate - see swtcon.h's swtcon_suspend()
+  // comment for the full rationale.
+  std::atomic<bool> workerSuspended{ false };
+
+  // create_pid_file's own lock fd; -1 when no lock is held.
+  int nPidFd = -1;
+
+  // Path discovered once by init_temperature_sensor, reused by every
+  // subsequent refresh_temperature_cache call.
+  std::string hwmonTempPath;
+
+  // Re-initializes every field to its default - including members that
+  // aren't copy/move-assignable (std::atomic, the pthread primitives), which
+  // is why this is a destroy+placement-new rather than `*this =
+  // SwtconState{}`. Called once at the top of swtcon_init so a second
+  // swtcon_init() in the same process (every unit test does this) never
+  // sees stale bookkeeping left over from a prior instance.
+  void reset() {
+    this->~SwtconState();
+    new (this) SwtconState();
+  }
+};
+
+inline SwtconState*
+swtcon_state() {
+  static SwtconState s;
+  return &s;
+}
+
 inline UpdateQueueGlobals*
 update_queue_globals() {
-  static UpdateQueueGlobals g{};
-  return &g;
+  return &swtcon_state()->queue;
+}
+
+inline StatebufferGlobals*
+statebuffer_globals() {
+  return &swtcon_state()->statebuffer;
+}
+
+inline FramebufferGlobals*
+framebuffer_globals() {
+  return &swtcon_state()->framebuffer;
+}
+
+inline FrameCursorGlobals*
+frame_cursor_globals() {
+  return &swtcon_state()->frameCursor;
+}
+
+inline float*
+cached_temperature_ptr() {
+  return &swtcon_state()->cachedTemperature;
+}
+
+inline pthread_mutex_t*
+temperature_mutex() {
+  return &swtcon_state()->temperatureMutex;
+}
+
+inline int*
+seq_counter_ptr() {
+  return &swtcon_state()->seqCounter;
+}
+
+inline uint8_t*
+backbuffer_dirty_gate() {
+  return swtcon_state()->backbufferDirtyGate +
+         (size_t)kDirtyGateBucketCount * kDirtyGateRowBytes;
 }
 
 // Shared internal primitives, also used by display.cpp (worker

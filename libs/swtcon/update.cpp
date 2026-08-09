@@ -241,8 +241,6 @@ piece_builder(WorkItem* dest, const WorkItem* src, const Rect& piece_rect) {
 // disjoint column ranges - it changes nothing about which output byte reads
 // which input byte, so this single-pass native port doesn't replicate it.
 
-extern void* g_pGammaTableNative;
-
 // Mirrors render_update_kernel's pixelMode==5 ("auto") indirection through
 // g_anPixelModeDispatchTable - confirmed by reading the table's bytes
 // directly out of the loaded library (Ghidra address 0x596b8).
@@ -299,13 +297,14 @@ render_kernel_formula(int case_, uint16_t src, bool back_active, uint8_t gamma) 
 // sized for item's own rect (dispatch_update_regions's job).
 //
 // Non-static (declared in update.h) for direct unit testing - a test needs
-// init_statebuffer() to have populated g_pGammaTableNative first.
+// init_statebuffer() to have populated statebuffer_globals()->pGammaTable
+// first.
 void
 render_update_kernel(WorkItem* item, const uint16_t* dataBuffer, const uint8_t* backBuffer) {
   auto* rr = item->regionRows.get();
   if (!rr->dataPtr)
     return;
-  const uint8_t* gammaTable = (const uint8_t*)g_pGammaTableNative;
+  const uint8_t* gammaTable = (const uint8_t*)statebuffer_globals()->pGammaTable;
   int case_ = render_kernel_case(item->pixelMode, item->mode);
 
   for (int32_t y_screen = item->rectY0; y_screen <= item->rectY1; y_screen++) {

@@ -21,7 +21,7 @@ struct LUTEntry {
 // init_lut allocate - each is duplicated (as a raw literal) at every
 // site that (re)allocates, fills, or checksums that buffer, so this is the
 // one place all of them should read from. `kStatebufferSize` doubles as the
-// 16-bit image buffer's size (g_pImageBufferNative) since both are
+// 16-bit image buffer's size (UpdateQueueGlobals::dataBuffer) since both are
 // kScreenWidth*kScreenHeight 16-bit-per-pixel buffers - see
 // init_statebuffer's own comment for which is which.
 constexpr size_t kStatebufferSize = (size_t)kScreenWidth * kScreenHeight * 2;
@@ -126,7 +126,8 @@ void init_temperature_sensor();
 void refresh_temperature_cache();
 
 // Mirrors frame_buffer_addr (0x53fd0): address of frame slot `frame_idx`
-// within the mmap'd framebuffer (each slot is g_nFbSizeXNative bytes).
+// within the mmap'd framebuffer (each slot is framebuffer_globals()->nFbSizeX
+// bytes).
 void* frame_buffer_addr(int frame_idx);
 
 // Mirrors upload_lut_to_frame_slot (0x53bc8): copies the full waveform LUT

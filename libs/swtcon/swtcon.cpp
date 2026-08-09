@@ -126,20 +126,6 @@ swtcon_runtime_offset() {
 
 #endif // SWTCON_32BIT_ABI_CHECK
 
-extern void* g_pImageBufferNative;
-extern void* g_pScreenBufferNative;
-extern void* g_pStateBufferNative;
-extern void* g_pGammaTableNative;
-extern bool g_imageBufferOwnedNative;
-extern bool g_screenBufferOwnedNative;
-extern int g_nFbFdNative;
-extern int g_nFbSizeXNative;
-extern int g_nFbSizeYNative;
-extern void* g_pFbAddrNative;
-extern void* g_pLUTAddrNative;
-extern struct fb_var_screeninfo g_fbVarScreeninfoNative;
-extern struct fb_fix_screeninfo g_fbFixScreeninfoNative;
-
 uint16_t*
 swtcon_init(const InitParams& params) {
   std::cout << "swtcon_init: initialization sequence starting..." << std::endl;
@@ -172,6 +158,16 @@ swtcon_init(const InitParams& params) {
 #endif // SWTCON_32BIT_ABI_CHECK
 
   // --- NATIVE INIT IMPLEMENTATION ---
+  // Reset all module-level state first - swtcon_shutdown doesn't zero scalar
+  // bookkeeping, so a second swtcon_init() in one process would otherwise
+  // see stale state (e.g. workerThreadShutdown still set). Must happen
+  // before create_pid_file/init_statebuffer below, which now write directly
+  // into this same state rather than into their own separate globals.
+  swtcon_state()->reset();
+
+  auto* queue = update_queue_globals();
+  auto* fb = framebuffer_globals();
+
   // Caller (e.g. rm2fb's server, coordinating with xochitl's own separate,
   // unmodified swtcon instance via SIGSTOP + idle notices instead of this
   // lock - see tools/xochitl-mock-server) takes responsibility for
@@ -183,19 +179,6 @@ swtcon_init(const InitParams& params) {
   if (init_statebuffer(params.dataBuffer, params.backBuffer) != 0)
     return nullptr;
 
-  auto* queue = update_queue_globals();
-  auto* sb = statebuffer_globals();
-  auto* fb = framebuffer_globals();
-  auto* cursor = frame_cursor_globals();
-
-  // Reset every singleton first - swtcon_shutdown doesn't zero scalar
-  // bookkeeping, so a second swtcon_init() in one process would otherwise
-  // see stale state (e.g. workerThreadShutdown still set).
-  *queue = UpdateQueueGlobals{};
-  *sb = StatebufferGlobals{};
-  *fb = FramebufferGlobals{};
-  *cursor = FrameCursorGlobals{};
-
   // Phase 4 cleanup (Step 4): listProcessedUpdates/listIncomingUpdates/
   // accumList are real std::list<T> now (see update.h's
   // UpdateQueueGlobals) - their own default constructor already produces
@@ -203,12 +186,6 @@ swtcon_init(const InitParams& params) {
   // this used to need (back when they were a hand-rolled ListHead that
   // had to be manually made self-referencing before any empty-list check
   // or list walk would work) is no longer necessary at all.
-
-  queue->dataBuffer = g_pImageBufferNative;
-  queue->backBuffer = g_pScreenBufferNative;
-  sb->pStatebuffer = g_pStateBufferNative;
-  sb->pGammaTable = g_pGammaTableNative;
-  sb->nSize = kStatebufferSize;
 
   std::string waveform_path;
   if (params.waveformPathOverride) {
@@ -246,24 +223,16 @@ swtcon_init(const InitParams& params) {
     return nullptr;
   }
 
-  fb->pFbMmap = g_pFbAddrNative;
-  fb->nFbSizeX = g_nFbSizeXNative;
-  fb->nFbSizeY = g_nFbSizeYNative;
-  fb->nFbFd = g_nFbFdNative;
-
-  // The library's pan/display code reads the full fb_var_screeninfo /
-  // fb_fix_screeninfo from these globals. pan_to_frame only rewrites yoffset
-  // in place, so the whole struct must be present or FBIOPAN_DISPLAY fails
-  // ("Pan failed").
-  fb->fbFix = g_fbFixScreeninfoNative;
-  fb->fbVar = g_fbVarScreeninfoNative;
+  // init_framebuffer/init_framebuffer_with_fd write fb->fbFix/fbVar/nFbFd/
+  // pFbMmap/nFbSizeX/nFbSizeY directly now - pan_to_frame only rewrites
+  // yoffset in place, so the whole fb_var_screeninfo must be present there
+  // or FBIOPAN_DISPLAY fails ("Pan failed").
 
   std::cout << "Calling init_LUT..." << std::endl;
   init_lut();
-  fb->pLUT = g_pLUTAddrNative;
 
   std::cout << "Uploading LUT to all frame slots..." << std::endl;
-  for (int i = 0; i < g_nFbSizeYNative; i++) {
+  for (int i = 0; i < fb->nFbSizeY; i++) {
     upload_lut_to_frame_slot(frame_buffer_addr(i));
   }
 
@@ -320,7 +289,7 @@ swtcon_init(const InitParams& params) {
   }
 
   std::cout << "swtcon_init: native initialization complete!" << std::endl;
-  return (uint16_t*)g_pImageBufferNative;
+  return (uint16_t*)queue->dataBuffer;
 }
 
 // Walk the waveform vector and print each LUT's metadata plus a checksum of
@@ -468,9 +437,9 @@ swtcon_shutdown(uintptr_t state_ptr_or_zero) {
   // Only free what we actually allocated - a caller-supplied dataBuffer/
   // backBuffer (see swtcon_init) is owned by the caller, e.g. rm2fb's
   // server passing in its own mmap'd shared framebuffer.
-  if (g_imageBufferOwnedNative)
+  if (queue->dataBufferOwned)
     free(queue->dataBuffer);
-  if (g_screenBufferOwnedNative)
+  if (queue->backBufferOwned)
     free(queue->backBuffer);
 
   close_fb();

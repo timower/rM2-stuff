@@ -22,10 +22,6 @@
 #define INSTANCE_ADDR 0x35de0
 #define RENDER_UPDATE_KERNEL_ADDR 0x4e7b8
 
-extern void* g_pImageBufferNative;
-extern void* g_pScreenBufferNative;
-extern void* g_pGammaTableNative;
-
 typedef void (*RenderKernelFn)(WorkItem*, void*, void*, int, int);
 
 static uintptr_t g_runtime_offset = 0;
@@ -63,11 +59,10 @@ main(int argc, char** argv) {
     fprintf(stderr, "init_statebuffer failed\n");
     return 1;
   }
-  statebuffer_globals()->pGammaTable = g_pGammaTableNative;
 
   const int W = 1404, H = 1872;
-  uint16_t* dataBuffer = (uint16_t*)g_pImageBufferNative;
-  uint8_t* backBuffer = (uint8_t*)g_pScreenBufferNative;
+  uint16_t* dataBuffer = (uint16_t*)update_queue_globals()->dataBuffer;
+  uint8_t* backBuffer = (uint8_t*)update_queue_globals()->backBuffer;
   memset(backBuffer, 0xff, (size_t)W * H);
 
   const int RECT = 128;
@@ -161,7 +156,7 @@ main(int argc, char** argv) {
   // unreachable under any normal (0-124) gamma content with sum=0.
   printf("\n--- gamma index ---\n");
   fill_range(0, N, 0x0000);
-  uint8_t* gammaTable = (uint8_t*)g_pGammaTableNative;
+  uint8_t* gammaTable = (uint8_t*)statebuffer_globals()->pGammaTable;
   const int64_t GN = 0x4400;
   uint8_t gamma_backup[0x4400];
   memcpy(gamma_backup, gammaTable, GN);

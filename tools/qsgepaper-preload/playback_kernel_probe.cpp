@@ -60,9 +60,6 @@ constexpr size_t kFrameSlotBytes = 0x165800;
 // §6.4): (frameSlots[8], item, frameCount, chunkIndex, chunkCount).
 typedef void (*PlaybackKernelFn)(void**, WorkItem*, int, int, int);
 
-extern void* g_pStateBufferNative;
-extern void* g_pGammaTableNative;
-
 static uintptr_t g_runtime_offset = 0;
 uintptr_t
 swtcon_runtime_offset() {
@@ -324,8 +321,6 @@ main() {
     fprintf(stderr, "init_statebuffer failed\n");
     return 1;
   }
-  statebuffer_globals()->pStatebuffer = g_pStateBufferNative;
-  statebuffer_globals()->pGammaTable = g_pGammaTableNative;
   printf("init_statebuffer done, bridged pStatebuffer/pGammaTable\n");
 
   auto plain_kernel = (PlaybackKernelFn)(g_runtime_offset + PLAIN_PLAYBACK_KERNEL_ADDR);

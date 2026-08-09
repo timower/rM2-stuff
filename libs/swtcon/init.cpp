@@ -1,5 +1,6 @@
 #include "init.h"
 #include "statebuffer_table.h"
+#include "update.h" // swtcon_state()
 #include <iostream>
 #include <fstream>
 #include <cctype>
@@ -17,46 +18,18 @@
 #include <unistd.h>
 
 // The library keeps four separate buffers (see init_statebuffer + the
-// qsgepaper_init prologue). They are distinct allocations with distinct fills:
-//   g_pImageBufferNative  -> g_pDataBuffer  @0x670bc, kStatebufferSize, memset 0xff
-//                            (the 16-bit image buffer returned to the caller)
-//   g_pScreenBufferNative -> g_pBackBuffer  @0x670c0, kScreenWidth*kScreenHeight,
-//                            calloc (full-screen 1 byte/pixel back buffer)
-//   g_pStateBufferNative  -> DAT_0006d1d0   @0x6d1d0, kStatebufferSize, memset 0x1e
-//                            (the persisted statebuffer)
-//   g_pGammaTableNative   -> DAT_0006d1d4   @0x6d1d4, kGammaTableSize ('U' + gamma
-//                            LUT, 128 temperature entries x 0x88 bytes) read by the
-//                            render kernel FUN_0004e7b8 as uVar40*0x88 + base.
-void* g_pImageBufferNative = nullptr;
-void* g_pScreenBufferNative = nullptr;
-void* g_pStateBufferNative = nullptr;
-void* g_pGammaTableNative = nullptr;
-
-// Whether g_pImageBufferNative/g_pScreenBufferNative were malloc'd/calloc'd
-// here (and so need freeing at shutdown) versus supplied externally by the
-// caller (e.g. rm2fb's server passing in its own mmap'd shared framebuffer
-// - see swtcon_init's dataBuffer/backBuffer params). free()ing an
-// externally-supplied buffer would hand a non-heap pointer to the
-// allocator - confirmed on real hardware as an immediate "free(): invalid
-// pointer" abort in swtcon_shutdown.
-bool g_imageBufferOwnedNative = false;
-bool g_screenBufferOwnedNative = false;
-
-int g_nPidFdNative = -1;
-int g_nFbFdNative = -1;
-int g_nFbSizeXNative = 0;
-int g_nFbSizeYNative = 0;
-void* g_pFbAddrNative = nullptr;
-void* g_pLUTAddrNative = nullptr;
-
-// The library's pan/display code reads the *global* g_fbVarScreeninfo (0x6d3a0)
-// and g_fbFixScreeninfo (0x6d35c) — pan_to_frame just rewrites yoffset in that
-// global and re-issues FBIOPAN_DISPLAY. So init_framebuffer must fill
-// these (not locals); swtcon_init copies them into the library globals. If the
-// global vinfo is left zeroed the pan ioctl gets yres=0/xres=0 and the driver
-// rejects it ("Pan failed"), which is why the panel never refreshes on hardware.
-struct fb_var_screeninfo g_fbVarScreeninfoNative;
-struct fb_fix_screeninfo g_fbFixScreeninfoNative;
+// qsgepaper_init prologue). They are distinct allocations with distinct fills,
+// all held directly in SwtconState now (update.h) rather than as loose
+// globals here:
+//   queue->dataBuffer            -> g_pDataBuffer  @0x670bc, kStatebufferSize, memset 0xff
+//                                   (the 16-bit image buffer returned to the caller)
+//   queue->backBuffer            -> g_pBackBuffer  @0x670c0, kScreenWidth*kScreenHeight,
+//                                   calloc (full-screen 1 byte/pixel back buffer)
+//   statebuffer->pStatebuffer    -> DAT_0006d1d0   @0x6d1d0, kStatebufferSize, memset 0x1e
+//                                   (the persisted statebuffer)
+//   statebuffer->pGammaTable     -> DAT_0006d1d4   @0x6d1d4, kGammaTableSize ('U' + gamma
+//                                   LUT, 128 temperature entries x 0x88 bytes) read by the
+//                                   render kernel FUN_0004e7b8 as uVar40*0x88 + base.
 
 LUTEntry::~LUTEntry() {
     if (data) free(data); // Using free() since malloc() was used
@@ -69,7 +42,7 @@ int create_pid_file() {
         return -1;
     }
     if (flock(fd, LOCK_EX | LOCK_NB) == 0) {
-        g_nPidFdNative = fd;
+        swtcon_state()->nPidFd = fd;
         return 0;
     }
     std::cerr << "another instance is already running" << std::endl;
@@ -79,47 +52,51 @@ int create_pid_file() {
 
 int init_statebuffer(void* dataBuffer, void* backBuffer) {
     size_t sz = kStatebufferSize;
+    auto* queue = update_queue_globals();
+    auto* sb = statebuffer_globals();
 
     // g_pDataBuffer: 16-bit image working buffer, returned to the caller.
-    g_imageBufferOwnedNative = dataBuffer == nullptr;
-    g_pImageBufferNative = dataBuffer == nullptr ? malloc(sz) : dataBuffer;
-    if (!g_pImageBufferNative) return -1;
-    memset(g_pImageBufferNative, 0xff, sz);
+    queue->dataBufferOwned = dataBuffer == nullptr;
+    queue->dataBuffer = dataBuffer == nullptr ? malloc(sz) : dataBuffer;
+    if (!queue->dataBuffer) return -1;
+    memset(queue->dataBuffer, 0xff, sz);
 
     // g_pBackBuffer: full-screen 1 byte/pixel back buffer.
-    g_screenBufferOwnedNative = backBuffer == nullptr;
-    g_pScreenBufferNative = backBuffer == nullptr
+    queue->backBufferOwned = backBuffer == nullptr;
+    queue->backBuffer = backBuffer == nullptr
                                ? calloc((size_t)kScreenWidth * kScreenHeight, 1)
                                : backBuffer;
-    if (!g_pScreenBufferNative) return -1;
+    if (!queue->backBuffer) return -1;
 
     // DAT_0006d1d0: the persisted statebuffer. init_statebuffer @0x4fad4 fills it
     // with the 32-bit pattern kNeutralStateWord (bytes 1e 00 1e 00) — i.e. a
     // per-pixel uint16 state of 0x001e, NOT every byte = 0x1e. Using a plain
     // memset(0x1e) makes each state 0x1e1e and corrupts the waveform
     // transitions the render kernels compute.
-    g_pStateBufferNative = malloc(sz);
-    if (!g_pStateBufferNative) return -1;
+    sb->pStatebuffer = malloc(sz);
+    if (!sb->pStatebuffer) return -1;
     {
-        uint32_t* sp = (uint32_t*)g_pStateBufferNative;
+        uint32_t* sp = (uint32_t*)sb->pStatebuffer;
         for (size_t i = 0; i < sz / 4; i++)
             sp[i] = kNeutralStateWord;
     }
 
     // DAT_0006d1d4: 'U' followed by the gamma LUT (128 entries x 0x88 bytes).
-    g_pGammaTableNative = malloc(kGammaTableSize);
-    if (!g_pGammaTableNative) return -1;
+    sb->pGammaTable = malloc(kGammaTableSize);
+    if (!sb->pGammaTable) return -1;
     // Matches init_statebuffer @0x4fad4: values are treated as UNSIGNED 16-bit
     // (the library does VectorSignedToFloat((uint)*puVar6) on a zero-extended
     // ushort). statebuffer_table is pre-shifted to start at the library's first
     // read (Ghidra 0x596da), so index i maps directly.
-    char* pc = (char*)g_pGammaTableNative;
+    char* pc = (char*)sb->pGammaTable;
     *pc++ = 'U';
     for (int i = 0; i < 17407; i++) {
         double d = (double)statebuffer_table[i];
         d = round((d * 124.0) / 65532.0);
         *pc++ = (d > 0.0) ? (char)d : 0;
     }
+
+    sb->nSize = kStatebufferSize;
 
     return 0;
 }
@@ -153,18 +130,19 @@ unsigned int frame_bytes_of(const FbInitParams& fb_info) {
 
 int init_framebuffer(const FbInitParams& fb_info) {
     const char* file = "/dev/fb0";
-    g_nFbFdNative = open(file, O_RDWR);
-    if (g_nFbFdNative < 0) {
+    auto* fb = framebuffer_globals();
+    fb->nFbFd = open(file, O_RDWR);
+    if (fb->nFbFd < 0) {
         std::cerr << "Cannot open device" << std::endl;
         return -1;
     }
 
     // Fill the module-global finfo/vinfo (not locals): the display/pan code reads
-    // g_fbVarScreeninfo directly, so the full struct must persist past init.
-    struct fb_fix_screeninfo& finfo = g_fbFixScreeninfoNative;
-    struct fb_var_screeninfo& vinfo = g_fbVarScreeninfoNative;
+    // fb->fbVar directly, so the full struct must persist past init.
+    struct fb_fix_screeninfo& finfo = fb->fbFix;
+    struct fb_var_screeninfo& vinfo = fb->fbVar;
     memset(&finfo, 0, sizeof(finfo));
-    if (ioctl(g_nFbFdNative, FBIOGET_FSCREENINFO, &finfo) == -1) {
+    if (ioctl(fb->nFbFd, FBIOGET_FSCREENINFO, &finfo) == -1) {
         std::cerr << "Error reading fixed information" << std::endl;
         return -1;
     }
@@ -172,14 +150,14 @@ int init_framebuffer(const FbInitParams& fb_info) {
     // Read the current mode, then overwrite exactly the fields init_framebuffer
     // (@0x53c0c) sets, leaving everything else as the driver reported it.
     memset(&vinfo, 0, sizeof(vinfo));
-    if (ioctl(g_nFbFdNative, FBIOGET_VSCREENINFO, &vinfo) == -1) {
+    if (ioctl(fb->nFbFd, FBIOGET_VSCREENINFO, &vinfo) == -1) {
         std::cerr << "Unable to read screeninfo" << std::endl;
         return -1;
     }
 
     fill_var_screeninfo(vinfo, fb_info);
 
-    if (ioctl(g_nFbFdNative, FBIOPUT_VSCREENINFO, &vinfo) == -1) {
+    if (ioctl(fb->nFbFd, FBIOPUT_VSCREENINFO, &vinfo) == -1) {
         std::cerr << "Error writing variable information" << std::endl;
         return -1;
     }
@@ -188,22 +166,23 @@ int init_framebuffer(const FbInitParams& fb_info) {
     unsigned int frame_bytes = frame_bytes_of(fb_info);
     size_t size = (size_t)y_factor * frame_bytes;
 
-    g_pFbAddrNative =
-      mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, g_nFbFdNative, 0);
-    if (g_pFbAddrNative == MAP_FAILED) {
+    fb->pFbMmap =
+      mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fb->nFbFd, 0);
+    if (fb->pFbMmap == MAP_FAILED) {
         std::cerr << "Error: failed to map framebuffer device to memory" << std::endl;
         return -1;
     }
 
-    g_nFbSizeXNative = frame_bytes;
-    g_nFbSizeYNative = y_factor;
+    fb->nFbSizeX = frame_bytes;
+    fb->nFbSizeY = y_factor;
 
     return 0;
 }
 
 void init_framebuffer_with_fd(const FbInitParams& fb_info, int fd) {
-    memset(&g_fbFixScreeninfoNative, 0, sizeof(g_fbFixScreeninfoNative));
-    struct fb_var_screeninfo& vinfo = g_fbVarScreeninfoNative;
+    auto* fb = framebuffer_globals();
+    memset(&fb->fbFix, 0, sizeof(fb->fbFix));
+    struct fb_var_screeninfo& vinfo = fb->fbVar;
     memset(&vinfo, 0, sizeof(vinfo));
     fill_var_screeninfo(vinfo, fb_info);
 
@@ -214,10 +193,10 @@ void init_framebuffer_with_fd(const FbInitParams& fb_info, int fd) {
     // A real fd (memfd_create() or a temp file), just not a framebuffer
     // device - ftruncate it to size so mmap has something to map.
     ftruncate(fd, size);
-    g_nFbFdNative = fd;
-    g_pFbAddrNative = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    g_nFbSizeXNative = frame_bytes;
-    g_nFbSizeYNative = y_factor;
+    fb->nFbFd = fd;
+    fb->pFbMmap = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    fb->nFbSizeX = frame_bytes;
+    fb->nFbSizeY = y_factor;
 }
 
 // Mirrors FUN_00053a30 exactly (constants read from its disassembly — the vector
@@ -303,9 +282,10 @@ static void fill_lut_pattern(void* dest, int pattern) {
 
 int init_lut() {
     size_t sz = kLutBlobSize;
-    g_pLUTAddrNative = malloc(sz);
-    if (!g_pLUTAddrNative) return -1;
-    fill_lut_pattern(g_pLUTAddrNative, 0);
+    auto* fb = framebuffer_globals();
+    fb->pLUT = malloc(sz);
+    if (!fb->pLUT) return -1;
+    fill_lut_pattern(fb->pLUT, 0);
     return 0;
 }
 
@@ -825,13 +805,9 @@ bool read_temperature_raw(const char* path, int* out_value) {
     return true;
 }
 
-// Path discovered once by init_temperature_sensor and reused by every
-// subsequent refresh_temperature_cache call.
-static std::string g_hwmonTempPathNative;
-
 void refresh_temperature_cache() {
     int raw_value;
-    if (!read_temperature_raw(g_hwmonTempPathNative.c_str(), &raw_value))
+    if (!read_temperature_raw(swtcon_state()->hwmonTempPath.c_str(), &raw_value))
         return;
 
     pthread_mutex_t* mutex = temperature_mutex();
@@ -842,9 +818,10 @@ void refresh_temperature_cache() {
 }
 
 void init_temperature_sensor() {
-    if (find_temperature_hwmon_path(&g_hwmonTempPathNative)) {
+    auto* state = swtcon_state();
+    if (find_temperature_hwmon_path(&state->hwmonTempPath)) {
         std::cout << "temperature_hwmon: found temperature path: "
-                  << g_hwmonTempPathNative << std::endl;
+                  << state->hwmonTempPath << std::endl;
     } else {
         std::cerr << "temperature_hwmon: failed to find path" << std::endl;
     }
@@ -852,11 +829,12 @@ void init_temperature_sensor() {
 }
 
 void* frame_buffer_addr(int frame_idx) {
-    return (uint8_t*)g_pFbAddrNative + (size_t)g_nFbSizeXNative * frame_idx;
+    auto* fb = framebuffer_globals();
+    return (uint8_t*)fb->pFbMmap + (size_t)fb->nFbSizeX * frame_idx;
 }
 
 void upload_lut_to_frame_slot(void* dest) {
-    memcpy(dest, g_pLUTAddrNative, kLutBlobSize);
+    memcpy(dest, framebuffer_globals()->pLUT, kLutBlobSize);
 }
 
 // Mirrors reset_statebuffer_neutral (0x4fbe0): reapplies the same
@@ -909,7 +887,7 @@ int pan_and_unblank(int frame_idx) {
         std::cout << "FBIOBLANK failed (unblank)" << std::endl;
     }
 
-    vinfo->yoffset = g_nFbSizeYNative * vinfo->yres;
+    vinfo->yoffset = fb->nFbSizeY * vinfo->yres;
     if (ioctl(fb->nFbFd, FBIOPAN_DISPLAY, vinfo) == -1) {
         std::cout << "Pan failed" << std::endl;
     }
@@ -987,10 +965,11 @@ void free_LUT() {
 }
 
 void unlock_pid_file() {
-    if (g_nPidFdNative > -1) {
-        if (flock(g_nPidFdNative, LOCK_UN) == -1) {
+    auto* state = swtcon_state();
+    if (state->nPidFd > -1) {
+        if (flock(state->nPidFd, LOCK_UN) == -1) {
             std::cerr << "unable to unlock exclusive lock" << std::endl;
         }
-        close(g_nPidFdNative);
+        close(state->nPidFd);
     }
 }

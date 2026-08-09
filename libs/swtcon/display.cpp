@@ -75,15 +75,15 @@ pan_and_advance_frame(UpdateQueueGlobals* queue,
 }
 
 // swtcon_suspend/swtcon_resume's gate - see swtcon.h for the full
-// rationale. Rides on queue->workerCond/workerCondMutex (the same condvar
-// steps 1 and 5 already share below) rather than a condvar of its own:
-// swtcon_suspend()/swtcon_resume() are documented (swtcon.h) as only valid
-// after swtcon_init() has returned, so there's no need for this to outlive
-// that condvar's own init/shutdown lifecycle. The flag itself stays atomic
-// so is_worker_suspended() can be polled from inside step 5's loop while
-// workerCondMutex is already held there, without relocking it.
+// rationale, and SwtconState::workerSuspended (update.h) for where the
+// flag itself now lives. Rides on queue->workerCond/workerCondMutex (the
+// same condvar steps 1 and 5 already share below) rather than a condvar of
+// its own: swtcon_suspend()/swtcon_resume() are documented (swtcon.h) as
+// only valid after swtcon_init() has returned, so there's no need for this
+// to outlive that condvar's own init/shutdown lifecycle. The flag itself
+// stays atomic so is_worker_suspended() can be polled from inside step 5's
+// loop while workerCondMutex is already held there, without relocking it.
 namespace {
-std::atomic<bool> g_workerSuspended{ false };
 
 // Peeks the suspend flag without blocking - used by worker_thread_func at
 // points other than the main gate (step 1) to notice a suspend request
@@ -91,7 +91,7 @@ std::atomic<bool> g_workerSuspended{ false };
 // swtcon_suspend()'s comment for why the gate alone isn't sufficient.
 bool
 is_worker_suspended() {
-  return g_workerSuspended.load(std::memory_order_relaxed);
+  return swtcon_state()->workerSuspended.load(std::memory_order_relaxed);
 }
 } // namespace
 
@@ -105,10 +105,10 @@ swtcon_suspend() {
           !queue->listProcessedUpdates.empty()))
     usleep(100);
 
-  g_workerSuspended.store(true, std::memory_order_relaxed);
+  swtcon_state()->workerSuspended.store(true, std::memory_order_relaxed);
 
   // The gate at the top of worker_thread_func's outer loop (step 1) is the
-  // only place that actually blocks on g_workerSuspended - but the worker
+  // only place that actually blocks on this flag - but the worker
   // thread spends most of its time NOT there, blocked instead inside step
   // 5's wait for the next frame to advance to. Setting the flag alone
   // doesn't wake it from that wait; if left alone, the next real update
@@ -130,7 +130,7 @@ swtcon_suspend() {
 // See display.h - only wakes the gate, doesn't touch nIsFbBlanked.
 void
 wake_suspend_gate() {
-  g_workerSuspended.store(false, std::memory_order_relaxed);
+  swtcon_state()->workerSuspended.store(false, std::memory_order_relaxed);
   auto* queue = update_queue_globals();
   pthread_mutex_lock(&queue->workerCondMutex);
   pthread_cond_broadcast(&queue->workerCond);
@@ -178,7 +178,7 @@ worker_thread_func(void*) {
     // re-checks this loop's own predicate and goes back to waiting if still
     // suspended, same as any other condvar user.
     pthread_mutex_lock(&queue->workerCondMutex);
-    while (g_workerSuspended.load(std::memory_order_relaxed) &&
+    while (swtcon_state()->workerSuspended.load(std::memory_order_relaxed) &&
            queue->workerThreadShutdown == 0)
       pthread_cond_wait(&queue->workerCond, &queue->workerCondMutex);
     pthread_mutex_unlock(&queue->workerCondMutex);
@@ -371,8 +371,6 @@ request_flash_and_wait() {
 // which switches every public swtcon_* entry point to the real library
 // wholesale rather than splicing it into individual native call sites.
 
-extern void* g_pStateBufferNative;
-
 // Native reimplementation of the display-commit kernels FUN_0004f8f0
 // (item.sync==0, "incremental") / FUN_0004e680 (sync!=0, "force") - see
 // swtcon_architecture.md §6.3 for the confirmed per-pixel formula (derived
@@ -460,7 +458,7 @@ commit_item(WorkItem* item) {
   const uint8_t* pixelBuf =
     regionRows ? (const uint8_t*)item->pixelDataPtr : nullptr;
   int pixelStride = regionRows ? regionRows->stride : 0;
-  uint16_t* state = (uint16_t*)g_pStateBufferNative;
+  uint16_t* state = (uint16_t*)statebuffer_globals()->pStatebuffer;
   bool force = item->sync != 0;
 
   if (force) {

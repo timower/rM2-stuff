@@ -33,8 +33,6 @@
 
 typedef bool (*DispatchProcessedRegionsFn)(ListHead*);
 
-extern void* g_pStateBufferNative;
-
 static uintptr_t g_runtime_offset = 0;
 uintptr_t
 swtcon_runtime_offset() {
@@ -75,12 +73,12 @@ load_library() {
 
 const int SCREEN_W = 1404, SCREEN_H = 1872;
 
-// g_pStateBufferNative is column-major over the FULL screen, stride
-// SCREEN_H, 2 bytes/pixel (matches FUN_0004f8f0's own
+// statebuffer_globals()->pStatebuffer is column-major over the FULL screen,
+// stride SCREEN_H, 2 bytes/pixel (matches FUN_0004f8f0's own
 // `g_pStateBuffer + (col*0x750 + row) * 2` addressing - 0x750 == 1872).
 static uint16_t*
 state_cell(int abs_col, int abs_row) {
-  uint16_t* base = (uint16_t*)g_pStateBufferNative;
+  uint16_t* base = (uint16_t*)statebuffer_globals()->pStatebuffer;
   return &base[(size_t)abs_col * SCREEN_H + abs_row];
 }
 
@@ -221,12 +219,11 @@ main() {
     return 1;
   }
   printf("init_statebuffer done\n");
-  // Bridge our native g_pStateBufferNative into the library's own global,
-  // exactly like render_kernel_verify.cpp bridges the gamma table - the
-  // commit kernels FUN_0004f8f0/FUN_0004e680 read/write g_pStateBuffer
-  // directly (not via a parameter).
-  statebuffer_globals()->pStatebuffer = g_pStateBufferNative;
-  printf("bridged pStatebuffer\n");
+  // init_statebuffer already pointed statebuffer_globals()->pStatebuffer at
+  // our native buffer - the real library's own commit kernels
+  // (FUN_0004f8f0/FUN_0004e680) read/write g_pStateBuffer through that same
+  // pointer (not via a parameter), exactly like render_kernel_verify.cpp
+  // bridges the gamma table.
 
   auto dispatch_processed_regions =
     (DispatchProcessedRegionsFn)(g_runtime_offset + DISPATCH_PROCESSED_REGIONS_ADDR);

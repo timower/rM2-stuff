@@ -142,51 +142,12 @@ static_assert(offsetof(FrameCursorGlobals, nLastPannedFrame) == 0x66ddc - kFrame
 static_assert(sizeof(FrameCursorGlobals) >= 0x66de0 - kFrameCursorGlobalsAddr,
               "FrameCursorGlobals layout drift");
 
-inline FrameCursorGlobals*
-frame_cursor_globals() {
-  static FrameCursorGlobals g{};
-  return &g;
-}
-
-// --- Standalone globals (isolated - no neighbor close enough to bridge
-// with a confidently-sized gap) ------------------------------------------
 // Formerly resolve_ptr<T*>(fixed_addr) into the library's own .bss/.data
 // (g_nPidFd 0x66dec, g_flCachedTemperature 0x66e20, g_dwTemperatureMutex
 // 0x6d180, the work-item sequence id counter 0x6d178) - now natively-owned
-// storage (Phase 7). g_nPidFd's slot is unused: create_pid_file
-// (init.cpp) already writes the real fd into its own native
-// g_nPidFdNative global instead, so unlock_pid_file reads that
-// directly rather than through here.
-
-// NOT zero-initialized in the real library: g_flCachedTemperature's initial
-// bytes in libqsgepaper.so's own data image are 0x41c80000 (25.0f), a
-// genuine initialized default (room temperature), not .bss. Confirmed via
-// Ghidra memory inspection at 0x66e20 after tracking down a real behavioral
-// divergence this got wrong - with 0.0f here, a sensor-read failure (which
-// happens on the emulator, no hwmon path) leaves the two sides selecting
-// different temperature-indexed waveform LUT entries (0C vs 25C bucket),
-// visible as a completely different phase count/content for the startup
-// flash waveform (149 phases vs ~99) even though everything else about the
-// flash sequence matches exactly.
-inline float*
-cached_temperature_ptr() {
-  static float t = 25.0f;
-  return &t;
-}
-
-// Zero-initialized, matching the library's own .bss state before
-// swtcon_init explicitly pthread_mutex_init's it (see swtcon.cpp).
-inline pthread_mutex_t*
-temperature_mutex() {
-  static pthread_mutex_t m{};
-  return &m;
-}
-
-inline int*
-seq_counter_ptr() {
-  static int c = 0;
-  return &c;
-}
+// storage, held (along with every other module-level global in this
+// codebase) in SwtconState - see update.h for the struct itself and every
+// accessor declared below.
 
 // backBuffer dirty-gate array (formerly resolve_ptr<uint8_t*>(0x670d8) into
 // the library's .bss, byte-verified via decompilation of both
@@ -214,11 +175,6 @@ constexpr int32_t kDirtyGateBucketCount = kFrameSlotRingCount;
 // non-negative frame number mod 16), so it stays zero forever, exactly
 // reproducing the observed-harmless behavior instead of segfaulting on an
 // unmapped page.
-inline uint8_t*
-backbuffer_dirty_gate() {
-  static uint8_t g[2 * kDirtyGateBucketCount * kDirtyGateRowBytes]{};
-  return g + (size_t)kDirtyGateBucketCount * kDirtyGateRowBytes;
-}
 
 // --- Persisted statebuffer + gamma table --------------------------------
 // Fully contiguous, all three pointers/size wired together at init
@@ -234,12 +190,6 @@ static_assert(offsetof(StatebufferGlobals, pGammaTable) == 0x6d1d4 - kStatebuffe
 static_assert(offsetof(StatebufferGlobals, nSize) == 0x6d1d8 - kStatebufferGlobalsAddr, "");
 static_assert(sizeof(StatebufferGlobals) == 0xc, "StatebufferGlobals layout drift");
 #endif
-
-inline StatebufferGlobals*
-statebuffer_globals() {
-  static StatebufferGlobals g{};
-  return &g;
-}
 
 // --- Framebuffer + LUT state ---------------------------------------------
 // Fully contiguous except one confirmed 4-byte unreversed gap between pLUT
@@ -275,8 +225,16 @@ static_assert(sizeof(FramebufferGlobals) == 0x6d450 - kFramebufferGlobalsAddr,
 #undef FB_OFFSETOF
 #endif
 
-inline FramebufferGlobals*
-framebuffer_globals() {
-  static FramebufferGlobals g{};
-  return &g;
-}
+// Accessors for FrameCursorGlobals/StatebufferGlobals/FramebufferGlobals
+// above, plus cached_temperature_ptr()/temperature_mutex()/seq_counter_ptr()/
+// backbuffer_dirty_gate() - all defined in update.h alongside SwtconState
+// (which embeds these structs as members), not here: they need SwtconState
+// complete, and SwtconState needs WorkItem/Batch complete, both of which are
+// only available once update.h itself has been included.
+FrameCursorGlobals* frame_cursor_globals();
+StatebufferGlobals* statebuffer_globals();
+FramebufferGlobals* framebuffer_globals();
+float* cached_temperature_ptr();
+pthread_mutex_t* temperature_mutex();
+int* seq_counter_ptr();
+uint8_t* backbuffer_dirty_gate();

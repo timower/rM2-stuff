@@ -34,10 +34,6 @@
 #define INSTANCE_ADDR 0x35de0
 #define RENDER_UPDATE_KERNEL_ADDR 0x4e7b8
 
-extern void* g_pImageBufferNative;
-extern void* g_pScreenBufferNative;
-extern void* g_pGammaTableNative;
-
 typedef void (*RenderKernelFn)(WorkItem*, void*, void*, int, int);
 
 // init.cpp's temperature-sensor code path resolves a couple of
@@ -168,16 +164,16 @@ main(int argc, char** argv) {
     fprintf(stderr, "init_statebuffer failed\n");
     return 1;
   }
-  // lib_render_update_kernel reads the LIBRARY's own g_pGammaTable global (not a
-  // parameter) - point it at our native table, exactly like swtcon_init does
-  // via statebuffer_globals()->pGammaTable for the real init path.
-  statebuffer_globals()->pGammaTable = g_pGammaTableNative;
+  // lib_render_update_kernel reads the LIBRARY's own g_pGammaTable global (not
+  // a parameter) - init_statebuffer already points statebuffer_globals()'s
+  // pGammaTable at our native table, exactly like swtcon_init does for the
+  // real init path.
   printf("init_statebuffer done\n");
 
   const int W = 1404, H = 1872;
-  uint16_t* dataBuffer = (uint16_t*)g_pImageBufferNative;
-  uint8_t* backBuffer = (uint8_t*)g_pScreenBufferNative;
-  uint8_t* gammaTable = (uint8_t*)g_pGammaTableNative;
+  uint16_t* dataBuffer = (uint16_t*)update_queue_globals()->dataBuffer;
+  uint8_t* backBuffer = (uint8_t*)update_queue_globals()->backBuffer;
+  uint8_t* gammaTable = (uint8_t*)statebuffer_globals()->pGammaTable;
 
   const int RECT = 128;
   uint8_t* output = (uint8_t*)malloc(RECT * RECT);

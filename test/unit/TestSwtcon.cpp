@@ -20,16 +20,6 @@
 using swtcon_test::run_with_timeout;
 using swtcon_test::SwtconFixture;
 
-// Native globals with no public accessor (create_pid_file/unlock_pid_file's
-// own lock-fd bookkeeping, init_framebuffer()'s own raw output) - declared
-// extern here the same way swtcon.cpp/update.cpp reach each other's native
-// globals, not exposed via any header.
-extern int g_nPidFdNative;
-extern void* g_pFbAddrNative;
-extern int g_nFbSizeXNative;
-extern int g_nFbSizeYNative;
-extern struct fb_var_screeninfo g_fbVarScreeninfoNative;
-
 namespace {
 WorkItem
 make_item(int y0, int x0, int y1, int x1) {
@@ -163,14 +153,14 @@ TEST_CASE("create_pid_file: acquires an exclusive lock, rejects a second acquire
   // per open-file-description, not per-process.
   CHECK(create_pid_file() == -1);
   unlock_pid_file();
-  g_nPidFdNative = -1; // don't leave a stale closed fd for later tests' shutdown to touch
+  swtcon_state()->nPidFd = -1; // don't leave a stale closed fd for later tests' shutdown to touch
 }
 
 TEST_CASE("unlock_pid_file: reports (but survives) a flock failure on an already-invalid fd",
           "[swtcon]") {
-  g_nPidFdNative = 123456; // not a fd this process actually owns
+  swtcon_state()->nPidFd = 123456; // not a fd this process actually owns
   REQUIRE_NOTHROW(unlock_pid_file());
-  g_nPidFdNative = -1; // don't leave a bogus fd for a later test's swtcon_shutdown to touch
+  swtcon_state()->nPidFd = -1; // don't leave a bogus fd for a later test's swtcon_shutdown to touch
 }
 
 TEST_CASE("read_wbf_match_fields", "[swtcon]") {
@@ -479,7 +469,7 @@ TEST_CASE("BatchNodeClaimed: reads the claimed byte at +0x15", "[swtcon]") {
 }
 
 TEST_CASE("render_update_kernel: no-op when regionRows has no data buffer", "[swtcon]") {
-  SwtconFixture fx; // provides g_pGammaTableNative
+  SwtconFixture fx; // provides statebuffer_globals()->pGammaTable
   WorkItem item{};
   item.rectY0 = 0;
   item.rectX0 = 0;
@@ -1308,15 +1298,16 @@ TEST_CASE("init_framebuffer: succeeds against a mocked /dev/fb0", "[swtcon]") {
 
   FbInitParams params = make_fb_init_params();
   REQUIRE(init_framebuffer(params) == 0);
-  CHECK(g_pFbAddrNative != nullptr);
-  CHECK(g_nFbSizeXNative > 0);
-  CHECK(g_nFbSizeYNative == kFrameSlotRingCount + 1);
+  auto* fb = framebuffer_globals();
+  CHECK(fb->pFbMmap != nullptr);
+  CHECK(fb->nFbSizeX > 0);
+  CHECK(fb->nFbSizeY == kFrameSlotRingCount + 1);
 
   // fill_var_screeninfo's actual field-by-field output, sent to the kernel
   // via the (mocked) FBIOPUT_VSCREENINFO - a wrong/zeroed field here is
   // exactly what makes the real driver reject the pan ioctl on hardware
   // (see fill_var_screeninfo's own comment).
-  auto& vinfo = g_fbVarScreeninfoNative;
+  auto& vinfo = fb->fbVar;
   CHECK(vinfo.xres == (uint32_t)params.xres);
   CHECK(vinfo.yres == (uint32_t)params.yres);
   CHECK(vinfo.xres_virtual == (uint32_t)params.xres);
