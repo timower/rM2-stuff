@@ -115,9 +115,8 @@ swtcon_suspend() {
   // (or the loop's own 3s idle timeout) would eventually wake it anyway,
   // and it would then run the rest of that iteration - including the real
   // pan_and_advance_frame()/flash hardware calls in steps 7-8 - before
-  // ever looping back to check this flag. Confirmed empirically via
-  // tools/qsgepaper-preload/suspend_sync_probe.cpp: a Sync update
-  // submitted right after swtcon_suspend() still produced a real
+  // ever looping back to check this flag. Confirmed empirically: a Sync
+  // update submitted right after swtcon_suspend() still produced a real
   // FBIOPAN/FBIOBLANK sequence before returning. Broadcasting workerCond
   // here kicks the worker thread out of that wait immediately so the new
   // break condition added to that loop (and the re-check right after it)
@@ -560,9 +559,8 @@ commit_item(WorkItem* item) {
 // Native reimplementation of dispatch_processed_regions (0x50660) - see
 // swtcon_architecture.md §6.2 step 4 for the reversing history (an earlier
 // pass mistook the per-item chunk bookkeeping for a genuine cross-item
-// rectangle merge; empirically disproved via
-// tools/qsgepaper-preload/dispatch_processed_regions_probe.cpp - items in a
-// batch are processed completely independently). Runs each item through
+// rectangle merge; empirically disproved via a dedicated probe tool - items
+// in a batch are processed completely independently). Runs each item through
 // commit_item in a single full-rect pass (no thread pool - see that
 // function's comment for why chunking is provably invisible here), destroys
 // items that come back degenerate (either already-degenerate on entry, or
@@ -570,8 +568,8 @@ commit_item(WorkItem* item) {
 // and returns true iff the sub-list is non-empty afterward.
 //
 // WIRED IN (this pass). The per-item algorithm is independently verified
-// byte-exact against the real library (dispatch_processed_regions_probe.cpp,
-// 7 passing experiments incl. pixelTransitions' exact (old<<5)|new packing
+// byte-exact against the real library (7 passing probe experiments incl.
+// pixelTransitions' exact (old<<5)|new packing
 // and 0x0400 marker).
 //
 // The "integration hazard" that previously kept this by-address - a
@@ -813,9 +811,9 @@ dispatch_plain_kernel(void** frame_slots, WorkItem* item, int frame_count) {
 // "aligned" throughout (function, address macros, log tag) to match.
 //
 // FUN_0004a234 turned out NOT to be a distinct algorithm: a decisive probe
-// test (tools/qsgepaper-preload/playback_kernel_probe.cpp Experiment 7) calls
-// both FUN_0004a140 and the real FUN_0004a234 on an IDENTICAL WorkItem/state/
-// LUT (a rich, pseudo-random, non-uniform fill spanning 4 columns x 16 rows)
+// test (Experiment 7 of a dedicated probe tool) calls both FUN_0004a140 and
+// the real FUN_0004a234 on an IDENTICAL WorkItem/state/LUT (a rich,
+// pseudo-random, non-uniform fill spanning 4 columns x 16 rows)
 // for every frameCount 1-8 (including the three cases - 1,2,3 - that
 // FUN_0004a234 itself tail-calls out to separate, still fully unreversed
 // delegates FUN_0004a3f8/FUN_0004a9e0/FUN_0004b098 for) and diffs every byte

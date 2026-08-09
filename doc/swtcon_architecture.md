@@ -19,14 +19,15 @@ decode off-by-one — and both looked entirely plausible from static reading
 alone; they only surfaced under byte-level A/B against the library. Treat
 `[derived]`/`[guess]` accordingly before shipping native code against them.
 
-Native source lives in `tools/qsgepaper-preload/`. `swtcon.h` is the public
+Native source lives in `libs/swtcon/`. `swtcon.h` is the public
 API (`swtcon_init/update/lock/unlock_post/wait/shutdown`); `swtcon.cpp` owns
 `dlopen`/`dlsym` loading and init/shutdown orchestration; `init.cpp`
 owns init-allocated resources; `update.cpp` owns the update path;
 `display.cpp` owns both persistent display-pipeline threads
 (`worker_thread_func` and `display_thread_func`, Phase 5);
 `qsgepaper_globals.h` models the library's own `.bss` layout we still read
-by address.
+by address. `tools/swtcon-test/` holds the end-to-end test harness
+(`qsgepaper-test`) and the playback-kernel benchmark that link against it.
 
 ---
 
@@ -35,7 +36,7 @@ by address.
 These are the binary layouts the native code and the still-library code both
 read/write, so they have to match exactly — libstdc++ ABI included (this
 binary uses the **new** SSO `std::string` ABI, `_GLIBCXX_USE_CXX11_ABI=1`;
-`tools/qsgepaper-preload` is pinned to match).
+`tools/swtcon-test` is pinned to match).
 
 ### SpRef — inlined shared_ptr
 

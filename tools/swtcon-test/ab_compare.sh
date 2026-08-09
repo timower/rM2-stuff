@@ -18,7 +18,7 @@
 # comparison and not a real regression signal (see CLAUDE.md's Phase 9
 # notes). Pass "8" or "9" explicitly to test them anyway.
 #
-# Usage: tools/qsgepaper-preload/ab_compare.sh <ssh-target> [test-case]
+# Usage: tools/swtcon-test/ab_compare.sh <ssh-target> [test-case]
 #
 #   <ssh-target>  ssh destination for the device/emulator (e.g. "RemEmu"),
 #                 passed straight through to ssh/scp.
@@ -44,7 +44,7 @@ TEST_CASE="${2:-}"
 REPO_ROOT=$(cd "$(dirname -- "$0")/../.." && pwd)
 BUILD_DIR="${REPO_ROOT}/build/dev"
 
-QSGEPAPER_TEST="${BUILD_DIR}/tools/qsgepaper-preload/qsgepaper-test"
+QSGEPAPER_TEST="${BUILD_DIR}/tools/swtcon-test/qsgepaper-test"
 LIBIOCTL_DUMP="${BUILD_DIR}/tools/ioctl-dump/libioctl-dump.so"
 PAN_CAPTURE_COMPARE="${BUILD_DIR}/tools/ioctl-dump/pan-capture-compare"
 

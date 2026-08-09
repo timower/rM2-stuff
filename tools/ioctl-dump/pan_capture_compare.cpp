@@ -6,7 +6,7 @@
 // Comparison is ORDERED: hash at position i in capture A is compared against
 // the hash at position i in capture B, in sequence order. This assumes both
 // captures come from a single, isolated test case (see
-// tools/qsgepaper-preload/ab_compare.sh, which runs and diffs one test case
+// tools/swtcon-test/ab_compare.sh, which runs and diffs one test case
 // at a time by default) - real-time frame pacing and cross-test interleaving
 // can still shift how many transient waveform frames a *whole-suite* run
 // produces (documented previously as 677 vs. 355 deduped records for an

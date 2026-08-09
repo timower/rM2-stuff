@@ -229,9 +229,8 @@ piece_builder(WorkItem* dest, const WorkItem* src, const Rect& piece_rect) {
 // --- Native render_update_kernel / dispatch_update_regions (Phase 6) ---
 //
 // Both formulas and addressing are empirically confirmed against the real
-// library function - see swtcon_architecture.md §5.1/§5.2 and
-// tools/qsgepaper-preload/render_kernel_verify.cpp /
-// render_kernel_addr_map.cpp for the verification methodology. The upshot:
+// library function - see swtcon_architecture.md §5.1/§5.2 for the
+// verification methodology. The upshot:
 // every output byte is a pure function of exactly one dataBuffer/backBuffer
 // pixel and one gamma-table cell, read through a 180-degree rotation of the
 // whole framebuffer relative to the update rect's own coordinate space (the

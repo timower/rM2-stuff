@@ -262,11 +262,11 @@ in
   };
 
   # Black-box A/B correctness check for the native swtcon reimplementation:
-  # for each isolated test case in qsgepaper-test (tools/qsgepaper-preload),
+  # for each isolated test case in qsgepaper-test (tools/swtcon-test),
   # runs it once natively and once with SWTCON_LIBIMPL=1 (the real
   # libqsgepaper.so), then diffs the two SWTCON_PAN_CAPTURE sequences with
   # pan-capture-compare - the same technique, and the same environment, as
-  # tools/qsgepaper-preload/ab_compare.sh (see its header comment and
+  # tools/swtcon-test/ab_compare.sh (see its header comment and
   # CLAUDE.md's Building/Testing section), just run automatically instead of
   # by hand against a real device/RemEmu over ssh.
   #

@@ -62,7 +62,7 @@ wake_suspend_gate();
 // the definition in playback_kernel_intrinsics.cpp (its own translation unit as
 // of Phase 9, so its NEON fast path can sit behind an #ifdef) for the full
 // byte-verified breakdown of the LUT-index and destination-address
-// formulas. Non-static so tools/qsgepaper-preload/playback_kernel_bench.cpp
+// formulas. Non-static so tools/swtcon-test/playback_kernel_bench.cpp
 // can call it directly to measure the compute cost in isolation from the
 // threading/dispatch code around it (playback_kernel_dispatch).
 void

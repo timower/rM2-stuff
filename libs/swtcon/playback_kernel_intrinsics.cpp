@@ -11,7 +11,7 @@
 #define KERNEL_MODE_NEON 3
 
 // Set by libs/swtcon/CMakeLists.txt; direct compilations that skip it (e.g.
-// tools/qsgepaper-preload, arm-only) default to the real production kernel.
+// tools/swtcon-test, arm-only) default to the real production kernel.
 #ifndef SWTCON_KERNEL_MODE
 #define SWTCON_KERNEL_MODE KERNEL_MODE_ASM
 #endif
@@ -23,12 +23,11 @@
 #endif
 
 // Native reimplementation of FUN_0004a140 (0x4a140, the "plain" playback
-// kernel) - fully reversed via
-// tools/qsgepaper-preload/playback_kernel_probe.cpp (isolated by-address calls
-// against the real library with guard-paged buffers, cross-checked against its
-// Ghidra decompile - see AGENTS.md). For each column in [rectX0,rectX1]
-// restricted to this call's [chunkIndex,chunkCount) column sub-range, and each
-// 8-row group in [rectY0,rectY1]:
+// kernel) - fully reversed via a dedicated probe tool (isolated by-address
+// calls against the real library with guard-paged buffers, cross-checked
+// against its Ghidra decompile - see AGENTS.md). For each column in
+// [rectX0,rectX1] restricted to this call's [chunkIndex,chunkCount) column
+// sub-range, and each 8-row group in [rectY0,rectY1]:
 //   - fetches each of the group's 8 rows' packed LUT word ONCE (word_idx =
 //     phase/8, indexed using the row's own transition value - the raw
 //     transitionDataPtr u16, used DIRECTLY as the LUT's (row*mode_width+col)
@@ -65,7 +64,7 @@
 // an #ifdef, without dragging every other display.cpp dependency
 // (threads, globals, ...) into the same file.
 //
-// Non-static (extern, declared in display.h): tools/qsgepaper-preload/
+// Non-static (extern, declared in display.h): tools/swtcon-test/
 // playback_kernel_bench.cpp calls this directly to isolate the compute cost
 // of the real, shipped kernel from the threading/dispatch machinery around
 // it - real hardware confirmed this is currently much slower than the
@@ -110,7 +109,7 @@
 // (NEON, over disjoint bit ranges) are both commutative/associative, so
 // reordering the reduction - row-outer/subphase-vectorized here vs. the
 // scalar version's row-outer/subphase-inner - changes nothing observable.
-// Verified via tools/qsgepaper-preload/playback_kernel_bench.cpp and the
+// Verified via tools/swtcon-test/playback_kernel_bench.cpp and the
 // swtcon-ab-test A/B harness (native builds are deterministic and
 // self-consistent regardless of which path compiled in).
 #if KERNEL_MODE == KERNEL_MODE_NEON
