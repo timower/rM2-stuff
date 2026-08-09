@@ -941,12 +941,11 @@ void save_statebuffer(uintptr_t state_ptr_or_zero) {
     }
 }
 
-void free_statebuffer() {
-    auto* sb = statebuffer_globals();
-    free(sb->pStatebuffer);
-    if (sb->pGammaTable != nullptr) {
-        ::operator delete(sb->pGammaTable);
-    }
+void
+free_statebuffer() {
+  auto* sb = statebuffer_globals();
+  free(sb->pStatebuffer);
+  free(sb->pGammaTable);
 }
 
 void close_fb() {
@@ -957,11 +956,10 @@ void close_fb() {
     fb->nFbFd = -1;
 }
 
-void free_LUT() {
-    auto* fb = framebuffer_globals();
-    if (fb->pLUT != nullptr) {
-        ::operator delete(fb->pLUT);
-    }
+void
+free_LUT() {
+  auto* fb = framebuffer_globals();
+  free(fb->pLUT);
 }
 
 void unlock_pid_file() {

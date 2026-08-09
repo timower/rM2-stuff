@@ -68,6 +68,9 @@ makeWacomDevice() {
   libevdev_uinput* uidev = nullptr;
   auto err = libevdev_uinput_create_from_device(
     dev, LIBEVDEV_UINPUT_OPEN_MANAGED, &uidev);
+  // libevdev_uinput_create_from_device doesn't take ownership of dev - it
+  // copies what it needs, so it's ours to free either way.
+  libevdev_free(dev);
   if (err != 0) {
     perror("uintput");
     std::cerr << "Error making uinput device\n";
@@ -142,6 +145,9 @@ makeTouchDevice() {
   libevdev_uinput* uidev = nullptr;
   auto err = libevdev_uinput_create_from_device(
     dev, LIBEVDEV_UINPUT_OPEN_MANAGED, &uidev);
+  // libevdev_uinput_create_from_device doesn't take ownership of dev - it
+  // copies what it needs, so it's ours to free either way.
+  libevdev_free(dev);
   if (err != 0) {
     perror("uintput");
     std::cerr << "Error making uinput device\n";
@@ -165,6 +171,9 @@ makeButtonDevice() {
   libevdev_uinput* uidev = nullptr;
   auto err = libevdev_uinput_create_from_device(
     dev, LIBEVDEV_UINPUT_OPEN_MANAGED, &uidev);
+  // libevdev_uinput_create_from_device doesn't take ownership of dev - it
+  // copies what it needs, so it's ours to free either way.
+  libevdev_free(dev);
   if (err != 0) {
     perror("uintput");
     std::cerr << "Error making uinput device\n";

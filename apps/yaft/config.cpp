@@ -62,7 +62,6 @@ parseMapping(
   if (!entry.has_value()) {
     return;
   }
-  tbl.erase(name);
 
   auto it = std::find_if(mapping.begin(), mapping.end(), [&](const auto& pair) {
     return pair.first == *entry;
@@ -75,10 +74,12 @@ parseMapping(
         YaftConfigError::Syntax,
         "error: Invalid " + std::string(name) + ": " + std::string(*entry),
       });
+    tbl.erase(name);
     return;
   }
 
   value = it->second;
+  tbl.erase(name);
 }
 
 YaftConfigAndError
