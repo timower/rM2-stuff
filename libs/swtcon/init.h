@@ -166,7 +166,11 @@ void prime_display();
 int is_fb_blanked();
 void blank_fb();
 
-void save_statebuffer(int state_ptr_or_zero);
+// Takes the destination path as a raw pointer-sized int rather than a typed
+// pointer, mirroring the real 32-bit ARM ABI (see WorkItem::pixelDataPtr's
+// comment in update.h for the same reasoning) - uintptr_t rather than
+// int32_t so the round-trip stays lossless on a 64-bit host too.
+void save_statebuffer(uintptr_t state_ptr_or_zero);
 void free_statebuffer();
 void close_fb();
 void free_LUT();

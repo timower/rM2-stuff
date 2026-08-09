@@ -36,6 +36,15 @@ if(TARGET swtcon)
   target_sources(${PROJECT_NAME} PRIVATE TestSwtcon.cpp)
   target_link_libraries(${PROJECT_NAME} PRIVATE swtcon)
 
+  # MockFb.cpp intercepts open()/ioctl() via linker symbol wrapping (GNU
+  # ld/lld-only, and only meaningful where swtcon's own <linux/fb.h>-based
+  # ioctls apply) to fake a working /dev/fb0 - see MockFb.h's own comment for
+  # why. Scoped to just this executable target, not swtcon itself.
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_sources(${PROJECT_NAME} PRIVATE MockFb.cpp)
+    target_link_options(${PROJECT_NAME} PRIVATE -Wl,--wrap=open -Wl,--wrap=ioctl)
+  endif()
+
   # assets/test.wbf.tar.xz is a real waveform (pulled from RemEmu) checked
   # in xz-compressed (~13x smaller) - extract it at build time instead of
   # storing the 280KB original. `cmake -E tar` uses CMake's own bundled

@@ -953,7 +953,7 @@ void blank_fb() {
     }
 }
 
-void save_statebuffer(int state_ptr_or_zero) {
+void save_statebuffer(uintptr_t state_ptr_or_zero) {
     auto* sb = statebuffer_globals();
     char* filename = (char*)state_ptr_or_zero;
     FILE* f = fopen64(filename, "w");

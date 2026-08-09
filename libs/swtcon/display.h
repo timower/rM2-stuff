@@ -88,3 +88,10 @@ void gc_processed_updates();
 void build_overlap_dependency_list(std::list<WorkItem>& sub_list);
 int playback_chunk_count(const WorkItem* item);
 void advance_work_item_frames(WorkItem* item);
+
+// worker_thread_func's own frame-pacing helper (steps 7/10), non-static so
+// its frame-slot-selection formula can be unit-tested directly - see its
+// definition in display.cpp for the full comment.
+void pan_and_advance_frame(UpdateQueueGlobals* queue,
+                           FrameCursorGlobals* cursor,
+                           bool unblank);

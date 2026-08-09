@@ -111,7 +111,22 @@ constexpr int32_t kRegionRowsStrideAlign = 16;
 // update_item_ctor (0x3ffd0). Lives embedded at +8 inside a WorkItemNode.
 struct WorkItem {
   std::shared_ptr<RegionRows> regionRows; // +0x00 (dispatch_update_regions's output)
-  int32_t pixelDataPtr;        // +0x08 cached RegionRows::dataPtr (the newly-rendered per-pixel byte), rebased to this item's rect origin (see piece_builder). Stored as int32_t, not a real pointer type, to match the real library's ABI - dispatch_processed_regions_probe.cpp still calls the real by-address dispatch_processed_regions, whose commit kernels (FUN_0004f8f0/FUN_0004e680) read this field via WorkItem+0x08 (see commit_item's comment).
+  // +0x08 cached RegionRows::dataPtr (the newly-rendered per-pixel byte),
+  // rebased to this item's rect origin (see piece_builder). Stored as
+  // uintptr_t rather than a typed pointer, to match the real library's ABI -
+  // dispatch_processed_regions_probe.cpp still calls the real by-address
+  // dispatch_processed_regions, whose commit kernels (FUN_0004f8f0/
+  // FUN_0004e680) read this field via WorkItem+0x08 (see commit_item's
+  // comment). uintptr_t (not int32_t) so the round-trip through this field
+  // is lossless on a 64-bit host too: on the real 32-bit ARM target
+  // uintptr_t is exactly 4 bytes, identical to int32_t (see WI_ASSERT's
+  // static_assert below), but on a 64-bit dev-host build an int32_t can't
+  // represent a real heap address at all (glibc heap addresses commonly sit
+  // around 0x55...), which silently corrupted this field's round-trip
+  // through commit_item (display.cpp) - a real, reachable crash through the
+  // normal swtcon_update -> [worker/display threads] -> commit_item
+  // pipeline on this platform before this field widened.
+  uintptr_t pixelDataPtr;
   int32_t rectY0;               // +0x0c
   int32_t rectX0;                // +0x10
   int32_t rectY1;                 // +0x14

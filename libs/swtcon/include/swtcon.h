@@ -105,8 +105,11 @@ void swtcon_wait();
 void swtcon_suspend();
 void swtcon_resume();
 
-// Re-implemented natively
-void swtcon_shutdown(int state_ptr_or_zero);
+// Re-implemented natively. state_ptr_or_zero is 0, or a raw pointer-sized
+// int naming the file to save the statebuffer to (see save_statebuffer's
+// own comment in init.h) - uintptr_t rather than int32_t so the round-trip
+// stays lossless on a 64-bit host too.
+void swtcon_shutdown(uintptr_t state_ptr_or_zero);
 
 // Runtime load bias of libqsgepaper.so: ghidra_addr = runtime_pc - offset.
 uintptr_t swtcon_runtime_offset();

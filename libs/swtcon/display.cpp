@@ -52,7 +52,11 @@ stamp_last_pan_timestamp(UpdateQueueGlobals* queue) {
 // curFrame. Shared by steps 7 and 10 below (the two "advance one frame"
 // call sites); step 2's double pan-to-16 stamps the same fields but without
 // advancing curFrame, so it isn't routed through this helper.
-static void
+//
+// Non-static (declared in display.h) so the frame-slot-selection formula
+// (queue->curFrame % kFrameSlotRingCount) can be unit-tested directly,
+// rather than only indirectly through a real, racy worker-thread run.
+void
 pan_and_advance_frame(UpdateQueueGlobals* queue,
                       FrameCursorGlobals* cursor,
                       bool unblank) {
@@ -451,9 +455,7 @@ commit_item(WorkItem* item) {
   // regionRows->dataPtr, which is why full-screen updates rendered fine
   // before this fix.)
   auto* regionRows = item->regionRows.get();
-  const uint8_t* pixelBuf =
-    regionRows ? (const uint8_t*)(uintptr_t)(uint32_t)item->pixelDataPtr
-               : nullptr;
+  const uint8_t* pixelBuf = regionRows ? (const uint8_t*)item->pixelDataPtr : nullptr;
   int pixelStride = regionRows ? regionRows->stride : 0;
   uint16_t* state = (uint16_t*)g_pStateBufferNative;
   bool force = item->sync != 0;

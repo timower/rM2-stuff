@@ -10,11 +10,15 @@
 #include <vector>
 
 // Library exports resolved once at dlopen time (see swtcon.cpp's load_lib),
-// used only by the swtcon_lib_impl_enabled() fallback below.
+// used only by the swtcon_lib_impl_enabled() fallback below - only defined
+// there (and meaningful) against the real armv7 binary, see
+// SWTCON_32BIT_ABI_CHECK's own comment in qsgepaper_globals.h.
+#if SWTCON_32BIT_ABI_CHECK
 extern void (*qsgepaper_lock)();
 extern void (*qsgepaper_update)(update_data*);
 extern void (*qsgepaper_unlock_post)();
 extern void (*qsgepaper_wait)();
+#endif // SWTCON_32BIT_ABI_CHECK
 
 // --- Native swtcon_update / lock / unlock_post / wait ---
 //
@@ -351,7 +355,7 @@ dispatch_update_regions(WorkItem* item, void* dataBuffer, void* backBuffer) {
     delete[] p->dataPtr;
     delete p;
   });
-  item->pixelDataPtr = (int32_t)(intptr_t)rr->dataPtr;
+  item->pixelDataPtr = (uintptr_t)rr->dataPtr;
 
   if (item->rectY0 <= item->rectY1 && item->rectX0 <= item->rectX1)
     render_update_kernel(item, (const uint16_t*)dataBuffer, (const uint8_t*)backBuffer);
@@ -495,20 +499,24 @@ update_lut_is_valid(const std::shared_ptr<LUTEntry>& lut) {
 
 void
 swtcon_lock() {
+#if SWTCON_32BIT_ABI_CHECK
   if (swtcon_lib_impl_enabled()) {
     qsgepaper_lock();
     return;
   }
+#endif // SWTCON_32BIT_ABI_CHECK
   // LockSwapMutex: take the update-queue mutex.
   pthread_mutex_lock(&update_queue_globals()->updateQueueMutex);
 }
 
 void
 swtcon_update(update_data* data) {
+#if SWTCON_32BIT_ABI_CHECK
   if (swtcon_lib_impl_enabled()) {
     qsgepaper_update(data);
     return;
   }
+#endif // SWTCON_32BIT_ABI_CHECK
   auto* queue = update_queue_globals();
 
   alignas(16) WorkItem item;
@@ -578,10 +586,12 @@ swtcon_update(update_data* data) {
 
 void
 swtcon_unlock_post() {
+#if SWTCON_32BIT_ABI_CHECK
   if (swtcon_lib_impl_enabled()) {
     qsgepaper_unlock_post();
     return;
   }
+#endif // SWTCON_32BIT_ABI_CHECK
   auto* queue = update_queue_globals();
 
   // Find the insertion point: walk backwards from the tail, skipping
@@ -607,10 +617,12 @@ swtcon_unlock_post() {
 
 void
 swtcon_wait() {
+#if SWTCON_32BIT_ABI_CHECK
   if (swtcon_lib_impl_enabled()) {
     qsgepaper_wait();
     return;
   }
+#endif // SWTCON_32BIT_ABI_CHECK
   // WaitForUpdate: spin until shutdown or the batch queue drains.
   auto* queue = update_queue_globals();
   while (queue->shutdownRequested == 0 && !queue->listIncomingUpdates.empty()) {

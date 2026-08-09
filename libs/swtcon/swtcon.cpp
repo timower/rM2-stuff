@@ -20,6 +20,15 @@
 #include "init.h"
 #include "qsgepaper_globals.h"
 
+// SWTCON_LIBIMPL mode dlopen's the real libqsgepaper.so and calls its
+// by-address exports directly - only meaningful against the real armv7
+// binary (see swtcon_libimpl.h's comment), so on any other host dlopen
+// would just fail architecture-mismatch. Compiled out entirely there
+// (rather than left runtime-dead behind swtcon_lib_impl_enabled()'s env-var
+// check) so coverage tooling doesn't count this unreachable-on-dev-host code
+// as missing coverage.
+#if SWTCON_32BIT_ABI_CHECK
+
 // Symbol addresses for version 3.23.0.54 / 3.23.0.64 (assumes 0x10000 image
 // base)
 #define INSTANCE_ADDR 0x35de0
@@ -108,6 +117,15 @@ swtcon_lib_impl_enabled() {
   return enabled;
 }
 
+#else // !SWTCON_32BIT_ABI_CHECK
+
+uintptr_t
+swtcon_runtime_offset() {
+  return 0;
+}
+
+#endif // SWTCON_32BIT_ABI_CHECK
+
 extern void* g_pImageBufferNative;
 extern void* g_pScreenBufferNative;
 extern void* g_pStateBufferNative;
@@ -126,6 +144,7 @@ uint16_t*
 swtcon_init(const InitParams& params) {
   std::cout << "swtcon_init: initialization sequence starting..." << std::endl;
 
+#if SWTCON_32BIT_ABI_CHECK
   if (swtcon_lib_impl_enabled()) {
     // Library mode always drives real hardware - InitParams' native-mode
     // injection seams don't apply here.
@@ -150,6 +169,7 @@ swtcon_init(const InitParams& params) {
     uint16_t* image = *(uint16_t**)(state + 0x14);
     return image;
   }
+#endif // SWTCON_32BIT_ABI_CHECK
 
   // --- NATIVE INIT IMPLEMENTATION ---
   // Caller (e.g. rm2fb's server, coordinating with xochitl's own separate,
@@ -374,16 +394,22 @@ swtcon_dump_buffers() {
 // --- Re-implemented shutdown ---
 
 void
-swtcon_shutdown(int state_ptr_or_zero) {
+swtcon_shutdown(uintptr_t state_ptr_or_zero) {
+#if SWTCON_32BIT_ABI_CHECK
   if (swtcon_lib_impl_enabled()) {
     // Library mode: nothing native was ever allocated (swtcon_init never
     // touched update_queue_globals()), so there's no native teardown to run
     // - just call the library's own actualShutdown (0x3b6b4) by address,
     // the same way every other public entry point does in this mode.
-    qsgepaper_shutdown(state_ptr_or_zero);
+    // qsgepaper_shutdown's own signature stays `int` (see its declaration
+    // above) to match the real by-address library's own ABI exactly -
+    // identical width to uintptr_t here since this path only ever compiles
+    // against the real 32-bit ARM target (SWTCON_32BIT_ABI_CHECK).
+    qsgepaper_shutdown((int)state_ptr_or_zero);
     std::cout << "swtcon_shutdown: complete (library mode)." << std::endl;
     return;
   }
+#endif // SWTCON_32BIT_ABI_CHECK
 
   auto* queue = update_queue_globals();
 
