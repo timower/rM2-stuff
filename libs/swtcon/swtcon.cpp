@@ -6,11 +6,11 @@
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <iostream>
+#include <linux/fb.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <string>
 #include <sys/file.h>
-#include <linux/fb.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/time.h>
@@ -177,146 +177,150 @@ swtcon_init(const InitParams& params) {
   // lock - see tools/xochitl-mock-server) takes responsibility for
   // ensuring only one swtcon instance actually drives hardware at a time
   // when skipPidLock is set.
-  if (!params.skipPidLock && create_pid_file() != 0) return nullptr;
+  if (!params.skipPidLock && create_pid_file() != 0)
+    return nullptr;
 
-    if (init_statebuffer(params.dataBuffer, params.backBuffer) != 0) return nullptr;
+  if (init_statebuffer(params.dataBuffer, params.backBuffer) != 0)
+    return nullptr;
 
-    auto* queue = update_queue_globals();
-    auto* sb = statebuffer_globals();
-    auto* fb = framebuffer_globals();
-    auto* cursor = frame_cursor_globals();
+  auto* queue = update_queue_globals();
+  auto* sb = statebuffer_globals();
+  auto* fb = framebuffer_globals();
+  auto* cursor = frame_cursor_globals();
 
-    // Reset every singleton first - swtcon_shutdown doesn't zero scalar
-    // bookkeeping, so a second swtcon_init() in one process would otherwise
-    // see stale state (e.g. workerThreadShutdown still set).
-    *queue = UpdateQueueGlobals{};
-    *sb = StatebufferGlobals{};
-    *fb = FramebufferGlobals{};
-    *cursor = FrameCursorGlobals{};
+  // Reset every singleton first - swtcon_shutdown doesn't zero scalar
+  // bookkeeping, so a second swtcon_init() in one process would otherwise
+  // see stale state (e.g. workerThreadShutdown still set).
+  *queue = UpdateQueueGlobals{};
+  *sb = StatebufferGlobals{};
+  *fb = FramebufferGlobals{};
+  *cursor = FrameCursorGlobals{};
 
-    // Phase 4 cleanup (Step 4): listProcessedUpdates/listIncomingUpdates/
-    // accumList are real std::list<T> now (see update.h's
-    // UpdateQueueGlobals) - their own default constructor already produces
-    // a valid empty list, so the explicit self-referencing-sentinel setup
-    // this used to need (back when they were a hand-rolled ListHead that
-    // had to be manually made self-referencing before any empty-list check
-    // or list walk would work) is no longer necessary at all.
+  // Phase 4 cleanup (Step 4): listProcessedUpdates/listIncomingUpdates/
+  // accumList are real std::list<T> now (see update.h's
+  // UpdateQueueGlobals) - their own default constructor already produces
+  // a valid empty list, so the explicit self-referencing-sentinel setup
+  // this used to need (back when they were a hand-rolled ListHead that
+  // had to be manually made self-referencing before any empty-list check
+  // or list walk would work) is no longer necessary at all.
 
-    queue->dataBuffer = g_pImageBufferNative;
-    queue->backBuffer = g_pScreenBufferNative;
-    sb->pStatebuffer = g_pStateBufferNative;
-    sb->pGammaTable = g_pGammaTableNative;
-    sb->nSize = kStatebufferSize;
+  queue->dataBuffer = g_pImageBufferNative;
+  queue->backBuffer = g_pScreenBufferNative;
+  sb->pStatebuffer = g_pStateBufferNative;
+  sb->pGammaTable = g_pGammaTableNative;
+  sb->nSize = kStatebufferSize;
 
-    std::string waveform_path;
-    if (params.waveformPathOverride) {
-        waveform_path = params.waveformPathOverride;
-    } else if (!find_waveform_path(&waveform_path)) {
-        std::cerr << "swtcon_init: unable to find any waveform files!" << std::endl;
-        return nullptr;
-    }
+  std::string waveform_path;
+  if (params.waveformPathOverride) {
+    waveform_path = params.waveformPathOverride;
+  } else if (!find_waveform_path(&waveform_path)) {
+    std::cerr << "swtcon_init: unable to find any waveform files!" << std::endl;
+    return nullptr;
+  }
 
-    std::cout << "Calling load_waveform with path=" << waveform_path << std::endl;
-    if (!load_waveform(&queue->waveform, waveform_path.c_str())) {
-        std::cerr << "swtcon_init: failed to load waveform natively" << std::endl;
-        return nullptr;
-    }
+  std::cout << "Calling load_waveform with path=" << waveform_path << std::endl;
+  if (!load_waveform(&queue->waveform, waveform_path.c_str())) {
+    std::cerr << "swtcon_init: failed to load waveform natively" << std::endl;
+    return nullptr;
+  }
 
-    std::cout << "Initializing framebuffer..." << std::endl;
-    FbInitParams fb_info = {};
-    fb_info.xres = 0x104;
-    fb_info.yres = 0x580;
-    fb_info.bitsPerPixel = 0x20;
-    fb_info.pixclock = 0x7080;
-    fb_info.frameCount = kFrameSlotRingCount; // + 1 extra slot, see kInitFrameSlotIndex
-    fb_info.leftMargin = 1;
-    fb_info.rightMargin = 1;
-    fb_info.upperMargin = 1;
-    fb_info.lowerMargin = 0x8f;
-    fb_info.hsyncLen = 1;
-    fb_info.vsyncLen = 1;
+  std::cout << "Initializing framebuffer..." << std::endl;
+  FbInitParams fb_info = {};
+  fb_info.xres = 0x104;
+  fb_info.yres = 0x580;
+  fb_info.bitsPerPixel = 0x20;
+  fb_info.pixclock = 0x7080;
+  fb_info.frameCount =
+    kFrameSlotRingCount; // + 1 extra slot, see kInitFrameSlotIndex
+  fb_info.leftMargin = 1;
+  fb_info.rightMargin = 1;
+  fb_info.upperMargin = 1;
+  fb_info.lowerMargin = 0x8f;
+  fb_info.hsyncLen = 1;
+  fb_info.vsyncLen = 1;
 
-    if (params.framebufferFd >= 0) {
-        init_framebuffer_with_fd(fb_info, params.framebufferFd);
-    } else if (init_framebuffer(fb_info) != 0) {
-        std::cerr << "swtcon_init: failed to init framebuffer" << std::endl;
-        return nullptr;
-    }
+  if (params.framebufferFd >= 0) {
+    init_framebuffer_with_fd(fb_info, params.framebufferFd);
+  } else if (init_framebuffer(fb_info) != 0) {
+    std::cerr << "swtcon_init: failed to init framebuffer" << std::endl;
+    return nullptr;
+  }
 
-    fb->pFbMmap = g_pFbAddrNative;
-    fb->nFbSizeX = g_nFbSizeXNative;
-    fb->nFbSizeY = g_nFbSizeYNative;
-    fb->nFbFd = g_nFbFdNative;
+  fb->pFbMmap = g_pFbAddrNative;
+  fb->nFbSizeX = g_nFbSizeXNative;
+  fb->nFbSizeY = g_nFbSizeYNative;
+  fb->nFbFd = g_nFbFdNative;
 
-    // The library's pan/display code reads the full fb_var_screeninfo /
-    // fb_fix_screeninfo from these globals. pan_to_frame only rewrites yoffset
-    // in place, so the whole struct must be present or FBIOPAN_DISPLAY fails
-    // ("Pan failed").
-    fb->fbFix = g_fbFixScreeninfoNative;
-    fb->fbVar = g_fbVarScreeninfoNative;
+  // The library's pan/display code reads the full fb_var_screeninfo /
+  // fb_fix_screeninfo from these globals. pan_to_frame only rewrites yoffset
+  // in place, so the whole struct must be present or FBIOPAN_DISPLAY fails
+  // ("Pan failed").
+  fb->fbFix = g_fbFixScreeninfoNative;
+  fb->fbVar = g_fbVarScreeninfoNative;
 
-    std::cout << "Calling init_LUT..." << std::endl;
-    init_lut();
-    fb->pLUT = g_pLUTAddrNative;
+  std::cout << "Calling init_LUT..." << std::endl;
+  init_lut();
+  fb->pLUT = g_pLUTAddrNative;
 
-    std::cout << "Uploading LUT to all frame slots..." << std::endl;
-    for (int i = 0; i < g_nFbSizeYNative; i++) {
-        upload_lut_to_frame_slot(frame_buffer_addr(i));
-    }
+  std::cout << "Uploading LUT to all frame slots..." << std::endl;
+  for (int i = 0; i < g_nFbSizeYNative; i++) {
+    upload_lut_to_frame_slot(frame_buffer_addr(i));
+  }
 
-    // Phase 7: temperature_mutex() is natively-owned zero-initialized storage
-    // now (previously the library's own .bss, already valid as an
-    // all-zero glibc fast mutex without an explicit init) - init it
-    // explicitly like every other mutex here, before the temperature-polling
-    // thread or get_current_temperature can touch it.
-    pthread_mutex_init(temperature_mutex(), nullptr);
-    init_temperature_sensor();
+  // Phase 7: temperature_mutex() is natively-owned zero-initialized storage
+  // now (previously the library's own .bss, already valid as an
+  // all-zero glibc fast mutex without an explicit init) - init it
+  // explicitly like every other mutex here, before the temperature-polling
+  // thread or get_current_temperature can touch it.
+  pthread_mutex_init(temperature_mutex(), nullptr);
+  init_temperature_sensor();
 
-    // Prime the display exactly as qsgepaper_init does. init_framebuffer leaves
-    // g_nIsFbBlanked = 1 (blanked); record the current wall-clock time in
-    // timeVar; init the display-timing mutex used by the worker and display
-    // threads to timestamp frame flushes; then run the priming sequence
-    // prime_display (pan to frame 16, unblank, reblank). Without this the
-    // frame counters never get seeded and the worker streams frame 0 forever.
-    fb->nIsFbBlanked = 1;
+  // Prime the display exactly as qsgepaper_init does. init_framebuffer leaves
+  // g_nIsFbBlanked = 1 (blanked); record the current wall-clock time in
+  // timeVar; init the display-timing mutex used by the worker and display
+  // threads to timestamp frame flushes; then run the priming sequence
+  // prime_display (pan to frame 16, unblank, reblank). Without this the
+  // frame counters never get seeded and the worker streams frame 0 forever.
+  fb->nIsFbBlanked = 1;
 
-    struct timeval tv;
-    gettimeofday(&tv, nullptr);
-    queue->timeVar = (int)tv.tv_sec;
+  struct timeval tv;
+  gettimeofday(&tv, nullptr);
+  queue->timeVar = (int)tv.tv_sec;
 
-    pthread_mutex_init(&queue->displayTimingMutex, nullptr);
+  pthread_mutex_init(&queue->displayTimingMutex, nullptr);
 
-    prime_display();
+  prime_display();
 
-    // Needed by swtcon_lock/update/unlock_post regardless of startThreads.
-    pthread_mutex_init(&queue->updateQueueMutex, nullptr);
-    sem_init(&queue->displayThreadSem, 0, 0);
-    pthread_mutex_init(&queue->workerCondMutex, nullptr);
-    pthread_cond_init(&queue->workerCond, nullptr);
+  // Needed by swtcon_lock/update/unlock_post regardless of startThreads.
+  pthread_mutex_init(&queue->updateQueueMutex, nullptr);
+  sem_init(&queue->displayThreadSem, 0, 0);
+  pthread_mutex_init(&queue->workerCondMutex, nullptr);
+  pthread_cond_init(&queue->workerCond, nullptr);
 
-    if (params.startThreads) {
-        std::cout << "Starting threads natively..." << std::endl;
+  if (params.startThreads) {
+    std::cout << "Starting threads natively..." << std::endl;
 
-        pthread_create(&queue->workerThread, nullptr, worker_thread_func, nullptr);
-        pthread_create(&queue->displayThread, nullptr, display_thread_func, nullptr);
-        queue->threadsStarted = true;
+    pthread_create(&queue->workerThread, nullptr, worker_thread_func, nullptr);
+    pthread_create(
+      &queue->displayThread, nullptr, display_thread_func, nullptr);
+    queue->threadsStarted = true;
 
-        sched_param param;
-        param.__sched_priority = 99;
-        pthread_setschedparam(queue->workerThread, SCHED_FIFO, &param);
-        param.__sched_priority = 98;
-        pthread_setschedparam(queue->displayThread, SCHED_FIFO, &param);
+    sched_param param;
+    param.__sched_priority = 99;
+    pthread_setschedparam(queue->workerThread, SCHED_FIFO, &param);
+    param.__sched_priority = 98;
+    pthread_setschedparam(queue->displayThread, SCHED_FIFO, &param);
 
-        // EPFramebufferSwtcon::initialize (0x38e30) calls qsgepaper_init and
-        // then FUN_0003b4b4 - a startup flash of the panel, blocking until it
-        // completes - before doing anything else. swtcon_init now replaces
-        // that whole call site, so it does the same here.
-        std::cout << "Requesting startup flash..." << std::endl;
-        request_flash_and_wait();
-    }
+    // EPFramebufferSwtcon::initialize (0x38e30) calls qsgepaper_init and
+    // then FUN_0003b4b4 - a startup flash of the panel, blocking until it
+    // completes - before doing anything else. swtcon_init now replaces
+    // that whole call site, so it does the same here.
+    std::cout << "Requesting startup flash..." << std::endl;
+    request_flash_and_wait();
+  }
 
-    std::cout << "swtcon_init: native initialization complete!" << std::endl;
-    return (uint16_t*)g_pImageBufferNative;
+  std::cout << "swtcon_init: native initialization complete!" << std::endl;
+  return (uint16_t*)g_pImageBufferNative;
 }
 
 // Walk the waveform vector and print each LUT's metadata plus a checksum of
@@ -327,7 +331,8 @@ swtcon_init(const InitParams& params) {
 void
 swtcon_dump_waveform() {
   auto* vec = &update_queue_globals()->waveform;
-  std::cout << "=== waveform dump: " << vec->size() << " modes ===" << std::endl;
+  std::cout << "=== waveform dump: " << vec->size()
+            << " modes ===" << std::endl;
   for (size_t mi = 0; mi < vec->size(); mi++) {
     ModeEntry* m = (*vec)[mi];
     std::cout << "mode[" << mi << "] name='" << m->name
@@ -355,7 +360,8 @@ swtcon_dump_waveform() {
 }
 
 // Checksum the fixed tables that init produces and the render kernels read, so
-// they can be A/B'd between native and library init the same way as the waveform.
+// they can be A/B'd between native and library init the same way as the
+// waveform.
 void
 swtcon_dump_buffers() {
   auto* fb = framebuffer_globals();
@@ -430,7 +436,8 @@ swtcon_shutdown(uintptr_t state_ptr_or_zero) {
     sem_post(&queue->displayThreadSem);
     pthread_join(queue->displayThread, nullptr);
 
-    std::cout << "swtcon_shutdown: waiting for display to finish..." << std::endl;
+    std::cout << "swtcon_shutdown: waiting for display to finish..."
+              << std::endl;
     queue->workerThreadShutdown = 1;
     pthread_mutex_lock(&queue->workerCondMutex);
     pthread_cond_broadcast(&queue->workerCond);
@@ -469,8 +476,10 @@ swtcon_shutdown(uintptr_t state_ptr_or_zero) {
   // Only free what we actually allocated - a caller-supplied dataBuffer/
   // backBuffer (see swtcon_init) is owned by the caller, e.g. rm2fb's
   // server passing in its own mmap'd shared framebuffer.
-  if (g_imageBufferOwnedNative) free(queue->dataBuffer);
-  if (g_screenBufferOwnedNative) free(queue->backBuffer);
+  if (g_imageBufferOwnedNative)
+    free(queue->dataBuffer);
+  if (g_screenBufferOwnedNative)
+    free(queue->backBuffer);
 
   close_fb();
   // dummy uninit

@@ -68,30 +68,38 @@ wake_suspend_gate();
 // threading/dispatch code around it (playback_kernel_dispatch).
 void
 playback_kernel_plain_intrinsics(void** frame_slots,
-                             WorkItem* item,
-                             int frame_count,
-                             int chunk_index,
-                             int chunk_count);
+                                 WorkItem* item,
+                                 int frame_count,
+                                 int chunk_index,
+                                 int chunk_count);
 void
 playback_kernel_aligned_intrinsics(void** frame_slots,
-                               WorkItem* item,
-                               int frame_count,
-                               int chunk_index,
-                               int chunk_count);
+                                   WorkItem* item,
+                                   int frame_count,
+                                   int chunk_index,
+                                   int chunk_count);
 
 // Individual pieces of display_thread_func, non-static so each can be
 // unit-tested directly - see display.cpp for the full comments.
-bool commit_item(WorkItem* item);
-bool dispatch_processed_regions_native(std::list<WorkItem>& sub_list);
-void stale_row_cleanup();
-void gc_processed_updates();
-void build_overlap_dependency_list(std::list<WorkItem>& sub_list);
-int playback_chunk_count(const WorkItem* item);
-void advance_work_item_frames(WorkItem* item);
+bool
+commit_item(WorkItem* item);
+bool
+dispatch_processed_regions_native(std::list<WorkItem>& sub_list);
+void
+stale_row_cleanup();
+void
+gc_processed_updates();
+void
+build_overlap_dependency_list(std::list<WorkItem>& sub_list);
+int
+playback_chunk_count(const WorkItem* item);
+void
+advance_work_item_frames(WorkItem* item);
 
 // worker_thread_func's own frame-pacing helper (steps 7/10), non-static so
 // its frame-slot-selection formula can be unit-tested directly - see its
 // definition in display.cpp for the full comment.
-void pan_and_advance_frame(UpdateQueueGlobals* queue,
-                           FrameCursorGlobals* cursor,
-                           bool unblank);
+void
+pan_and_advance_frame(UpdateQueueGlobals* queue,
+                      FrameCursorGlobals* cursor,
+                      bool unblank);

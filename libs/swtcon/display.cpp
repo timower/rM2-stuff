@@ -455,7 +455,8 @@ commit_item(WorkItem* item) {
   // regionRows->dataPtr, which is why full-screen updates rendered fine
   // before this fix.)
   auto* regionRows = item->regionRows.get();
-  const uint8_t* pixelBuf = regionRows ? (const uint8_t*)item->pixelDataPtr : nullptr;
+  const uint8_t* pixelBuf =
+    regionRows ? (const uint8_t*)item->pixelDataPtr : nullptr;
   int pixelStride = regionRows ? regionRows->stride : 0;
   uint16_t* state = (uint16_t*)g_pStateBufferNative;
   bool force = item->sync != 0;
