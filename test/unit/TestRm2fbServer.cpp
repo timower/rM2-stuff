@@ -1,4 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
+#include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -67,6 +69,14 @@ struct FakeClient {
   void sendIdleUpdate(bool idle) {
     auto res = sendMessage(sock, UnixClientMsg{ IdleUpdate{ idle } });
     REQUIRE(res.has_value());
+  }
+
+  // Reads back the buffer fd the server sends in reply to Init - see
+  // SharedFB::recv(), which this mirrors without needing a whole SharedFB.
+  unistdpp::FD recvBuffer() {
+    auto fd = unistdpp::recvFD(sock);
+    REQUIRE(fd.has_value());
+    return unistdpp::FD(*fd);
   }
 };
 
@@ -208,4 +218,71 @@ TEST_CASE("Client-driven front keeps its confirmed idle state across "
   auto* front = std::get_if<ClientDrivenFront>(&server.focus);
   REQUIRE(front != nullptr);
   REQUIRE(!front->pendingSwitchTarget.has_value());
+}
+
+// Regression: the server used to withhold a client's buffer-fd reply until
+// resume() actually promoted it to front - a client whose switch is
+// deferred behind a still-busy ClientDrivenFront (see
+// ClientDrivenFront::pendingSwitchTarget) would then never get a reply at
+// all until that front went idle. It now replies as soon as Init is
+// processed (readUnixSock()), independently of when - or whether -
+// requestSwitch() actually promotes this client.
+TEST_CASE("Server replies to Init immediately, even when the switch itself "
+          "is deferred",
+          "[rm2fb][rm2fb-server]") {
+  const char* lockPath = "/tmp/rm2fb-test-server-init-reply.lock";
+  const char* sockPath = "/tmp/rm2fb-test-server-init-reply.sock";
+  unlink(sockPath);
+
+  FakeAddressInfo fakeAddrs;
+  FakeProcessControl fakeProcessControl;
+  Server server(&fakeAddrs, lockPath, sockPath, fakeProcessControl);
+
+  // Client A takes front via the real accept()/Init path and never reports
+  // idle, so it stays "busy" from the server's point of view.
+  FakeClient clientA(sockPath);
+  pollUntil(server, [&] { return !server.unixClients.empty(); });
+  clientA.sendInit(/* ownSwtcon= */ true);
+  pollUntil(server, [&] {
+    return std::holds_alternative<ClientDrivenFront>(server.focus);
+  });
+  clientA.recvBuffer();
+
+  // Client B is injected directly into unixClients with a distinct fake
+  // pid instead of going through a second real connect() - acceptUnixClient
+  // derives pid from SO_PEERCRED, and a second socket from this same test
+  // process would get the identical real pid as A, tripping its accept-time
+  // duplicate-pid handling instead of giving us two independent clients.
+  // readUnixSock() itself only ever cares about the UnixClient reference
+  // it's given, not how it ended up in unixClients.
+  int fds[2];
+  REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds) == 0);
+  unistdpp::FD clientBTestSide(fds[1]);
+  UnixClient clientBEntry;
+  clientBEntry.sock = unistdpp::FD(fds[0]);
+  clientBEntry.pid = getpid() + 1;
+  clientBEntry.dontPause = false;
+  server.unixClients.push_back(std::move(clientBEntry));
+  UnixClient& clientB = server.unixClients.back();
+
+  REQUIRE(
+    sendMessage(clientBTestSide, UnixClientMsg{ Init{ .ownSwtcon = false } })
+      .has_value());
+  server.readUnixSock(clientB);
+
+  // B's switch must have been deferred - A is still front and still busy.
+  auto* front = std::get_if<ClientDrivenFront>(&server.focus);
+  REQUIRE(front != nullptr);
+  REQUIRE(front->pid == getpid());
+  REQUIRE(front->pendingSwitchTarget == clientB.pid);
+
+  // Yet B must already have received its own buffer fd, sent right at
+  // Init instead of waiting for a resume() that never happened.
+  auto receivedFd = unistdpp::recvFD(clientBTestSide);
+  REQUIRE(receivedFd.has_value());
+  unistdpp::FD received(*receivedFd);
+  REQUIRE(received.isValid());
+  struct stat st{};
+  REQUIRE(fstat(received.fd, &st) == 0);
+  REQUIRE(st.st_size == total_size);
 }

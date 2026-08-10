@@ -170,12 +170,11 @@ struct UnixClient {
   // hand-off based on it.
   std::optional<bool> ownSwtcon;
 
-  // True once this client has been front at least once. Used to (a) skip
+  // True once this client has been front at least once. Used to skip
   // resume()'s resync flash the very first time a swtcon-owning client
   // becomes front - no point pushing its blank, freshly-allocated buffer
   // to the panel right before it draws its own real content via its own
-  // swtcon - and (b) know whether it's still waiting on its first-ever
-  // Init reply (see resume()).
+  // swtcon.
   bool hasBeenFront = false;
 
   // Last IdleUpdate value reported by this client (ownSwtcon clients only) -
@@ -426,16 +425,6 @@ struct Server : ControlInterface {
         .waveform = WAVEFORM_MODE_GC16 | UpdateParams::ioctl_waveform_flag,
         .temperatureOverride = 0,
         .extraMode = 0,
-      });
-    }
-
-    // First time becoming front is also when this client's Init reply is
-    // still outstanding (readUnixSock() never replies itself - see its
-    // comment) - send it now that fb is finally set up correctly for it.
-    if (!client.hasBeenFront) {
-      fb.send(client.sock).or_else([&](auto err) {
-        std::cerr << "Error sending fb to resumed client: "
-                  << unistdpp::to_string(err) << "\n";
       });
     }
 
@@ -743,13 +732,26 @@ struct Server : ControlInterface {
                             << unistdpp::to_string(err) << "\n";
                 });
 
+              // Reply with this client's own dedicated buffer right away
+              // instead of waiting for it to actually become front (that
+              // used to happen in resume(), gated on hasBeenFront) - a
+              // client can mmap and even pre-render into it immediately;
+              // it just can't push real panel updates until requestSwitch()
+              // below actually promotes it (see the UpdateParams handling
+              // further down, which drops updates from a non-front client).
+              if (client.buffer.isValid()) {
+                unistdpp::sendFDTo(client.sock, client.buffer.fd)
+                  .or_else([&](auto err) {
+                    std::cerr << "Error sending fb to client: "
+                              << unistdpp::to_string(err) << "\n";
+                  });
+              }
+
               // requestSwitch() handles everything else (pausing the old
               // front if any, buffer handoff, suspendForXochitl if this
               // client owns its own swtcon) - including deferring all of
               // it if the current front is a busy client-driven one,
-              // instead of doing any of it here. It also replies with the
-              // buffer itself (resume()), once this client actually
-              // becomes front - not necessarily immediately.
+              // instead of doing any of it here.
               requestSwitch(client.pid);
               return {};
             } else if constexpr (std::is_same_v<T, UpdateParams>) {
