@@ -508,7 +508,9 @@ render_kernel_formula(int case_, uint16_t src, bool back_active, uint8_t gamma);
 void
 render_update_kernel(WorkItem* item,
                      const uint16_t* dataBuffer,
-                     const uint8_t* backBuffer);
+                     const uint8_t* backBuffer,
+                     int chunkIndex = 0,
+                     int chunkCount = 1);
 WorkItem*
 piece_builder(WorkItem* dest, const WorkItem* src, const Rect& piece_rect);
 void

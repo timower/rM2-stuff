@@ -5,6 +5,7 @@
 #include <iterator>
 #include <pthread.h>
 #include <semaphore.h>
+#include <thread>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -251,7 +252,18 @@ piece_builder(WorkItem* dest, const WorkItem* src, const Rect& piece_rect) {
 // itself). dispatch_update_regions's two-way thread-pool chunking (for rects
 // wider than 98 columns) only ever splits this same computation into two
 // disjoint column ranges - it changes nothing about which output byte reads
-// which input byte, so this single-pass native port doesn't replicate it.
+// which input byte, so a single-pass port would still be byte-identical.
+// It's ported anyway (see dispatch_update_regions/update_chunk_count below):
+// running this synchronously single-threaded on the caller's own thread
+// measurably slows down large-rect dispatch under emulation (confirmed:
+// ~155ms vs ~65ms for a 1035-column rect), a real gap from the real
+// library's own performance envelope worth closing on its own terms - found
+// while investigating swtcon-test cases 24-27's A2-priming mismatch, though
+// ruled out as that mismatch's own cause (see ab_compare.sh's header
+// comment): the frame number a newly-dispatched item lands on is forced to
+// the same value regardless of how long this call takes, confirmed both
+// analytically and by testing multiple independent timing variants that all
+// reproduced the identical mismatch.
 
 // Mirrors render_update_kernel's pixelMode==5 ("auto") indirection through
 // g_anPixelModeDispatchTable - confirmed by reading the table's bytes
@@ -309,7 +321,14 @@ render_kernel_formula(int case_,
 // Native reimplementation of render_update_kernel (0x4e7b8). `dataBuffer`
 // and `backBuffer` are the full-screen working buffers (queue->dataBuffer /
 // queue->backBuffer); item->regionRows must already point at a RegionRows
-// sized for item's own rect (dispatch_update_regions's job).
+// sized for item's own rect (dispatch_update_regions's job). `chunkIndex`/
+// `chunkCount` restrict the pass to one of dispatch_update_regions's two
+// disjoint column ranges (default chunkCount=1 covers the whole rect, the
+// same {item,dataBuffer,backBuffer,chunkIndex=0,chunkCount=1} convention the
+// real library's own single-shot call site uses) - splitting the column
+// range doesn't change any output byte (each is a pure function of one
+// source pixel, see this section's header comment), only which thread
+// computes it.
 //
 // Non-static (declared in update.h) for direct unit testing - a test needs
 // init_statebuffer() to have populated statebuffer_globals()->pGammaTable
@@ -317,7 +336,9 @@ render_kernel_formula(int case_,
 void
 render_update_kernel(WorkItem* item,
                      const uint16_t* dataBuffer,
-                     const uint8_t* backBuffer) {
+                     const uint8_t* backBuffer,
+                     int chunkIndex,
+                     int chunkCount) {
   auto* rr = item->regionRows.get();
   if (!rr->dataPtr)
     return;
@@ -325,12 +346,17 @@ render_update_kernel(WorkItem* item,
     (const uint8_t*)statebuffer_globals()->pGammaTable;
   int case_ = render_kernel_case(item->pixelMode, item->mode);
 
+  int span = item->rectX1 - item->rectX0; // 0-based, inclusive
+  int chunk_width = (span + 1) / chunkCount;
+  int col_lo = chunk_width * chunkIndex;
+  int col_hi =
+    (chunkIndex != chunkCount - 1) ? (chunk_width - 1 + col_lo) : span;
+
   for (int32_t y_screen = item->rectY0; y_screen <= item->rectY1; y_screen++) {
     int row = y_screen - item->rectY0;
     int src_y = (kScreenHeight - 1) - y_screen;
-    for (int32_t x_screen = item->rectX0; x_screen <= item->rectX1;
-         x_screen++) {
-      int col = x_screen - item->rectX0;
+    for (int col = col_lo; col <= col_hi; col++) {
+      int32_t x_screen = item->rectX0 + col;
       int src_x = (kScreenWidth - 1) - x_screen;
       int srcIdx = src_y * kScreenWidth + src_x;
       uint8_t gamma = gammaTable[(src_x & 0x7f) + (src_y & 0x7f) * 0x88];
@@ -341,9 +367,31 @@ render_update_kernel(WorkItem* item,
   }
 }
 
+// Shared chunk-count rule for dispatch_update_regions (CONFIRMED,
+// swtcon_architecture.md §5.1 point 2): 1 unless the rect is non-degenerate
+// and at least 99 columns wide, in which case exactly 2 (never scaled by
+// hardware_concurrency() - the real library's pool depth is headroom for
+// concurrent dispatches, not finer splitting of one).
+static int
+update_chunk_count(const WorkItem* item) {
+  if (item->rectY0 <= item->rectY1 && item->rectX0 <= item->rectX1 &&
+      item->rectX1 - item->rectX0 + 1 >= 99)
+    return 2;
+  return 1;
+}
+
 // Native reimplementation of dispatch_update_regions (0x4fff8): allocates the
 // item's RegionRows blob (releasing whatever it had before, via ordinary
-// shared_ptr assignment) and fills it via render_update_kernel.
+// shared_ptr assignment) and fills it via render_update_kernel - on a second
+// thread for the right-hand column chunk when the rect is wide enough (see
+// update_chunk_count), matching the real library's own two-way split
+// (§5.1 point 4). Not just a style match: dispatch_update_regions runs
+// synchronously on the caller's thread before the item is even queued, so
+// running it single-threaded measurably slows down every large-rect update
+// under emulation (confirmed: ~155ms single-threaded vs ~65ms two-threaded
+// for a 1035-column rect on the emulator) - closing that gap on its own
+// terms is the point here, not a fix for any specific observed mismatch
+// (see render_update_kernel's own header comment above).
 void
 dispatch_update_regions(WorkItem* item, void* dataBuffer, void* backBuffer) {
   auto* rr = new RegionRows{};
@@ -375,9 +423,25 @@ dispatch_update_regions(WorkItem* item, void* dataBuffer, void* backBuffer) {
   });
   item->pixelDataPtr = (uintptr_t)rr->dataPtr;
 
-  if (item->rectY0 <= item->rectY1 && item->rectX0 <= item->rectX1)
-    render_update_kernel(
-      item, (const uint16_t*)dataBuffer, (const uint8_t*)backBuffer);
+  if (item->rectY0 <= item->rectY1 && item->rectX0 <= item->rectX1) {
+    int chunk_count = update_chunk_count(item);
+    if (chunk_count < 2) {
+      render_update_kernel(
+        item, (const uint16_t*)dataBuffer, (const uint8_t*)backBuffer, 0, 1);
+    } else {
+      std::vector<std::thread> threads;
+      threads.reserve(chunk_count);
+      for (int i = 0; i < chunk_count; i++)
+        threads.emplace_back(render_update_kernel,
+                             item,
+                             (const uint16_t*)dataBuffer,
+                             (const uint8_t*)backBuffer,
+                             i,
+                             chunk_count);
+      for (auto& t : threads)
+        t.join();
+    }
+  }
 }
 
 // Native reimplementation of subtract_update_region (0x3be10): clips the

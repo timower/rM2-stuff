@@ -18,25 +18,22 @@
 // Exit code: 0 = identical ordered sequence, 1 = a length or positional
 // mismatch, 2 = I/O error.
 //
-// idx==16 (kInitFrameSlotIndex, libs/swtcon/qsgepaper_globals.h) entries are
-// dropped before comparing: that slot is worker_thread_func's per-tick
-// keep-alive pan (display.cpp step 2, byte-identical in the real library's
-// disassembly), always showing the same static content and never part of
-// real playback. Whether it lands between two real frames depends on how
-// finely display_thread_func's wall-clock pacing happens to chunk the
-// remaining work that tick - genuinely different, run to run, between two
-// separately-compiled binaries executing the same byte-verified algorithm
-// at different real speeds. Counting it as A/B signal makes otherwise-
-// identical runs look mismatched; real display content is unaffected by
-// dropping it since every other entry still compares positionally.
-//
-// Dropping those entries can newly place two equal-hash real-content
-// entries back to back (content C, then the dropped idx==16 tick, then C
-// again from a different ring slot - same content re-landing in a
-// different curFrame%16 slot, not a new pan). capture_display's own
-// consecutive-hash dedup (main.cpp) would already have collapsed that had
-// the idx==16 entry not been sitting between them, so read_hashes below
-// re-applies that same rule once idx==16 removal exposes the adjacency.
+// idx==16 (kInitFrameSlotIndex, libs/swtcon/qsgepaper_globals.h) entries -
+// worker_thread_func's per-tick keep-alive pan, always showing the same
+// static blank/white reference content, never real playback - are excluded
+// upstream, in main.cpp's capture_display, not here. They used to be
+// dropped in this file instead, but that was too late: capture_display's
+// own consecutive-hash dedup runs first and tracks "last shown hash" across
+// every pan including idle keep-alive ticks, so if an idle tick happened to
+// fire (real-time-scheduling-dependent, differs between native and
+// SWTCON_LIBIMPL=1 runs) moments before a genuine content transition that
+// happens to hash identically to that static reference (e.g. a waveform's
+// own white flash phase - not hypothetical, confirmed via
+// SWTCON_PAN_CAPTURE_ALL showing byte-identical undeduped content on a run
+// where the deduped comparison mismatched), the real transition got masked
+// as "no change" and silently dropped from the very capture file this tool
+// reads - no amount of filtering here could recover it. See main.cpp's
+// capture_display for the actual fix.
 
 #include <algorithm>
 #include <cstdint>
@@ -50,25 +47,12 @@
 
 namespace {
 
-// Slot index one past the 16-slot playback ring (libs/swtcon/
-// qsgepaper_globals.h's kInitFrameSlotIndex) - kept in sync manually since
-// this tool doesn't link against libswtcon.
-constexpr int kInitFrameSlotIndex = 16;
-
 std::vector<uint32_t>
 read_hashes(const char* path) {
   std::ifstream f(path);
   std::vector<uint32_t> hashes;
   std::string line;
   while (std::getline(f, line)) {
-    auto idx_pos = line.find("idx=");
-    if (idx_pos != std::string::npos) {
-      int idx = -1;
-      std::istringstream(line.substr(idx_pos + 4)) >> idx;
-      if (idx == kInitFrameSlotIndex)
-        continue;
-    }
-
     auto pos = line.find("hash=");
     if (pos == std::string::npos)
       continue;

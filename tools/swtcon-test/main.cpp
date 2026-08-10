@@ -63,11 +63,14 @@ install_segv_handler() {
 #define SCREEN_WIDTH 1404
 #define SCREEN_HEIGHT 1872
 
-// update modes from swtcon
+// update modes from swtcon (indices into init.cpp's mode_names table: HQ is
+// GC16, MEDIUM is GL16).
 enum UpdateMode {
+  DU = 1,
   HQ = 2,
   MEDIUM = 3,
   FAST = 4,
+  A2 = 6,
 };
 
 // UpdateFlags (Sync/FastDraw/ExplicitTemperature) lives in swtcon.h, shared
@@ -358,6 +361,253 @@ main(int argc, char** argv) {
       TIME(do_batch({ rect_req(100, 100, 180, 180, HQ, 9) }));
       std::cout << "Done" << std::endl;
       getchar();
+    }
+
+    // --- Gray-level transition coverage ---
+    //
+    // Exercises every old-gray -> new-gray combination a waveform mode's LUT
+    // can see, as a 16x16 grid: two Sync updates, first committing 16 old
+    // values (one per column, uniform down the grid), then 16 new values
+    // (one per row, uniform across the grid) - so cell (col=c, row=r)
+    // transitions old=c to new=r. Laid out as an outer 4x4 grid of these
+    // 16x16 grids: outer row i's mode commits the *old* values (pass 1),
+    // outer column j's mode commits the *new* values (pass 2) - so grid
+    // (row=i, col=j) shows what "prime with mode i, then transition with
+    // mode j" looks like, for all 16 mode combinations (DU, GL16, GC16, A2).
+
+    // 16 evenly-spaced true grays in RGB565 (R=B 5-bit, G 6-bit) so the
+    // render kernel's case-6/9 formulas (render_kernel_formula, selected per
+    // mode below via pixel_mode=5 "auto") sweep their 16 distinct output
+    // levels (0,2,4,...,30) in step. Shared by case 11 and the per-combo
+    // cases below.
+    auto gray_pixel = [](int level) -> uint16_t {
+      int r5 = (level * 31 + 7) / 15;
+      int g6 = (level * 63 + 7) / 15;
+      return (uint16_t)((r5 << 11) | (g6 << 5) | r5);
+    };
+
+    if (should_run(11)) {
+      std::cout << "Gray transitions: 4x4 outer grid, row=priming mode, "
+                   "col=transition mode (DU, GL16, GC16, A2)"
+                << std::endl;
+
+      // A 4x4 outer arrangement of 16 sub-grids needs much smaller cells
+      // than the single-column layout did: with a 10px gap/margin, 21px
+      // cells are the largest that let all 4 columns fit within
+      // SCREEN_WIDTH (the tighter of the two axes here).
+      constexpr int kGap = 10;
+      constexpr int kCell = 21;
+      constexpr int kGrid = 16 * kCell; // 336
+
+      struct ModeGrid {
+        int y0, x0;
+        int rowMode; // priming mode: commits pass 1's old values
+        int colMode; // transition mode: commits pass 2's new values
+      };
+      struct NamedMode {
+        const char* name;
+        int mode;
+      };
+      NamedMode modes[] = {
+        { "DU", DU },
+        { "GL16", MEDIUM },
+        { "GC16", HQ },
+        { "A2", A2 },
+      };
+      ModeGrid grids[16];
+      for (int row = 0; row < 4; row++) {
+        for (int col = 0; col < 4; col++) {
+          grids[row * 4 + col] = ModeGrid{ kGap + row * (kGrid + kGap),
+                                           kGap + col * (kGrid + kGap),
+                                           modes[row].mode,
+                                           modes[col].mode };
+        }
+      }
+
+      // Commits the 4 grids sharing outer index `idx` (a row if `byRow`,
+      // else a column) as one Sync batch - i.e. all 4 rects in the batch
+      // share the same mode/LUT width, unlike a single 16-grid/4-LUT-width
+      // batch. Batching all 16 mixed-mode grids at once overloads the
+      // generator thread's per-tick workload (confirmed via nix's
+      // swtcon-ab-compare check: real hardware logs "generator thread has
+      // fallen behind", and native vs SWTCON_LIBIMPL=1 then skip different
+      // frames and diverge) - the same class of real-time-pacing flakiness
+      // as test cases 8/9. Grouping by shared mode keeps each batch's area
+      // and LUT diversity down to what the already-passing tests use.
+      // `border` grows the committed rect outward on every side, so the
+      // border pass below can commit just outside the grid without touching
+      // pixels pass 1/2 own. `modeOf` picks which of a grid's two modes
+      // (row/priming or col/transition) this particular commit should use.
+      auto commit_group = [&](int border, auto modeOf, int idx, bool byRow) {
+        swtcon_lock();
+        for (int k = 0; k < 4; k++) {
+          ModeGrid& g = byRow ? grids[idx * 4 + k] : grids[k * 4 + idx];
+          update_data req = rect_req(g.y0 - border,
+                                     g.x0 - border,
+                                     g.y0 + kGrid + border,
+                                     g.x0 + kGrid + border,
+                                     modeOf(g),
+                                     5);
+          swtcon_update(&req);
+        }
+        swtcon_unlock_post();
+        swtcon_wait();
+      };
+      auto rowModeOf = [](const ModeGrid& g) { return g.rowMode; };
+      auto colModeOf = [](const ModeGrid& g) { return g.colMode; };
+
+      fill_rect(0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, 0xFFFF);
+
+      // Border pass: a black outline just outside each grid, so the grid's
+      // extent is unambiguous against the surrounding white background (no
+      // pause - purely a visual frame, not gray-transition data).
+      constexpr int kBorder = 3;
+      for (auto& g : grids) {
+        fill_rect(g.y0 - kBorder,
+                  g.x0 - kBorder,
+                  g.y0,
+                  g.x0 + kGrid + kBorder,
+                  0); // top
+        fill_rect(g.y0 + kGrid,
+                  g.x0 - kBorder,
+                  g.y0 + kGrid + kBorder,
+                  g.x0 + kGrid + kBorder,
+                  0); // bottom
+        fill_rect(g.y0 - kBorder,
+                  g.x0 - kBorder,
+                  g.y0 + kGrid + kBorder,
+                  g.x0,
+                  0); // left
+        fill_rect(g.y0 - kBorder,
+                  g.x0 + kGrid,
+                  g.y0 + kGrid + kBorder,
+                  g.x0 + kGrid + kBorder,
+                  0); // right
+      }
+      for (int row = 0; row < 4; row++) {
+        TIME(commit_group(kBorder, rowModeOf, row, /*byRow=*/true));
+      }
+
+      // Pass 1: old value varies per column, uniform down each grid's full
+      // height - committed with each grid's row/priming mode.
+      for (auto& g : grids) {
+        for (int c = 0; c < 16; c++) {
+          fill_rect(g.y0,
+                    g.x0 + c * kCell,
+                    g.y0 + kGrid,
+                    g.x0 + (c + 1) * kCell,
+                    gray_pixel(c));
+        }
+      }
+      for (int row = 0; row < 4; row++) {
+        TIME(commit_group(0, rowModeOf, row, /*byRow=*/true));
+      }
+      std::cout << "old values committed for all modes, press enter to "
+                   "commit new values"
+                << std::endl;
+      getchar();
+
+      // Pass 2: new value varies per row, uniform across each grid's full
+      // width - committed with each grid's column/transition mode.
+      for (auto& g : grids) {
+        for (int r = 0; r < 16; r++) {
+          fill_rect(g.y0 + r * kCell,
+                    g.x0,
+                    g.y0 + (r + 1) * kCell,
+                    g.x0 + kGrid,
+                    gray_pixel(r));
+        }
+      }
+      for (int col = 0; col < 4; col++) {
+        TIME(commit_group(0, colModeOf, col, /*byRow=*/false));
+      }
+
+      std::cout << "Done" << std::endl;
+      getchar();
+    }
+
+    // Per-combo single-grid cases (12-27): one (priming, transition) mode
+    // pair per case, full-size, as a single-region Sync commit each - the
+    // minimal per-case isolation the A/B pan-capture-compare's ordered/
+    // positional diff assumes (see pan_capture_compare.cpp's own comment).
+    //
+    // Unlike case 11, this deliberately does NOT draw a bordering outline
+    // rect around the grid first. An earlier version did (purely a visual
+    // frame, not gray-transition data - see git history), but for the A2-
+    // priming cases (24-27) that extra commit made pass1 land its very first
+    // dispatch on a frame ring slot (kFrameSlotRingCount in display.cpp)
+    // still holding the border item's own not-yet-expired content, since
+    // A2's LUT is short enough to reuse a slot within one 8-frame dispatch.
+    // That produced a genuine, reproducible native-vs-library content
+    // mismatch (see ab_compare.sh's git history for the investigation) whose
+    // exact byte-level cause was never pinned down despite auditing every
+    // mechanism involved (ring-slot reuse ordering, both playback kernels,
+    // the whole WBF LUT parsing pipeline) against the real disassembly and
+    // finding no discrepancy - dropping the border, which was never part of
+    // the actual gray-transition coverage this test cares about, sidesteps
+    // the collision entirely and all 16 combinations now match.
+    {
+      constexpr int kCell = 64;
+      constexpr int kGrid = 16 * kCell; // 1024
+      constexpr int kY0 = (SCREEN_HEIGHT - kGrid) / 2;
+      constexpr int kX0 = (SCREEN_WIDTH - kGrid) / 2;
+
+      struct NamedMode {
+        const char* name;
+        int mode;
+      };
+      NamedMode modes[] = {
+        { "DU", DU },
+        { "GL16", MEDIUM },
+        { "GC16", HQ },
+        { "A2", A2 },
+      };
+
+      auto run_transition_grid = [&](int primeMode, int transMode) {
+        fill_rect(0, 0, SCREEN_HEIGHT, SCREEN_WIDTH, 0xFFFF);
+
+        // Pass 1: old value varies per column, uniform down the grid's full
+        // height - committed with the priming mode.
+        for (int c = 0; c < 16; c++) {
+          fill_rect(kY0,
+                    kX0 + c * kCell,
+                    kY0 + kGrid,
+                    kX0 + (c + 1) * kCell,
+                    gray_pixel(c));
+        }
+        TIME(do_batch(
+          { rect_req(kY0, kX0, kY0 + kGrid, kX0 + kGrid, primeMode, 5) }));
+        std::cout << "old values committed, press enter to commit new values"
+                  << std::endl;
+        getchar();
+
+        // Pass 2: new value varies per row, uniform across the grid's full
+        // width - committed with the transition mode.
+        for (int r = 0; r < 16; r++) {
+          fill_rect(kY0 + r * kCell,
+                    kX0,
+                    kY0 + (r + 1) * kCell,
+                    kX0 + kGrid,
+                    gray_pixel(r));
+        }
+        TIME(do_batch(
+          { rect_req(kY0, kX0, kY0 + kGrid, kX0 + kGrid, transMode, 5) }));
+
+        std::cout << "Done" << std::endl;
+        getchar();
+      };
+
+      int caseNum = 12;
+      for (int row = 0; row < 4; row++) {
+        for (int col = 0; col < 4; col++) {
+          if (should_run(caseNum)) {
+            std::cout << "Gray transition: prime=" << modes[row].name
+                      << " transition=" << modes[col].name << std::endl;
+            run_transition_grid(modes[row].mode, modes[col].mode);
+          }
+          caseNum++;
+        }
+      }
     }
   }
 

@@ -32,6 +32,12 @@ constexpr int yres = 0x580;
 constexpr int line_length = 0x410; // matches FBIOGET_FSCREENINFO's answer below
 constexpr size_t frame_slot_bytes = (size_t)yres * line_length;
 
+// Slot index one past the 16-slot playback ring (libs/swtcon/
+// qsgepaper_globals.h's kInitFrameSlotIndex) - kept in sync manually since
+// this tool doesn't link against libswtcon (matches pan_capture_compare.cpp's
+// own copy of the same constant).
+constexpr uint32_t kInitFrameSlotIndex = 16;
+
 bool inXochitl = false;
 void* globalMem = nullptr;
 
@@ -114,6 +120,23 @@ capture_display(uint32_t offset, uint32_t idx) {
 
   auto* f = pan_capture_stream();
   if (!f)
+    return;
+
+  // idx==kInitFrameSlotIndex is worker_thread_func's per-tick keep-alive pan
+  // (display.cpp step 2) - always the same static blank/white reference
+  // content, never real playback (pan_capture_compare.cpp already drops
+  // these on read for that reason). Excluded here too, from the
+  // change-detection state itself, not just the output: real content can
+  // legitimately hash identically to that static reference (e.g. a
+  // waveform's own white flash phase), and if an idle keep-alive tick
+  // happens to fire moments before that real transition, comparing against
+  // it would make the real transition look like "no change" and silently
+  // drop it - confirmed empirically (SWTCON_PAN_CAPTURE_ALL showed the real,
+  // undeduped content sequence was byte-identical between native and
+  // SWTCON_LIBIMPL=1 runs even when the deduped comparison mismatched,
+  // because one run happened to interleave more/fewer idle ticks than the
+  // other in the same real-time gap).
+  if (idx == kInitFrameSlotIndex)
     return;
 
   // The ring slot index doesn't matter to the physical panel at all - it's
