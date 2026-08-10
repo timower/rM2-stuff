@@ -1,5 +1,6 @@
 #pragma once
 
+#include "rm2fb/SharedBuffer.h"
 #include "unistdpp/socket.h"
 #include <iomanip>
 #include <unistdpp/unistdpp.h>
@@ -86,6 +87,11 @@ struct Init {
   // True if this client manages its own swtcon and will send idle update
   // messages.
   bool ownSwtcon;
+  // Requested shared-buffer format - the server may grant a different
+  // one (e.g. clamp to the default for a non-ownSwtcon client whose
+  // buffer this server's own swtcon needs to decode) and replies with
+  // the granted format right after the fd (see Server::resume()).
+  FbFormat format = default_fb_format;
 };
 
 struct IdleUpdate {

@@ -253,6 +253,38 @@ in
     ];
   };
 
+  xochitl-latest = xochitl.override {
+    modules = [
+      ../modules/remarkable.nix
+      ../template/config.nix
+      { services.rm2fb.variant = "swtcon"; }
+      { virtualisation.rmEmuVersion = "3.27.1.0"; }
+      (
+        { pkgs, ... }:
+        {
+          programs.xochitl.extraPreloadLibraries = [
+            "${pkgs.rm2-stuff.ioctl_dump}/lib/libioctl-dump.so"
+          ];
+
+          # Test-only (the rtprio grant itself now lives in xochitl.nix,
+          # applied whenever services.rm2fb.variant is "swtcon" - it's real
+          # hardware behavior, not just a VM artifact): raise the core
+          # limit so a crash actually produces a coredump instead of
+          # "Resource limits disable core dumping", for debugging this test
+          # specifically.
+          security.pam.loginLimits = [
+            {
+              domain = "*";
+              type = "-";
+              item = "core";
+              value = "unlimited";
+            }
+          ];
+        }
+      )
+    ];
+  };
+
   xochitl-nouser = xochitl.override {
     modules = [
       ../modules/remarkable.nix

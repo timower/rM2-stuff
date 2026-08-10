@@ -71,9 +71,12 @@ struct FakeClient {
     REQUIRE(res.has_value());
   }
 
-  // Reads back the buffer fd the server sends in reply to Init - see
-  // SharedFB::recv(), which this mirrors without needing a whole SharedFB.
+  // Reads back the granted format followed by the buffer fd the server
+  // sends in reply to Init - see SharedFB::recv(), which this mirrors
+  // without needing a whole SharedFB.
   unistdpp::FD recvBuffer() {
+    auto format = sock.readAll<FbFormat>();
+    REQUIRE(format.has_value());
     auto fd = unistdpp::recvFD(sock);
     REQUIRE(fd.has_value());
     return unistdpp::FD(*fd);
@@ -276,8 +279,11 @@ TEST_CASE("Server replies to Init immediately, even when the switch itself "
   REQUIRE(front->pid == getpid());
   REQUIRE(front->pendingSwitchTarget == clientB.pid);
 
-  // Yet B must already have received its own buffer fd, sent right at
-  // Init instead of waiting for a resume() that never happened.
+  // Yet B must already have received its granted format and own buffer
+  // fd, sent right at Init instead of waiting for a resume() that never
+  // happened.
+  auto receivedFormat = clientBTestSide.readAll<FbFormat>();
+  REQUIRE(receivedFormat.has_value());
   auto receivedFd = unistdpp::recvFD(clientBTestSide);
   REQUIRE(receivedFd.has_value());
   unistdpp::FD received(*receivedFd);

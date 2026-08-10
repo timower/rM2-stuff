@@ -11,10 +11,11 @@
 //     installed only once inXochitl is confirmed (see __libc_start_main
 //     below - installing them any earlier, e.g. from a global constructor,
 //     would apply them to every process this library is preloaded into),
-//     redirect its own internal 16-bit working buffer / grayscale back
+//     redirect its own internal color working buffer / grayscale back
 //     buffer allocations into a SharedFB received from the rm2fb server,
-//     matched by exact size (fb_size/grayscale_size - a fixed hardware
-//     size, not per-xochitl-version) - and an ioctl hook that relays every
+//     matched by exact size (RGB565's fb_size pre-3.27, RGB32's larger
+//     size from 3.27 on, or grayscale_size for the back buffer - see
+//     mallocHook/callocHook) - and an ioctl hook that relays every
 //     blank/unblank transition to the server as an IdleUpdate message
 //     (rm2fb/Message.h) so it knows when it's safe to pause xochitl. The
 //     handful of spurious transitions during the one-time boot flash
@@ -50,6 +51,7 @@
 #include <iostream>
 #include <linux/fb.h>
 #include <linux/limits.h>
+#include <optional>
 #include <unistd.h>
 
 bool inXochitl = false; // NOLINT
@@ -85,7 +87,7 @@ getControlSocket() {
 // Sends Init to make sure the rm2fb server is listening and has started
 // the SWTCON, then receives the shared framebuffer.
 unistdpp::Result<void>
-doInit(SharedFB& fb, bool ownSwtcon) {
+doInit(SharedFB& fb, bool ownSwtcon, FbFormat format = default_fb_format) {
   if (fb.isValid()) {
     return {};
   }
@@ -96,7 +98,9 @@ doInit(SharedFB& fb, bool ownSwtcon) {
     std::exit(EXIT_FAILURE);
   }
 
-  return sendMessage(sock, UnixClientMsg{ Init{ .ownSwtcon = ownSwtcon } })
+  return sendMessage(
+           sock,
+           UnixClientMsg{ Init{ .ownSwtcon = ownSwtcon, .format = format } })
     .and_then([&] { return fb.recv(sock); })
     .or_else([&](auto err) {
       std::cerr << "Error sending: " << unistdpp::to_string(err) << "\n";
@@ -115,9 +119,9 @@ int g_realFbFd = -1;
 // degenerate empty-rect UpdateParams "init check" doInit() uses for
 // everyone else, then receives a SharedFB back via fd-passing.
 SharedFB&
-xochitlFb() {
-  static const bool ok = [] {
-    auto res = doInit(SharedFB::getInstance(), true);
+xochitlFb(FbFormat format = default_fb_format) {
+  static const bool ok = [format] {
+    auto res = doInit(SharedFB::getInstance(), true, format);
     if (!res) {
       std::cerr << "rm2fb: failed receiving shared framebuffer\n";
       return false;
@@ -133,13 +137,22 @@ xochitlFb() {
   return SharedFB::getInstance();
 }
 
-// One-shot: matches xochitl's own 16-bit working-buffer malloc (by exact,
-// hardware-fixed size), redirects it into the shared framebuffer, then
-// unhooks itself - same pattern as the old Version3.20.cpp mallocHook.
+// One-shot: matches xochitl's own working-buffer malloc by exact size -
+// RGB565 pre-3.27, RGB32 from 3.27 on (doc/swtcon_3.27_diff.md) - and
+// redirects it into the shared framebuffer, then unhooks itself - same
+// pattern as the old Version3.20.cpp mallocHook.
 void*
 mallocHook(void* (*orig)(size_t), size_t size) {
+  std::optional<PixelFormat> matched;
   if (size == fb_size) {
-    auto& fb = xochitlFb();
+    matched = PixelFormat::RGB565;
+  } else if (size == static_cast<size_t>(
+                       FbFormat{ .pixelFormat = PixelFormat::RGB32 }.size())) {
+    matched = PixelFormat::RGB32;
+  }
+
+  if (matched) {
+    auto& fb = xochitlFb(FbFormat{ .pixelFormat = *matched });
     if (fb.isValid()) {
       PreloadHook::getInstance().unhook<PreloadHook::Malloc>();
       return fb.getFb();

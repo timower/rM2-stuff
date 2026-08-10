@@ -131,6 +131,7 @@ TEST_CASE("AppWidget", "[rocket]") {
   const auto client = ControlInterface::Client{
     .pid = 12,
     .active = true,
+    .format = {},
     .name = "foo",
   };
 

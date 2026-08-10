@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <csignal>
 #include <optional>
+#include <sys/mman.h>
 #include <type_traits>
 #include <unistd.h>
 #include <variant>
@@ -44,6 +45,16 @@ erase_if(std::vector<T, Alloc>& c, Pred pred) {
   return r;
 }
 #endif
+// Lets std::visit take one lambda per alternative instead of a single
+// generic one with an if constexpr/using-T chain inside - see
+// readUnixSock() below.
+template<class... Ts>
+struct overloaded : Ts... {
+  using Ts::operator()...;
+};
+template<class... Ts>
+overloaded(Ts...) -> overloaded<Ts...>;
+
 constexpr auto tcp_port = 8888;
 
 // Guards against two rm2fb-server processes running concurrently.
@@ -170,6 +181,11 @@ struct UnixClient {
   // hand-off based on it.
   std::optional<bool> ownSwtcon;
 
+  // Shared-buffer format granted at Init time (readUnixSock()) - clamped
+  // to default_fb_format there unless ownSwtcon is true. Meaningless
+  // before ownSwtcon is set, same as ownSwtcon itself.
+  FbFormat format = default_fb_format;
+
   // True once this client has been front at least once. Used to skip
   // resume()'s resync flash the very first time a swtcon-owning client
   // becomes front - no point pushing its blank, freshly-allocated buffer
@@ -216,6 +232,13 @@ struct Server : ControlInterface {
   std::vector<unistdpp::FD> tcpClients;
 
   SharedFB& fb;
+
+  // A spare, unmapped, always-default-format fd - never given to any
+  // client. Populated by requestSwitch()'s NoFront branch (rescued from
+  // whichever buffer fb happened to be holding that nobody's using
+  // anymore, rather than a fresh allocation) and consumed/returned by
+  // resume()'s non-default-format resync conversion - see resume().
+  unistdpp::FD scratchBuffer;
 
   const AddressInfoBase* hookAddrs;
 
@@ -404,9 +427,6 @@ struct Server : ControlInterface {
   void resume(UnixClient& client) {
     std::cerr << "Resuming: " << client.pid << "\n";
 
-    fb.setFD(std::move(client.buffer));
-    fb.mmap();
-
     // Skip the resync flash only the very first time a swtcon-owning
     // client becomes front - it's about to draw its own real content via
     // its own swtcon immediately after taking over, so pushing its blank,
@@ -414,8 +434,9 @@ struct Server : ControlInterface {
     // other case (including this same client resuming again after a
     // pause()) needs the resync, to make sure the panel actually matches
     // this client's buffer content before it takes back control.
-    bool shouldUpdate = !(client.ownSwtcon == true && !client.hasBeenFront);
-    if (shouldUpdate) {
+    bool skipResync = client.ownSwtcon == true && !client.hasBeenFront;
+
+    auto resyncUpdate = [&] {
       doUpdate(UpdateParams{
         .y1 = 0,
         .x1 = 0,
@@ -426,6 +447,39 @@ struct Server : ControlInterface {
         .temperatureOverride = 0,
         .extraMode = 0,
       });
+    };
+
+    // This server's own swtcon can only decode the default RGB565
+    // format (doc/swtcon_3.27_diff.md) - it's bound once, permanently,
+    // to whatever address fb.getFb() has, and fb's later mmap() calls
+    // keep reusing that same address (MAP_FIXED) so normal updates stay
+    // zero-copy. For a granted non-default format, borrow the spare
+    // scratchBuffer as fb's backing instead, convert this client's real
+    // content into it (never touching the client's own buffer), flash
+    // that, then return scratchBuffer for next time before finally
+    // handing fb the client's real buffer below.
+    bool needsConversion =
+      !skipResync && client.format.pixelFormat != PixelFormat::RGB565;
+    if (needsConversion) {
+      fb.setFD(std::move(scratchBuffer), default_fb_format);
+      fb.mmap();
+      if (auto src = unistdpp::mmap(nullptr,
+                                    client.format.totalSize(),
+                                    PROT_READ,
+                                    MAP_SHARED,
+                                    client.buffer,
+                                    0)) {
+        convertToRGB565(client.format, src->get(), (uint16_t*)fb.getFb());
+      }
+      resyncUpdate();
+      scratchBuffer = fb.takeFD();
+    }
+
+    fb.setFD(std::move(client.buffer), client.format);
+    fb.mmap();
+
+    if (!skipResync && !needsConversion) {
+      resyncUpdate();
     }
 
     if (!client.dontPause) {
@@ -526,6 +580,16 @@ struct Server : ControlInterface {
 
     if (pid_t frontPid = focusPid(focus); frontPid != 0) {
       pause(frontPid);
+    } else if (std::holds_alternative<NoFront>(focus)) {
+      // fb currently holds a buffer nobody's using (the server's own
+      // startup buffer the first time this fires; a disconnected
+      // client's leftover buffer on any later NoFront) that resume()
+      // below would otherwise just close via fb.setFD() - rescue it
+      // into scratchBuffer instead, as a private, never-client-visible
+      // scratch target for the resync conversion flash (its content is
+      // always fully overwritten before use, so it doesn't matter whose
+      // leftover buffer it happens to be).
+      scratchBuffer = fb.takeFD();
     }
 
     resume(*targetIt);
@@ -541,6 +605,7 @@ struct Server : ControlInterface {
                      auto res = Client{
                        .pid = client.pid,
                        .active = client.pid == frontPid,
+                       .format = client.format,
                        .name = {},
                      };
                      auto name = getProcName(client.pid).value_or("<error>");
@@ -719,33 +784,42 @@ struct Server : ControlInterface {
     recvMessage<UnixClientMsg>(client.sock)
       .and_then([&](auto msg) -> unistdpp::Result<void> {
         return std::visit(
-          [&](auto& m) -> unistdpp::Result<void> {
-            using T = std::decay_t<decltype(m)>;
-            if constexpr (std::is_same_v<T, Init>) {
+          overloaded{
+            [&](Init& m) -> unistdpp::Result<void> {
               std::cerr << "Got init check!\n";
 
               client.ownSwtcon = m.ownSwtcon;
-              allocBlankBuffer()
-                .transform([&](auto buf) { client.buffer = std::move(buf); })
-                .or_else([](auto err) {
-                  std::cerr << "Error allocating client buffer: "
+              client.format = clampToSupported(m.format, m.ownSwtcon);
+
+              auto buf = allocBlankBuffer(client.format);
+              if (!buf) {
+                // No usable buffer for this client to ever become front
+                // with - drop it instead of replying, rather than let
+                // requestSwitch() below promote a client with no buffer.
+                std::cerr << "Error allocating client buffer: "
+                          << unistdpp::to_string(buf.error())
+                          << " - dropping client\n";
+                client.sock.close();
+                return {};
+              }
+              client.buffer = std::move(*buf);
+
+              // Reply with the granted format followed by this client's
+              // own dedicated buffer right away instead of waiting for
+              // it to actually become front (that used to happen in
+              // resume(), gated on hasBeenFront) - a client can mmap and
+              // even pre-render into it immediately; it just can't push
+              // real panel updates until requestSwitch() below actually
+              // promotes it (see the UpdateParams handling further down,
+              // which drops updates from a non-front client).
+              client.sock.writeAll(client.format)
+                .and_then([&] {
+                  return unistdpp::sendFDTo(client.sock, client.buffer.fd);
+                })
+                .or_else([&](auto err) {
+                  std::cerr << "Error sending fb to client: "
                             << unistdpp::to_string(err) << "\n";
                 });
-
-              // Reply with this client's own dedicated buffer right away
-              // instead of waiting for it to actually become front (that
-              // used to happen in resume(), gated on hasBeenFront) - a
-              // client can mmap and even pre-render into it immediately;
-              // it just can't push real panel updates until requestSwitch()
-              // below actually promotes it (see the UpdateParams handling
-              // further down, which drops updates from a non-front client).
-              if (client.buffer.isValid()) {
-                unistdpp::sendFDTo(client.sock, client.buffer.fd)
-                  .or_else([&](auto err) {
-                    std::cerr << "Error sending fb to client: "
-                              << unistdpp::to_string(err) << "\n";
-                  });
-              }
 
               // requestSwitch() handles everything else (pausing the old
               // front if any, buffer handoff, suspendForXochitl if this
@@ -754,7 +828,8 @@ struct Server : ControlInterface {
               // instead of doing any of it here.
               requestSwitch(client.pid);
               return {};
-            } else if constexpr (std::is_same_v<T, UpdateParams>) {
+            },
+            [&](UpdateParams& m) -> unistdpp::Result<void> {
               if (client.pid != focusPid(focus)) {
                 // Only the front client's updates should reach the shared
                 // swtcon instance. It may currently be suspended (a
@@ -766,8 +841,8 @@ struct Server : ControlInterface {
               }
               bool res = doUpdate(m);
               return client.sock.writeAll(res);
-            } else {
-              // IdleUpdate.
+            },
+            [&](IdleUpdate& m) -> unistdpp::Result<void> {
               auto* front = std::get_if<ClientDrivenFront>(&focus);
               if (!front || front->pid != client.pid) {
                 if (client.ownSwtcon != true) {
@@ -785,7 +860,7 @@ struct Server : ControlInterface {
               }
 
               return {};
-            }
+            },
           },
           msg);
       })

@@ -18,11 +18,13 @@ public:
       {
         .pid = 1,
         .active = true,
+        .format = {},
         .name = "test1",
       },
       {
         .pid = 2,
         .active = false,
+        .format = {},
         .name = "test2",
       },
     };

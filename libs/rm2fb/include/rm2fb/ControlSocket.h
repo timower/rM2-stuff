@@ -1,5 +1,7 @@
 #pragma once
 
+#include "rm2fb/SharedBuffer.h"
+
 #include <unistdpp/socket.h>
 
 constexpr std::string_view control_sock_addr = "/var/run/rm2fb.control.sock";
@@ -8,6 +10,8 @@ struct ControlInterface {
   struct Client {
     pid_t pid;
     bool active;
+
+    FbFormat format;
 
     char name[32];
   };

@@ -90,13 +90,28 @@ doTCPUpdate(unistdpp::FD& fd, const SharedFB& fb, const UpdateParams& params) {
   int size = width * height;
   std::vector<uint16_t> buffer(size);
 
+  // This wire protocol (and every client speaking it, e.g. rm2fb-test) only
+  // ever understood RGB565 - rather than teach all of them a second pixel
+  // format, convert here on the server, which already knows how to (see
+  // rgb32ToRgb565()/convertToRGB565() for the resync-flash path).
+  const FbFormat format = fb.getFormat();
   for (int row = 0; row < height; row++) {
     int fbRow = row + params.y1;
 
-    memcpy(&buffer[row * width],
-           // NOLINTNEXTLINE
-           static_cast<uint16_t*>(fb.getFb()) + fbRow * fb_width + params.x1,
-           width * sizeof(uint16_t));
+    if (format.pixelFormat == PixelFormat::RGB565) {
+      memcpy(&buffer[row * width],
+             // NOLINTNEXTLINE
+             static_cast<uint16_t*>(fb.getFb()) + fbRow * format.width +
+               params.x1,
+             width * sizeof(uint16_t));
+    } else {
+      // NOLINTNEXTLINE
+      const auto* src =
+        static_cast<uint32_t*>(fb.getFb()) + fbRow * format.width + params.x1;
+      for (int col = 0; col < width; col++) {
+        buffer[row * width + col] = rgb32ToRgb565(src[col]);
+      }
+    }
   }
 
   const auto writeSize = size * sizeof(uint16_t);

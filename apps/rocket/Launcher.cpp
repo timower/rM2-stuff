@@ -265,7 +265,7 @@ LauncherState::requestClients() {
     }
 
     auto& fb = fbBuffers[client.pid];
-    fb.setFD(unistdpp::FD(*fd));
+    fb.setFD(unistdpp::FD(*fd), client.format);
     fb.mmap();
   }
 

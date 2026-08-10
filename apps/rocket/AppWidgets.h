@@ -32,7 +32,10 @@ public:
 
     const Canvas& canvas =
       fb != nullptr && fb->isValid() && fb->getFb() != nullptr
-        ? Canvas((uint8_t*)fb->getFb(), fb_width, fb_height, fb_pixel_size)
+        ? Canvas((uint8_t*)fb->getFb(),
+                 client.format.width,
+                 client.format.height,
+                 client.format.pixelSize())
         : getMissingImage().canvas;
 
     return container(

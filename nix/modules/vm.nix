@@ -14,7 +14,7 @@ let
     pkgsLinux = pkgs.pkgsBuildBuild;
   };
 
-  inherit (emu-pkg) rm-emu;
+  rm-emu = emu-pkg."rm-emu-${cfg.rmEmuVersion}";
 
   vm-config = extendModules {
     modules = [ { systemd.targets.sleep.enable = false; } ];
@@ -119,6 +119,18 @@ in
       description = ''
         Package set to use for the host-specific packages of the VM runner.
         Changing this to e.g. a Darwin package set allows running NixOS VMs on Darwin.
+      '';
+    };
+
+    virtualisation.rmEmuVersion = lib.mkOption {
+      type = lib.types.str;
+      default = "3.23.0.64";
+      example = "3.27.1.0";
+      description = ''
+        reMarkable firmware version (a key of nix/pkgs/rm-emu/versions.nix)
+        whose extracted rootfs/kernel the emulator VM boots - this is what
+        determines which real (closed-source) /usr/bin/xochitl binary
+        programs.xochitl actually runs.
       '';
     };
   };
