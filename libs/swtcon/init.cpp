@@ -11,6 +11,7 @@
 #include <fstream>
 #include <iostream>
 #include <linux/fb.h>
+#include <mutex>
 #include <sys/file.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -924,11 +925,8 @@ refresh_temperature_cache() {
   if (!read_temperature_raw(swtcon_state()->hwmonTempPath.c_str(), &raw_value))
     return;
 
-  pthread_mutex_t* mutex = temperature_mutex();
-  float* cached_temp = cached_temperature_ptr();
-  pthread_mutex_lock(mutex);
-  *cached_temp = (float)raw_value - 2.0f;
-  pthread_mutex_unlock(mutex);
+  std::lock_guard<std::mutex> lock(*temperature_mutex());
+  *cached_temperature_ptr() = (float)raw_value - 2.0f;
 }
 
 void

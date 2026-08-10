@@ -23,9 +23,9 @@
 
 // Mirrors worker_thread_func (0x3ae38): the panel-driving frame-pacing loop.
 // Started by address today (kWorkerThreadFuncAddr in swtcon.cpp); this is
-// its native replacement, same pthread entry-point signature.
-void*
-worker_thread_func(void* arg);
+// its native replacement, run as a std::thread entry point.
+void
+worker_thread_func();
 
 // Mirrors FUN_0003b4b4 (0x3b4b4): requests the worker thread's flash
 // sequence (worker_thread_func step 6) and blocks until it
@@ -38,10 +38,10 @@ request_flash_and_wait();
 // Mirrors display_thread_func (0x3d2ac): the WorkItem/dependency-list state
 // machine - see swtcon_architecture.md §6.2 for the full byte-verified
 // breakdown. Started by address today (kDisplayThreadFuncAddr in
-// swtcon.cpp); this is its native replacement, same pthread entry-point
-// signature.
-void*
-display_thread_func(void* arg);
+// swtcon.cpp); this is its native replacement, run as a std::thread entry
+// point.
+void
+display_thread_func();
 
 // Wakes worker_thread_func's suspend gate (queue->workerCond in display.cpp)
 // without forcing framebuffer_globals()->nIsFbBlanked=1 the way the public

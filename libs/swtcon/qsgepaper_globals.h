@@ -11,8 +11,8 @@
 // Every struct below models a run of the library's .bss that we've
 // confirmed is *fully contiguous* by exact address arithmetic between two
 // independently-verified fields (sizes cross-checked against the real
-// on-target sizeof() of pthread_mutex_t/pthread_cond_t/sem_t/pthread_t - see
-// the static_asserts). Gaps between known fields are real - genuine
+// on-target field sizes - see the static_asserts). Gaps between known
+// fields are real - genuine
 // unreversed library state - but their *size* is exact (next_known_addr -
 // prev_addr - sizeof(prev)), not guessed, so they're safe to model as
 // untouched reserved padding. Globals that are isolated (no other used
@@ -26,8 +26,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <linux/fb.h>
-#include <pthread.h>
-#include <semaphore.h>
+#include <mutex>
 #include <vector>
 
 #include "swtcon.h"
@@ -248,7 +247,7 @@ FramebufferGlobals*
 framebuffer_globals();
 float*
 cached_temperature_ptr();
-pthread_mutex_t*
+std::mutex*
 temperature_mutex();
 int*
 seq_counter_ptr();

@@ -1,12 +1,11 @@
 #include "update.h"
 #include "init.h"
 #include "swtcon_libimpl.h"
+#include <chrono>
 #include <cstring>
 #include <iterator>
-#include <pthread.h>
-#include <semaphore.h>
+#include <mutex>
 #include <thread>
-#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -199,12 +198,8 @@ clamp_update_rect(const XYRect& in) {
 // output directly instead of re-polling hwmon ourselves.
 float
 get_current_temperature() {
-  pthread_mutex_t* mutex = temperature_mutex();
-  float* cached_temp = cached_temperature_ptr();
-  pthread_mutex_lock(mutex);
-  float temp = *cached_temp;
-  pthread_mutex_unlock(mutex);
-  return temp;
+  std::lock_guard<std::mutex> lock(*temperature_mutex());
+  return *cached_temperature_ptr();
 }
 
 // Native reimplementation of FUN_000400a8, the piece-builder used internally
@@ -600,7 +595,7 @@ swtcon_lock() {
   }
 #endif // SWTCON_32BIT_ABI_CHECK
   // LockSwapMutex: take the update-queue mutex.
-  pthread_mutex_lock(&update_queue_globals()->updateQueueMutex);
+  update_queue_globals()->updateQueueMutex.lock();
 }
 
 void
@@ -706,8 +701,8 @@ swtcon_unlock_post() {
   queue->accumList.clear();
   queue->accumFlag = 0;
 
-  pthread_mutex_unlock(&queue->updateQueueMutex);
-  sem_post(&queue->displayThreadSem); // wake the display thread
+  queue->updateQueueMutex.unlock();
+  queue->displayThreadSem.release(); // wake the display thread
 }
 
 void
@@ -721,6 +716,6 @@ swtcon_wait() {
   // WaitForUpdate: spin until shutdown or the batch queue drains.
   auto* queue = update_queue_globals();
   while (queue->shutdownRequested == 0 && !queue->listIncomingUpdates.empty()) {
-    usleep(100);
+    std::this_thread::sleep_for(std::chrono::microseconds(100));
   }
 }

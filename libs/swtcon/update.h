@@ -13,14 +13,16 @@
 // because of implicit compiler padding - there isn't any.
 
 #include <atomic>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <list>
 #include <memory>
+#include <mutex>
 #include <new>
-#include <pthread.h>
-#include <semaphore.h>
+#include <semaphore>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "init.h" // ModeEntry
@@ -319,21 +321,27 @@ struct UpdateQueueGlobals {
   std::list<WorkItem> listProcessedUpdates;
   int32_t curFrame;
   int32_t targetFrame;
-  pthread_mutex_t workerCondMutex;
-  pthread_cond_t workerCond;
+  std::mutex workerCondMutex;
+  std::condition_variable workerCond;
   uint8_t flashRequested; // byte flag, not int32
-  pthread_mutex_t displayTimingMutex;
+  std::mutex displayTimingMutex;
   Timespec64 lastPanTimestamp; // stamped alongside every nLastPannedFrame
                                // write, under displayTimingMutex
-  sem_t displayThreadSem;
+  // Not binary_semaphore/counting_semaphore<1>: worker_thread_func's
+  // catch-up loop and back-to-back swtcon_unlock_post() calls can both
+  // release() multiple times before the display thread's next acquire()
+  // drains them - the old sem_t this replaces was unbounded (SEM_VALUE_MAX)
+  // for the same reason, and release() past max() is a precondition
+  // violation for a bounded counting_semaphore.
+  std::counting_semaphore<> displayThreadSem{ 0 };
   int32_t timeVar;
   int32_t workerThreadShutdown;
   std::vector<ModeEntry*> waveform;
   int32_t shutdownRequested;
   std::list<Batch> listIncomingUpdates;
-  pthread_mutex_t updateQueueMutex;
-  pthread_t displayThread;
-  pthread_t workerThread;
+  std::mutex updateQueueMutex;
+  std::thread displayThread;
+  std::thread workerThread;
   void* dataBuffer;
   void* backBuffer;
   // Whether dataBuffer/backBuffer were malloc'd/calloc'd by init_statebuffer
@@ -348,7 +356,7 @@ struct UpdateQueueGlobals {
   std::list<WorkItem> accumList;
   int16_t accumFlag;
 
-  // Whether swtcon_init actually pthread_create'd the threads
+  // Whether swtcon_init actually started the worker/display threads
   // (InitParams::startThreads) - swtcon_shutdown must only join those.
   bool threadsStarted = false;
 };
@@ -373,9 +381,7 @@ struct SwtconState {
   // see cached_temperature_ptr's old comment (git blame) for the full
   // real-vs-emulator divergence this default fixes.
   float cachedTemperature = 25.0f;
-  // Zero-initialized, matching the library's own .bss state before
-  // swtcon_init explicitly pthread_mutex_init's it.
-  pthread_mutex_t temperatureMutex{};
+  std::mutex temperatureMutex;
   int seqCounter = 0;
 
   // backBuffer dirty-gate array: one bucket per frame-slot ring position
@@ -397,8 +403,8 @@ struct SwtconState {
   std::string hwmonTempPath;
 
   // Re-initializes every field to its default - including members that
-  // aren't copy/move-assignable (std::atomic, the pthread primitives), which
-  // is why this is a destroy+placement-new rather than `*this =
+  // aren't copy/move-assignable (std::atomic, std::mutex/condition_variable/
+  // thread), which is why this is a destroy+placement-new rather than `*this =
   // SwtconState{}`. Called once at the top of swtcon_init so a second
   // swtcon_init() in the same process (every unit test does this) never
   // sees stale bookkeeping left over from a prior instance.
@@ -439,7 +445,7 @@ cached_temperature_ptr() {
   return &swtcon_state()->cachedTemperature;
 }
 
-inline pthread_mutex_t*
+inline std::mutex*
 temperature_mutex() {
   return &swtcon_state()->temperatureMutex;
 }

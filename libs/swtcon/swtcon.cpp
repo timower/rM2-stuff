@@ -1,19 +1,20 @@
 #include "swtcon.h"
 #include "swtcon_libimpl.h"
 #include <cerrno>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <iostream>
 #include <linux/fb.h>
-#include <pthread.h>
-#include <semaphore.h>
+#include <pthread.h> // pthread_setschedparam - no std:: equivalent for SCHED_FIFO
 #include <string>
 #include <sys/file.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/time.h>
+#include <thread>
 #include <unistd.h>
 
 #include "display.h"
@@ -236,12 +237,6 @@ swtcon_init(const InitParams& params) {
     upload_lut_to_frame_slot(frame_buffer_addr(i));
   }
 
-  // Phase 7: temperature_mutex() is natively-owned zero-initialized storage
-  // now (previously the library's own .bss, already valid as an
-  // all-zero glibc fast mutex without an explicit init) - init it
-  // explicitly like every other mutex here, before the temperature-polling
-  // thread or get_current_temperature can touch it.
-  pthread_mutex_init(temperature_mutex(), nullptr);
   init_temperature_sensor();
 
   // Prime the display exactly as qsgepaper_init does. init_framebuffer leaves
@@ -256,29 +251,22 @@ swtcon_init(const InitParams& params) {
   gettimeofday(&tv, nullptr);
   queue->timeVar = (int)tv.tv_sec;
 
-  pthread_mutex_init(&queue->displayTimingMutex, nullptr);
-
   prime_display();
-
-  // Needed by swtcon_lock/update/unlock_post regardless of startThreads.
-  pthread_mutex_init(&queue->updateQueueMutex, nullptr);
-  sem_init(&queue->displayThreadSem, 0, 0);
-  pthread_mutex_init(&queue->workerCondMutex, nullptr);
-  pthread_cond_init(&queue->workerCond, nullptr);
 
   if (params.startThreads) {
     std::cout << "Starting threads natively..." << std::endl;
 
-    pthread_create(&queue->workerThread, nullptr, worker_thread_func, nullptr);
-    pthread_create(
-      &queue->displayThread, nullptr, display_thread_func, nullptr);
+    queue->workerThread = std::thread(worker_thread_func);
+    queue->displayThread = std::thread(display_thread_func);
     queue->threadsStarted = true;
 
     sched_param param;
     param.__sched_priority = 99;
-    pthread_setschedparam(queue->workerThread, SCHED_FIFO, &param);
+    pthread_setschedparam(
+      queue->workerThread.native_handle(), SCHED_FIFO, &param);
     param.__sched_priority = 98;
-    pthread_setschedparam(queue->displayThread, SCHED_FIFO, &param);
+    pthread_setschedparam(
+      queue->displayThread.native_handle(), SCHED_FIFO, &param);
 
     // EPFramebufferSwtcon::initialize (0x38e30) calls qsgepaper_init and
     // then FUN_0003b4b4 - a startup flash of the panel, blocking until it
@@ -389,7 +377,7 @@ swtcon_shutdown(uintptr_t state_ptr_or_zero) {
   auto* queue = update_queue_globals();
 
   // Skip straight to teardown if InitParams::startThreads was false -
-  // workerThread/displayThread were never pthread_create'd.
+  // workerThread/displayThread were never started.
   if (queue->threadsStarted) {
     std::cout << "swtcon_shutdown: waiting for updates to complete..."
               << std::endl;
@@ -398,26 +386,27 @@ swtcon_shutdown(uintptr_t state_ptr_or_zero) {
     while (queue->shutdownRequested == 0 &&
            (!queue->listIncomingUpdates.empty() ||
             !queue->listProcessedUpdates.empty())) {
-      usleep(100);
+      std::this_thread::sleep_for(std::chrono::microseconds(100));
     }
 
     queue->shutdownRequested = 1;
-    sem_post(&queue->displayThreadSem);
-    pthread_join(queue->displayThread, nullptr);
+    queue->displayThreadSem.release();
+    queue->displayThread.join();
 
     std::cout << "swtcon_shutdown: waiting for display to finish..."
               << std::endl;
     queue->workerThreadShutdown = 1;
-    pthread_mutex_lock(&queue->workerCondMutex);
-    pthread_cond_broadcast(&queue->workerCond);
-    pthread_mutex_unlock(&queue->workerCondMutex);
+    {
+      std::lock_guard<std::mutex> lock(queue->workerCondMutex);
+      queue->workerCond.notify_all();
+    }
     // Whether the worker thread is parked in swtcon_suspend()'s gate (step
     // 1) or the frame-target wait (step 5), both block on this same
     // workerCond/workerCondMutex now, so the one broadcast above reaches
     // whichever it's actually in. No need for swtcon_resume()'s
     // nIsFbBlanked=1 force here either way - both waits re-check
     // workerThreadShutdown (already set above) and exit immediately.
-    pthread_join(queue->workerThread, nullptr);
+    queue->workerThread.join();
   }
 
   if (state_ptr_or_zero != 0) {

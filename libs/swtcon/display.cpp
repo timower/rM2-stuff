@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -10,11 +12,9 @@
 #include <ctime>
 #include <iostream>
 #include <iterator>
-#include <pthread.h>
-#include <semaphore.h>
+#include <mutex>
 #include <sys/time.h>
 #include <thread>
-#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -67,11 +67,12 @@ pan_and_advance_frame(UpdateQueueGlobals* queue,
   else
     pan_to_frame(frame_idx);
 
-  pthread_mutex_lock(&queue->displayTimingMutex);
-  stamp_last_pan_timestamp(queue);
-  cursor->nLastPannedFrame = queue->curFrame - 1;
-  queue->curFrame = queue->curFrame + 1;
-  pthread_mutex_unlock(&queue->displayTimingMutex);
+  {
+    std::lock_guard<std::mutex> lock(queue->displayTimingMutex);
+    stamp_last_pan_timestamp(queue);
+    cursor->nLastPannedFrame = queue->curFrame - 1;
+    queue->curFrame = queue->curFrame + 1;
+  }
 }
 
 // swtcon_suspend/swtcon_resume's gate - see swtcon.h for the full
@@ -103,7 +104,7 @@ swtcon_suspend() {
   while (queue->workerThreadShutdown == 0 &&
          (queue->curFrame != queue->targetFrame ||
           !queue->listProcessedUpdates.empty()))
-    usleep(100);
+    std::this_thread::sleep_for(std::chrono::microseconds(100));
 
   swtcon_state()->workerSuspended.store(true, std::memory_order_relaxed);
 
@@ -121,9 +122,10 @@ swtcon_suspend() {
   // here kicks the worker thread out of that wait immediately so the new
   // break condition added to that loop (and the re-check right after it)
   // can catch the suspend request before any hardware-touching step runs.
-  pthread_mutex_lock(&queue->workerCondMutex);
-  pthread_cond_broadcast(&queue->workerCond);
-  pthread_mutex_unlock(&queue->workerCondMutex);
+  {
+    std::lock_guard<std::mutex> lock(queue->workerCondMutex);
+    queue->workerCond.notify_all();
+  }
 }
 
 // See display.h - only wakes the gate, doesn't touch nIsFbBlanked.
@@ -131,9 +133,8 @@ void
 wake_suspend_gate() {
   swtcon_state()->workerSuspended.store(false, std::memory_order_relaxed);
   auto* queue = update_queue_globals();
-  pthread_mutex_lock(&queue->workerCondMutex);
-  pthread_cond_broadcast(&queue->workerCond);
-  pthread_mutex_unlock(&queue->workerCondMutex);
+  std::lock_guard<std::mutex> lock(queue->workerCondMutex);
+  queue->workerCond.notify_all();
 }
 
 void
@@ -163,8 +164,8 @@ swtcon_resume() {
   wake_suspend_gate();
 }
 
-void*
-worker_thread_func(void*) {
+void
+worker_thread_func() {
   auto* queue = update_queue_globals();
   auto* cursor = frame_cursor_globals();
 
@@ -176,14 +177,15 @@ worker_thread_func(void*) {
     // wakeup from some unrelated broadcast (new work, flash, shutdown) just
     // re-checks this loop's own predicate and goes back to waiting if still
     // suspended, same as any other condvar user.
-    pthread_mutex_lock(&queue->workerCondMutex);
-    while (swtcon_state()->workerSuspended.load(std::memory_order_relaxed) &&
-           queue->workerThreadShutdown == 0)
-      pthread_cond_wait(&queue->workerCond, &queue->workerCondMutex);
-    pthread_mutex_unlock(&queue->workerCondMutex);
+    {
+      std::unique_lock<std::mutex> lock(queue->workerCondMutex);
+      while (swtcon_state()->workerSuspended.load(std::memory_order_relaxed) &&
+             queue->workerThreadShutdown == 0)
+        queue->workerCond.wait(lock);
+    }
 
     if (queue->workerThreadShutdown != 0)
-      pthread_exit(nullptr);
+      return;
 
     cursor->bWorkerThreadBusy = 1;
 
@@ -193,14 +195,13 @@ worker_thread_func(void*) {
     if (!is_fb_blanked()) {
       pan_to_frame(kInitFrameSlotIndex);
       pan_to_frame(kInitFrameSlotIndex);
-      pthread_mutex_lock(&queue->displayTimingMutex);
+      std::lock_guard<std::mutex> lock(queue->displayTimingMutex);
       stamp_last_pan_timestamp(queue);
       cursor->nLastPannedFrame = queue->curFrame - 1;
-      pthread_mutex_unlock(&queue->displayTimingMutex);
     }
 
     // 3. Wake the display thread once per worker tick.
-    sem_post(&queue->displayThreadSem);
+    queue->displayThreadSem.release();
 
     // 4. Periodic reprime, every 60s (recomputes g_time_var fresh rather
     // than incrementing it, so a long stall doesn't cause a burst of
@@ -216,50 +217,48 @@ worker_thread_func(void*) {
     // 5. Wait for the display thread to advance the target frame, a flash
     // request, or shutdown - bounded to 3s so a stuck target still lets us
     // blank the panel on timeout instead of waiting forever.
-    pthread_mutex_lock(&queue->workerCondMutex);
-    struct timespec deadline;
-    bool have_deadline = clock_gettime(CLOCK_REALTIME, &deadline) == 0;
-    if (have_deadline)
-      deadline.tv_sec += 3;
-    bool want_timed = have_deadline;
+    {
+      std::unique_lock<std::mutex> lock(queue->workerCondMutex);
+      auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(3);
+      bool want_timed = true;
 
-    if (queue->curFrame == queue->targetFrame) {
-      for (;;) {
-        if (queue->workerThreadShutdown != 0)
-          break;
-        if (queue->flashRequested != 0)
-          break;
-        // Not part of the byte-verified original algorithm (see this
-        // function's banner comment) - swtcon_suspend()/swtcon_resume()
-        // are this project's own addition, with no analog in the real
-        // library. Bail out of the wait as soon as a suspend is
-        // requested, same as the shutdown/flash checks above, so the
-        // re-check right after this loop (below) can skip steps 7-8
-        // instead of running one more real pan first.
-        if (is_worker_suspended())
-          break;
+      if (queue->curFrame == queue->targetFrame) {
+        for (;;) {
+          if (queue->workerThreadShutdown != 0)
+            break;
+          if (queue->flashRequested != 0)
+            break;
+          // Not part of the byte-verified original algorithm (see this
+          // function's banner comment) - swtcon_suspend()/swtcon_resume()
+          // are this project's own addition, with no analog in the real
+          // library. Bail out of the wait as soon as a suspend is
+          // requested, same as the shutdown/flash checks above, so the
+          // re-check right after this loop (below) can skip steps 7-8
+          // instead of running one more real pan first.
+          if (is_worker_suspended())
+            break;
 
-        if (!want_timed) {
-          pthread_cond_wait(&queue->workerCond, &queue->workerCondMutex);
+          if (!want_timed) {
+            queue->workerCond.wait(lock);
+            if (queue->curFrame != queue->targetFrame)
+              break;
+            continue;
+          }
+
+          auto status = queue->workerCond.wait_until(lock, deadline);
+          if (status == std::cv_status::timeout) {
+            blank_fb();
+            want_timed = false;
+            if (queue->curFrame != queue->targetFrame)
+              break;
+            continue;
+          }
           if (queue->curFrame != queue->targetFrame)
             break;
-          continue;
         }
-
-        int r = pthread_cond_timedwait(
-          &queue->workerCond, &queue->workerCondMutex, &deadline);
-        if (r == ETIMEDOUT) {
-          blank_fb();
-          want_timed = false;
-          if (queue->curFrame != queue->targetFrame)
-            break;
-          continue;
-        }
-        if (queue->curFrame != queue->targetFrame)
-          break;
       }
     }
-    pthread_mutex_unlock(&queue->workerCondMutex);
 
     // 6.
     cursor->bWorkerThreadBusy = 0;
@@ -319,18 +318,16 @@ worker_thread_func(void*) {
 
     // 9.
     if (queue->workerThreadShutdown != 0)
-      pthread_exit(nullptr);
+      return;
 
     // 10. Catch-up: pan/advance/wake the display thread in a tight loop
     // until curFrame catches up to whatever target the display thread has
     // set.
     while (queue->curFrame < queue->targetFrame) {
       pan_and_advance_frame(queue, cursor, /*unblank=*/false);
-      sem_post(&queue->displayThreadSem);
+      queue->displayThreadSem.release();
     }
   }
-
-  return nullptr;
 }
 
 // Mirrors FUN_0003b4b4: sets flashRequested, wakes the worker thread (it
@@ -344,12 +341,13 @@ request_flash_and_wait() {
   auto* queue = update_queue_globals();
 
   queue->flashRequested = 1;
-  pthread_mutex_lock(&queue->workerCondMutex);
-  pthread_cond_broadcast(&queue->workerCond);
-  pthread_mutex_unlock(&queue->workerCondMutex);
+  {
+    std::lock_guard<std::mutex> lock(queue->workerCondMutex);
+    queue->workerCond.notify_all();
+  }
 
   while (queue->flashRequested != 0)
-    usleep(100);
+    std::this_thread::sleep_for(std::chrono::microseconds(100));
 }
 
 // ---------------------------------------------------------------------
@@ -949,9 +947,8 @@ advance_work_item_frames(WorkItem* item) {
   if (new_frame_cursor <= queue->targetFrame)
     return;
   queue->targetFrame = new_frame_cursor;
-  pthread_mutex_lock(&queue->workerCondMutex);
-  pthread_cond_broadcast(&queue->workerCond);
-  pthread_mutex_unlock(&queue->workerCondMutex);
+  std::lock_guard<std::mutex> lock(queue->workerCondMutex);
+  queue->workerCond.notify_all();
 }
 
 // Mirrors display_thread_func (0x3d2ac) - see swtcon_architecture.md §6.2
@@ -961,13 +958,13 @@ advance_work_item_frames(WorkItem* item) {
 // updateQueueMutex is held across the ENTIRE intake+dispatch+commit
 // sequence for every batch this tick - not dropped before the heavy
 // dispatch_processed_regions call as an earlier draft of this port assumed).
-void*
-display_thread_func(void*) {
+void
+display_thread_func() {
   auto* queue = update_queue_globals();
   auto* cursor = frame_cursor_globals();
 
   for (;;) {
-    sem_wait(&queue->displayThreadSem);
+    queue->displayThreadSem.acquire();
 
     // 1. Stale-row cleanup.
     stale_row_cleanup();
@@ -981,8 +978,7 @@ display_thread_func(void*) {
       break;
 
     // 3-6. Incoming-batch intake, gate-check, dispatch, commit.
-    if (!incoming_empty &&
-        pthread_mutex_trylock(&queue->updateQueueMutex) == 0) {
+    if (!incoming_empty && queue->updateQueueMutex.try_lock()) {
       for (auto batch_it = queue->listIncomingUpdates.begin();
            batch_it != queue->listIncomingUpdates.end();) {
         if (batch_it->subList.empty()) {
@@ -1042,18 +1038,20 @@ display_thread_func(void*) {
                 (int32_t)(((int64_t)min_x0 + 1) * kColumnPaceUsPerColumnX1000 /
                           1000);
 
-              pthread_mutex_lock(&queue->displayTimingMutex);
-              struct timespec now;
-              clock_gettime(CLOCK_MONOTONIC_RAW, &now);
-              int32_t base_frame =
-                (queue->curFrame - 1 == cursor->nLastPannedFrame)
-                  ? queue->curFrame
-                  : queue->curFrame - 1;
-              int64_t elapsed_us =
-                (int64_t)(now.tv_sec - queue->lastPanTimestamp.tv_sec) *
-                  1000000 +
-                (now.tv_nsec - queue->lastPanTimestamp.tv_nsec) / 1000;
-              pthread_mutex_unlock(&queue->displayTimingMutex);
+              int32_t base_frame;
+              int64_t elapsed_us;
+              {
+                std::lock_guard<std::mutex> lock(queue->displayTimingMutex);
+                struct timespec now;
+                clock_gettime(CLOCK_MONOTONIC_RAW, &now);
+                base_frame = (queue->curFrame - 1 == cursor->nLastPannedFrame)
+                               ? queue->curFrame
+                               : queue->curFrame - 1;
+                elapsed_us =
+                  (int64_t)(now.tv_sec - queue->lastPanTimestamp.tv_sec) *
+                    1000000 +
+                  (now.tv_nsec - queue->lastPanTimestamp.tv_nsec) / 1000;
+              }
 
               if (elapsed_us > (int64_t)kPanelFrameTickUs + 1) {
                 elapsed_us = 0;
@@ -1099,7 +1097,7 @@ display_thread_func(void*) {
           ++batch_it;
         }
       }
-      pthread_mutex_unlock(&queue->updateQueueMutex);
+      queue->updateQueueMutex.unlock();
     }
 
     // 7. Bottom-of-loop sweep: keep playing back any processed item that
@@ -1109,6 +1107,4 @@ display_thread_func(void*) {
         advance_work_item_frames(&item);
     }
   }
-
-  return nullptr;
 }

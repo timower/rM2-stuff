@@ -43,6 +43,10 @@ add_executable(playback-kernel-bench playback_kernel_bench.cpp
                                       ${SWTCON_LIB_DIR}/playback_kernel.s ${SWTCON_LIB_DIR}/playback_kernel_aligned.s)
 target_link_libraries(playback-kernel-bench dl)
 target_include_directories(playback-kernel-bench PRIVATE ${SWTCON_LIB_DIR} ${SWTCON_LIB_DIR}/include)
+# Compiles update.h directly (see comment above) rather than linking the
+# swtcon target, so it needs the same C++20 requirement (std::counting_semaphore
+# in UpdateQueueGlobals) spelled out here too.
+target_compile_features(playback-kernel-bench PRIVATE cxx_std_20)
 
 install(
   TARGETS qsgepaper-test

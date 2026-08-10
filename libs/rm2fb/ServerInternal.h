@@ -29,6 +29,12 @@
 
 using namespace unistdpp;
 
+// Polyfill for std::erase_if(vector, pred), added to <vector> in C++20 -
+// this target still builds as C++17 in some configurations (others now pull
+// in C++20 transitively via swtcon), and under C++20 std::erase_if is
+// already found via ADL at the unqualified call sites below, ambiguous
+// against this same overload - so only define it pre-C++20.
+#if __cplusplus < 202002L
 template<class T, class Alloc, class Pred>
 constexpr typename std::vector<T, Alloc>::size_type
 erase_if(std::vector<T, Alloc>& c, Pred pred) {
@@ -37,6 +43,7 @@ erase_if(std::vector<T, Alloc>& c, Pred pred) {
   c.erase(it, c.end());
   return r;
 }
+#endif
 constexpr auto tcp_port = 8888;
 
 // Guards against two rm2fb-server processes running concurrently.
