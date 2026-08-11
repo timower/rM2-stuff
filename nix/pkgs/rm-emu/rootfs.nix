@@ -28,7 +28,7 @@ let
   base_url = "https://updates-download.cloud.remarkable.engineering/build/reMarkable%20Device%20Beta/RM110"; # Default URL for v2 versions
   base_url_v3 = "https://updates-download.cloud.remarkable.engineering/build/reMarkable%20Device/reMarkable2";
 
-  isNewFormat = (builtins.compareVersions fw_version "3.11.2.5") == 1;
+  isNewFormat = isLatest || (builtins.compareVersions fw_version "3.11.2.5") == 1;
 
   url =
     if isNewFormat then
@@ -66,12 +66,15 @@ let
 
   rootfsImageNew = runCommand "rm-rootfs.ext4" { nativeBuildInputs = [ cpio ]; } ''
     cpio -i --file ${updateArchive}
-    gzip -dc ${lib.strings.removeSuffix ".swu" fileName}.ext4.gz > $out
+    images=(*.ext4.gz)
+    [ "''${#images[@]}" -eq 1 ] || {
+      echo "expected exactly one *.ext4.gz in update archive, found: ''${images[*]}" >&2
+      exit 1
+    }
+    gzip -dc "''${images[0]}" > $out
   '';
 
   rootfsImage = if isNewFormat then rootfsImageNew else rootfsImageOld;
-
-  needsPatchDhcpcd = (builtins.compareVersions fw_version "3.12.0.0") != 1;
 
 in
 vmTools.runInLinuxVM (
@@ -136,7 +139,9 @@ vmTools.runInLinuxVM (
       ln -fs /dev/null /mnt/root/etc/systemd/system/dropbear-usb1.socket
       ln -fs /dev/null /mnt/root/etc/systemd/system/dropbear-wlan.socket
 
-      ${lib.optionalString needsPatchDhcpcd "sed -i 's/wlan/eth/' /mnt/root/lib/systemd/system/dhcpcd.service"}
+      if [ -e /mnt/root/lib/systemd/system/dhcpcd.service ]; then
+        sed -i 's/wlan/eth/' /mnt/root/lib/systemd/system/dhcpcd.service
+      fi
 
       # 3.22 stopped shipping dropbear.socket on all interfaces.
       if ! [ -e /mnt/root/lib/systemd/system/dropbear.socket ]; then

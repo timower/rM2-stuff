@@ -68,7 +68,7 @@ in
           "swtcon-server"
           "swtcon"
         ];
-        default = "hook";
+        default = "swtcon";
         description = ''
           Which rm2fb server/client implementation to run:
 

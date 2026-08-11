@@ -114,7 +114,7 @@ in
         after the rm2fb client library. Test/debugging use only - e.g.
         libioctl-dump.so to mock /dev/fb0 for the services.rm2fb.variant =
         "swtcon" coexistence client in an environment without a real
-        framebuffer device (see nix/tests/default.nix's xochitl-swtcon) -
+        framebuffer device (see nix/tests/default.nix's xochitlSwtconFbMock) -
         not meant for a real on-device configuration.
       '';
     };
