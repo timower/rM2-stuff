@@ -14,6 +14,7 @@
     ./rm2-display.nix
     ./rm2-stuff.nix
     ./xochitl.nix
+    ./xochitl-env.nix
     ./koreader.nix
     ./overlay.nix
     ./console.nix

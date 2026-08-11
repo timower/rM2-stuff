@@ -1,111 +1,17 @@
 {
   lib,
-
-  writeShellApplication,
+  rustPlatform,
   util-linux,
-  coreutils,
-
-  preloadRm2fb ? false,
-  # Full paths of libraries to LD_PRELOAD, in order - only meaningful when
-  # preloadRm2fb is true. Defaults to the standard by-address hooking
-  # client; callers pick the coexistence variant (librm2fb_client_swtcon.so)
-  # and/or append extra libraries (e.g. libioctl-dump.so, to mock /dev/fb0
-  # in an environment without real hardware) via this list - see
-  # nix/modules/xochitl.nix.
-  preloadLibs ? [ "/run/current-system/sw/lib/librm2fb_client.so" ],
-  extraEnv ? { },
 }:
-let
-  envAttr = {
-    PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin";
-    HOME = "/home/root";
-  }
-  // extraEnv
-  // lib.optionalAttrs preloadRm2fb {
-    LD_PRELOAD = lib.concatStringsSep ":" preloadLibs;
-  };
+rustPlatform.buildRustPackage {
+  pname = "xochitl-env";
+  version = "0.1.0";
+  src = ./xochitl-env-rust;
+  cargoLock.lockFile = ./xochitl-env-rust/Cargo.lock;
 
-  # Generate '${FOO+FOO="$FOO"}' which ensures it's not an error if the variable isn't set.
-  getValue =
-    name: value: if value == null then "\${${name}+${name}=\"\$${name}\"}" else "${name}=\"${value}\"";
+  # Baked in as a compile-time constant (see src/main.rs) - $PATH can't be
+  # trusted in a setuid context.
+  BLKID_PATH = lib.getExe' util-linux "blkid";
 
-  envList = lib.attrsets.mapAttrsToList getValue envAttr;
-  envStr = lib.concatStringsSep " " envList;
-in
-writeShellApplication rec {
-  name = "xochitl-env";
-
-  runtimeInputs = [
-    util-linux
-    coreutils
-  ];
-
-  text = ''
-    self="${placeholder "out"}/bin/${name}"
-    if [ "$EUID" -ne 0 ]; then
-      echo "Not running as root. Re-executing with sudo..."
-      exec /run/wrappers/bin/sudo "$self" "$@"
-    fi
-
-    # Unshare the mount namespace, so mounts don't leak and are cleaned up.
-    # Adapted from nixos-enter.
-    if [ -z "''${UNSHARED:-}" ]; then
-      export UNSHARED=1
-      exec -a "$1" unshare --mount -- "$self" "$@"
-    else
-      mount --make-rprivate /
-    fi
-
-    root=/run/xochitlEnv
-
-    mkdir -p $root
-
-    # Mount partitions, read only to prevent changes.
-    if [ -f /run/active-partition ]; then
-      activePartition=$(cat /run/active-partition)
-    else
-      activePartition="/dev/mmcblk2p2"
-    fi
-
-    # Mount active root
-    mount "$activePartition" $root
-    mkdir -p $root/nix # On first boot, /nix might not exist.
-    mount -o remount,ro,bind $root
-
-    mount -o ro /dev/mmcblk2p1 $root/var/lib/uboot
-
-    # Mount /home rw, to allow document access.
-    mount /dev/mmcblk2p4 $root/home
-    if [ -n "''${SUDO_HOME:-}" ]; then
-      # Run blkid on /dev/mmcblk2p4 as root, otherwise xochitl fails.
-      blkid /dev/mmcblk2p4
-      mount -o remount,ro,bind $root/home
-      mount -o bind "$SUDO_HOME" $root/home/root
-    fi
-
-    # Mount special fs
-    mount --rbind /dev $root/dev
-    mount --rbind /sys $root/sys
-    mount --rbind /proc $root/proc
-
-    # Mount nix stuff, so the LD_PRELOAD library can be found. Recursive
-    # (--rbind, like /dev,/sys,/proc below): a plain bind doesn't propagate
-    # /nix/store when it's itself a separate mount (e.g. the emulator's
-    # virtio-9p share), leaving it looking empty inside the chroot.
-    mount --rbind /nix $root/nix
-    mount -o remount,ro,bind $root/nix
-
-    # /tmp needed for xochitl, and the rm-sync service
-    # rm.synchronizer: Synchronizer's libraryLock path="/tmp/library-enumeration.lock"
-    mount -o bind /tmp $root/tmp
-    # Mount /run for rm2fb.sock and dbus access.
-    mount -o bind /run $root/run
-
-    # Start xochitl
-    if [ -z "''${SUDO_USER:-}" ]; then
-      exec chroot $root /usr/bin/env -i ${envStr} "$@"
-    else
-      exec chroot --userspec="$SUDO_USER" $root /usr/bin/env -i ${envStr} "$@"
-    fi
-  '';
+  meta.mainProgram = "xochitl-env";
 }

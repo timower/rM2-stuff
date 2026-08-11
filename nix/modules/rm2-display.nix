@@ -8,20 +8,20 @@ let
   rm2-pkgs = pkgs.rm2-stuff;
   rm2-server-pkg = rm2-pkgs.rm2display;
 
-  xochitl-env = pkgs.callPackage ../pkgs/xochitlEnv.nix {
-    # No need to add the client for the rm2fb server.
-    preloadRm2fb = false;
-
-    # Pass through the socket activation env vars.
-    extraEnv = {
-      NOTIFY_SOCKET = null;
-      LISTEN_PID = null;
-      LISTEN_FDS = null;
-      LISTEN_FDNAMES = null;
-
-      LD_LIBRARY_PATH = "/usr/lib";
-    };
-  };
+  xochitl-env = "${config.security.wrapperDir}/xochitl-env";
+  xochitl-env-args = lib.escapeShellArgs (
+    lib.concatMap (name: [ "--env" name ]) [
+      # Pass through the socket activation env vars.
+      "NOTIFY_SOCKET"
+      "LISTEN_PID"
+      "LISTEN_FDS"
+      "LISTEN_FDNAMES"
+    ]
+    ++ [
+      "--env"
+      "LD_LIBRARY_PATH=/usr/lib"
+    ]
+  );
 
   kill-rm2fb = pkgs.writeShellScript "kill-rm2fb" ''
     export PATH="${
@@ -52,7 +52,7 @@ let
     if config.services.rm2fb.variant != "hook" then
       lib.getExe' rm2-server-pkg "rm2fb_server_swtcon"
     else
-      "${lib.getExe xochitl-env} ${lib.getExe' rm2-server-pkg "rm2fb_server"}";
+      "${xochitl-env} ${xochitl-env-args} -- ${lib.getExe' rm2-server-pkg "rm2fb_server"}";
 in
 {
   options = {

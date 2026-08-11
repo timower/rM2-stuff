@@ -9,13 +9,33 @@ let
   # "swtcon" variant needs xochitl to preload the coexistence client
   # (ClientSwtcon.cpp) instead of the by-address hooking one, so its own
   # internal swtcon runs untouched rather than being hooked at all.
-  xochitl-env = pkgs.callPackage ../pkgs/xochitlEnv.nix {
-    preloadRm2fb = true;
-    preloadLibs = [
-      "/run/current-system/sw/lib/librm2fb_client.so"
-    ]
-    ++ config.programs.xochitl.extraPreloadLibraries;
-  };
+  xochitl-env = "${config.security.wrapperDir}/xochitl-env";
+  xochitl-env-args =
+    extraArgs:
+    lib.escapeShellArgs (
+      [
+        "--env"
+        "LD_PRELOAD=${
+          lib.concatStringsSep ":" (
+            [ "/run/current-system/sw/lib/librm2fb_client.so" ] ++ config.programs.xochitl.extraPreloadLibraries
+          )
+        }"
+      ]
+      ++ extraArgs
+    );
+
+  # The "swtcon" variant's whole point is letting xochitl's real, unmodified
+  # code run (unlike "hook", fully intercepted by address before it'd reach
+  # a scheduling call), including its own pthread_setschedparam(SCHED_FIFO)
+  # call for its display threads - which fails ("Unable to set thread
+  # priority: Operation not permitted") and crashes without a raised
+  # RLIMIT_RTPRIO. xochitl-env raises it (while still root, before its own
+  # privilege-drop) rather than granting it PAM-wide, since it's the only
+  # process that needs it.
+  xochitlSwtconArgs = lib.optionals (config.services.rm2fb.variant == "swtcon") [
+    "--rtprio"
+    "99"
+  ];
   xochitl = pkgs.writeShellApplication {
     name = "xochitl";
     runtimeInputs = with pkgs; [
@@ -34,7 +54,7 @@ let
         ctlCmd="systemctl --user"
       fi
       $ctlCmd start rm-sync
-      ${lib.getExe xochitl-env} /usr/bin/xochitl
+      ${xochitl-env} ${xochitl-env-args xochitlSwtconArgs} -- /usr/bin/xochitl
       $ctlCmd stop rm-sync
     '';
   };
@@ -78,7 +98,7 @@ let
       # running otherwise.
       Type = "simple";
       BusName = "no.remarkable.sync";
-      ExecStart = "${lib.getExe xochitl-env} /usr/bin/rm-sync";
+      ExecStart = "${xochitl-env} ${xochitl-env-args [ ]} -- /usr/bin/rm-sync";
     };
   };
 in
@@ -102,44 +122,12 @@ in
 
   config = lib.mkIf config.programs.xochitl.enable {
 
-    # We need sudo to start the xochitl-env script as root.
-    # Security wrappers doesn't work with shell scripts.
-    security.sudo = {
-      enable = true;
-      extraRules = [
-        {
-          users = [ "ALL" ];
-          commands = [
-            {
-              command = lib.getExe xochitl-env;
-              options = [ "NOPASSWD" ];
-            }
-          ];
-        }
-      ];
-    };
-
     # xochitl ultimately runs as an unprivileged user here (rocket.service's
-    # User=, still in effect after xochitl-env's sudo+chroot --userspec
+    # User=, still in effect after xochitl-env's setuid+chroot privilege-drop
     # dance drops back to it) - fine for the "hook" variant, since xochitl's
     # own display code never actually runs there (fully intercepted by
-    # address before it would reach a scheduling call). The "swtcon"
-    # variant's whole point is letting xochitl's real, unmodified code run
-    # instead, including its own pthread_setschedparam(SCHED_FIFO) call for
-    # its display threads - which fails ("Unable to set thread priority:
-    # Operation not permitted") and crashes without this. RLIMIT_RTPRIO
-    # lets an unprivileged process use real-time scheduling up to this
-    # value without needing CAP_SYS_NICE - this is real hardware behavior,
-    # not just a VM/test artifact, since the same de-privileged launch path
-    # is used either way.
-    security.pam.loginLimits = lib.mkIf (config.services.rm2fb.variant == "swtcon") [
-      {
-        domain = "*";
-        type = "-";
-        item = "rtprio";
-        value = "99";
-      }
-    ];
+    # address before it would reach a scheduling call). See
+    # xochitlSwtconArgs above for why "swtcon" needs more than that.
 
     environment = {
       etc."draft/xochitl.draft".text = ''
@@ -154,8 +142,9 @@ in
         hash = "sha256-ODuDGAe8VpZzyF9qDRbRC8tIYDQu4MjtTKb8dR9UZ8k=";
       };
 
+      # xochitl-env itself doesn't need to be listed here - it's a setuid
+      # wrapper already on PATH via security-wrappers' wrapperDir.
       systemPackages = [
-        xochitl-env
         xochitl
       ];
     };
