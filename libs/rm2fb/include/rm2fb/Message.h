@@ -72,7 +72,7 @@ using ClientMsg = std::variant<Input, GetUpdate, PowerButton>;
 //
 // Init: the first message any client sends, replacing the old
 // x1==x2&&y1==y2 UpdateParams sentinel - the server replies with the
-// shared framebuffer's fd (SharedFB::send/recv).
+// shared framebuffer's fd (Buffer::send/recv).
 //
 // IdleUpdate: sent by xochitl's client library (ClientSwtcon.cpp) after
 // Init, whenever its own swtcon blanks/unblanks the panel past the

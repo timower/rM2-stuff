@@ -72,8 +72,8 @@ struct FakeClient {
   }
 
   // Reads back the granted format followed by the buffer fd the server
-  // sends in reply to Init - see SharedFB::recv(), which this mirrors
-  // without needing a whole SharedFB.
+  // sends in reply to Init - see Buffer::recv(), which this mirrors
+  // without needing a whole Buffer.
   unistdpp::FD recvBuffer() {
     auto format = sock.readAll<FbFormat>();
     REQUIRE(format.has_value());

@@ -44,7 +44,7 @@ struct AddressInfo : public AddressInfoBase {
     , waitForStart(waitForStart) {}
 
   void initThreads() const final {
-    const auto& fb = SharedFB::getInstance();
+    const auto& fb = getGlobalFrameBuffer();
     if (!fb.isValid()) {
       return;
     }

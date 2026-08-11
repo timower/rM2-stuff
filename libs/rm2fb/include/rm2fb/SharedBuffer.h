@@ -61,7 +61,7 @@ struct FbFormat {
 constexpr FbFormat default_fb_format{};
 
 // The largest format any client can currently request (see readUnixSock()'s
-// clamp in ServerInternal.h) - SharedFB::mmap() reserves this much virtual
+// clamp in ServerInternal.h) - Buffer::mmap() reserves this much virtual
 // address space up front so a later swap to a bigger format at the same
 // fixed address never has to grow into memory it doesn't own. Update this
 // if PixelFormat ever grows a layout wider than RGB32.
@@ -75,8 +75,8 @@ constexpr FbFormat max_fb_format{ .pixelFormat = PixelFormat::RGB32 };
 FbFormat
 clampToSupported(FbFormat requested, bool ownSwtcon);
 
-// Allocates a fresh, blank buffer with the same size/layout as a SharedFB
-// of the given format, but not tied to a SharedFB instance and not left
+// Allocates a fresh, blank buffer with the same size/layout as a Buffer
+// of the given format, but not tied to a Buffer instance and not left
 // mapped - for handing out to a client that isn't (yet, or ever) the
 // currently-active one, see UnixClient::buffer in Server.cpp.
 unistdpp::Result<unistdpp::FD>
@@ -97,7 +97,7 @@ rgb32ToRgb565(uint32_t pixel);
 void
 convertToRGB565(const FbFormat& srcFormat, const void* src, uint16_t* dst);
 
-struct SharedFB {
+struct Buffer {
   bool isValid() const { return fd.isValid(); }
   int getFd() const { return fd.fd; }
   // Format travels with the fd so mmap() always knows how many bytes the
@@ -125,10 +125,13 @@ struct SharedFB {
   unistdpp::Result<void> alloc(FbFormat fmt = default_fb_format);
   unistdpp::Result<void> send(const unistdpp::FD& client) const;
 
-  static SharedFB& getInstance();
-
 private:
   unistdpp::FD fd;
   unistdpp::MmapPtr mem;
   FbFormat format;
 };
+
+// The process's one active framebuffer (server's front buffer, or a
+// client's /dev/fb0 shim) - use a plain Buffer for anything else.
+Buffer&
+getGlobalFrameBuffer();

@@ -62,7 +62,7 @@ setupHooks() {
 // Sends Init to make sure the rm2fb server is listening and has started
 // the SWTCON.
 unistdpp::Result<void>
-doInit(SharedFB& fb) {
+doInit(Buffer& fb) {
   if (fb.isValid()) {
     return {};
   }
@@ -105,7 +105,7 @@ extern "C" {
 int
 open64(const char* pathname, int flags, mode_t mode = 0) {
   if (!inXochitl && pathname == std::string("/dev/fb0")) {
-    auto& fb = SharedFB::getInstance();
+    auto& fb = getGlobalFrameBuffer();
     unistdpp::fatalOnError(doInit(fb), "init FB failed");
     return fb.getFd();
   }
@@ -119,7 +119,7 @@ open64(const char* pathname, int flags, mode_t mode = 0) {
 int
 open(const char* pathname, int flags, mode_t mode = 0) {
   if (!inXochitl && pathname == std::string("/dev/fb0")) {
-    auto& fb = SharedFB::getInstance();
+    auto& fb = getGlobalFrameBuffer();
     unistdpp::fatalOnError(doInit(fb), "init FB failed");
     return fb.getFd();
   }
@@ -132,7 +132,7 @@ open(const char* pathname, int flags, mode_t mode = 0) {
 
 int
 close(int fd) {
-  if (const auto& fb = SharedFB::getInstance();
+  if (const auto& fb = getGlobalFrameBuffer();
       fb.isValid() && fd == fb.getFd()) {
     return 0;
   }
@@ -143,7 +143,7 @@ close(int fd) {
 
 int
 ioctl(int fd, unsigned long request, char* ptr) {
-  if (const auto& fb = SharedFB::getInstance();
+  if (const auto& fb = getGlobalFrameBuffer();
       fb.isValid() && fd == fb.getFd()) {
     return handleIOCTL(request, ptr);
   }
@@ -156,7 +156,7 @@ ioctl(int fd, unsigned long request, char* ptr) {
 
 int
 __ioctl_time64(int fd, unsigned long int request, char* ptr) { // NOLINT
-  if (const auto& fb = SharedFB::getInstance();
+  if (const auto& fb = getGlobalFrameBuffer();
       fb.isValid() && fd == fb.getFd()) {
     return handleIOCTL(request, ptr);
   }
@@ -237,7 +237,7 @@ __libc_start_main(int (*mainFn)(int, char**, char**), // NOLINT
   if (std::string_view(pathBuffer, size) == "/usr/bin/xochitl") {
     inXochitl = true;
 
-    auto& fb = SharedFB::getInstance();
+    auto& fb = getGlobalFrameBuffer();
     unistdpp::fatalOnError(doInit(fb), "Error making shared FB");
     unistdpp::fatalOnError(fb.mmap(), "Failed to map FB");
 

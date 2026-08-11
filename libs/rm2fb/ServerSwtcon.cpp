@@ -59,7 +59,7 @@ struct AddressInfo : public AddressInfoBase {
   }
 
   void initThreads() const final {
-    const auto& fb = SharedFB::getInstance();
+    const auto& fb = getGlobalFrameBuffer();
     // xochitl runs its own, separate swtcon instance (unmodified, via
     // ClientSwtcon.cpp) and always takes /tmp/epd.lock itself - skip it
     // here rather than fight over it, and rely on suspendForXochitl()/

@@ -12,7 +12,7 @@
 //     below - installing them any earlier, e.g. from a global constructor,
 //     would apply them to every process this library is preloaded into),
 //     redirect its own internal color working buffer / grayscale back
-//     buffer allocations into a SharedFB received from the rm2fb server,
+//     buffer allocations into a Buffer received from the rm2fb server,
 //     matched by exact size (RGB565's fb_size pre-3.27, RGB32's larger
 //     size from 3.27 on, or grayscale_size for the back buffer - see
 //     mallocHook/callocHook) - and an ioctl hook that relays every
@@ -87,7 +87,7 @@ getControlSocket() {
 // Sends Init to make sure the rm2fb server is listening and has started
 // the SWTCON, then receives the shared framebuffer.
 unistdpp::Result<void>
-doInit(SharedFB& fb, bool ownSwtcon, FbFormat format = default_fb_format) {
+doInit(Buffer& fb, bool ownSwtcon, FbFormat format = default_fb_format) {
   if (fb.isValid()) {
     return {};
   }
@@ -117,16 +117,16 @@ int g_realFbFd = -1;
 
 // Lazily handshaken on first matching allocation - sends the same
 // degenerate empty-rect UpdateParams "init check" doInit() uses for
-// everyone else, then receives a SharedFB back via fd-passing.
-SharedFB&
+// everyone else, then receives a Buffer back via fd-passing.
+Buffer&
 xochitlFb(FbFormat format = default_fb_format) {
   static const bool ok = [format] {
-    auto res = doInit(SharedFB::getInstance(), true, format);
+    auto res = doInit(getGlobalFrameBuffer(), true, format);
     if (!res) {
       std::cerr << "rm2fb: failed receiving shared framebuffer\n";
       return false;
     }
-    auto mapRes = SharedFB::getInstance().mmap();
+    auto mapRes = getGlobalFrameBuffer().mmap();
     if (!mapRes) {
       std::cerr << "rm2fb: failed mapping shared framebuffer\n";
       return false;
@@ -134,7 +134,7 @@ xochitlFb(FbFormat format = default_fb_format) {
     return true;
   }();
   (void)ok;
-  return SharedFB::getInstance();
+  return getGlobalFrameBuffer();
 }
 
 // One-shot: matches xochitl's own working-buffer malloc by exact size -
@@ -243,7 +243,7 @@ extern "C" {
 int
 open64(const char* pathname, int flags, mode_t mode = 0) {
   if (!inXochitl && pathname == std::string("/dev/fb0")) {
-    auto& fb = SharedFB::getInstance();
+    auto& fb = getGlobalFrameBuffer();
     unistdpp::fatalOnError(doInit(fb, false), "init FB failed");
     return fb.getFd();
   }
@@ -261,7 +261,7 @@ open64(const char* pathname, int flags, mode_t mode = 0) {
 int
 open(const char* pathname, int flags, mode_t mode = 0) {
   if (!inXochitl && pathname == std::string("/dev/fb0")) {
-    auto& fb = SharedFB::getInstance();
+    auto& fb = getGlobalFrameBuffer();
     unistdpp::fatalOnError(doInit(fb, false), "init FB failed");
     return fb.getFd();
   }
@@ -278,7 +278,7 @@ open(const char* pathname, int flags, mode_t mode = 0) {
 
 int
 close(int fd) {
-  if (const auto& fb = SharedFB::getInstance();
+  if (const auto& fb = getGlobalFrameBuffer();
       fb.isValid() && fd == fb.getFd()) {
     return 0;
   }
@@ -292,7 +292,7 @@ ioctl(int fd, unsigned long request, char* ptr) {
   if (inXochitl && fd == g_realFbFd)
     handleBlankTransition(request, ptr);
 
-  if (const auto& fb = SharedFB::getInstance();
+  if (const auto& fb = getGlobalFrameBuffer();
       fb.isValid() && fd == fb.getFd()) {
     return handleIOCTL(request, ptr);
   }
@@ -308,7 +308,7 @@ __ioctl_time64(int fd, unsigned long int request, char* ptr) { // NOLINT
   if (inXochitl && fd == g_realFbFd)
     handleBlankTransition(request, ptr);
 
-  if (const auto& fb = SharedFB::getInstance();
+  if (const auto& fb = getGlobalFrameBuffer();
       fb.isValid() && fd == fb.getFd()) {
     return handleIOCTL(request, ptr);
   }

@@ -80,22 +80,22 @@ bool
 checkDebugMode();
 
 bool
-doTCPUpdate(unistdpp::FD& fd, const SharedFB& fb, const UpdateParams& params);
+doTCPUpdate(unistdpp::FD& fd, const Buffer& fb, const UpdateParams& params);
 
 void
-handleMsg(const SharedFB& fb,
+handleMsg(const Buffer& fb,
           unistdpp::FD& fd,
           const AllUinputDevices& devs,
           GetUpdate msg);
 
 void
-handleMsg(const SharedFB& fb,
+handleMsg(const Buffer& fb,
           unistdpp::FD& fd,
           const AllUinputDevices& devs,
           const Input& msg);
 
 void
-handleMsg(const SharedFB& fb,
+handleMsg(const Buffer& fb,
           unistdpp::FD& fd,
           const AllUinputDevices& devs,
           const PowerButton& msg);
@@ -231,7 +231,7 @@ struct Server : ControlInterface {
   std::vector<UnixClient> unixClients;
   std::vector<unistdpp::FD> tcpClients;
 
-  SharedFB& fb;
+  Buffer& fb;
 
   // A spare, unmapped, always-default-format fd - never given to any
   // client. Populated by requestSwitch()'s NoFront branch (rescued from
@@ -344,7 +344,7 @@ struct Server : ControlInterface {
     const ProcessControl& processControl = defaultProcessControl())
     : serverLockFd(acquireServerLock(lockPath))
     , controlServer(*this)
-    , fb(SharedFB::getInstance())
+    , fb(getGlobalFrameBuffer())
     , processControl(processControl) {
 
     unistdpp::fatalOnError(fb.alloc(), "Failed to allocated FB");

@@ -30,7 +30,7 @@ allocBlankBuffer(FbFormat format) {
   }
   TRY(unistdpp::ftruncate(fd, format.totalSize()));
 
-  // Short-lived mapping just to zero it out - unlike SharedFB::mmap(),
+  // Short-lived mapping just to zero it out - unlike Buffer::mmap(),
   // this one isn't the fixed, currently-active shared address, so it's
   // unmapped again as soon as it goes out of scope.
   auto mem = TRY(unistdpp::mmap(
@@ -59,25 +59,25 @@ convertToRGB565(const FbFormat& srcFormat, const void* src, uint16_t* dst) {
 }
 
 unistdpp::Result<void>
-SharedFB::alloc(FbFormat fmt) {
+Buffer::alloc(FbFormat fmt) {
   setFD(TRY(allocBlankBuffer(fmt)), fmt);
   return mmap();
 }
 
 unistdpp::Result<void>
-SharedFB::send(const unistdpp::FD& client) const {
+Buffer::send(const unistdpp::FD& client) const {
   return unistdpp::sendFDTo(client, fd.fd);
 }
 
 unistdpp::Result<void>
-SharedFB::recv(const unistdpp::FD& client) {
+Buffer::recv(const unistdpp::FD& client) {
   format = TRY(client.readAll<FbFormat>());
   fd = unistdpp::FD(TRY(unistdpp::recvFD(client)));
   return {};
 }
 
 unistdpp::Result<void>
-SharedFB::mmap() {
+Buffer::mmap() {
   void* addr;
   if (mem) {
     addr = mem.get();
@@ -125,8 +125,8 @@ SharedFB::mmap() {
   return {};
 }
 
-SharedFB&
-SharedFB::getInstance() {
-  static SharedFB instance;
+Buffer&
+getGlobalFrameBuffer() {
+  static Buffer instance;
   return instance;
 }

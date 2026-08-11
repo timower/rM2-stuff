@@ -27,7 +27,7 @@ struct ImageInfo {
 int
 createThreadsHook(ImageInfo* info) {
   puts("HOOK: Create threads called!");
-  const auto& fb = SharedFB::getInstance();
+  const auto& fb = getGlobalFrameBuffer();
   info->width = fb_width;
   info->height = fb_height;
   info->stride = fb_width;
@@ -57,7 +57,7 @@ void*
 mallocHook(void* (*orig)(size_t), size_t size) {
   if (size == 0x503580) {
     std::cout << "HOOK: malloc redirected to shared FB\n";
-    const auto& fb = SharedFB::getInstance();
+    const auto& fb = getGlobalFrameBuffer();
     PreloadHook::getInstance().unhook<PreloadHook::Malloc>();
     return fb.getFb();
   }
@@ -69,7 +69,7 @@ void*
 callocHook(void* (*orig)(size_t, size_t), size_t size, size_t count) {
   if (size == 0x281ac0 && count == 1) {
     std::cout << "HOOK: calloc redirected to shared FB\n";
-    const auto& fb = SharedFB::getInstance();
+    const auto& fb = getGlobalFrameBuffer();
     PreloadHook::getInstance().unhook<PreloadHook::Calloc>();
     return fb.getGrayBuffer();
   }

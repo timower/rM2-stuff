@@ -14,7 +14,7 @@ getMissingImage();
 class RunningAppWidget : public rmlib::StatelessWidget<RunningAppWidget> {
 public:
   RunningAppWidget(const ControlClient::Client& client,
-                   const SharedFB* fb,
+                   const Buffer* fb,
                    rmlib::Callback onTap,
                    rmlib::Callback onKill,
                    bool isCurrent,
@@ -49,7 +49,7 @@ public:
 
 private:
   const ControlClient::Client& client;
-  const SharedFB* fb;
+  const Buffer* fb;
   rmlib::Callback onTap;
   rmlib::Callback onKill;
   rmlib::Rotation rotation;

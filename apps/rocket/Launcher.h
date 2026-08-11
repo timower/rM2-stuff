@@ -182,7 +182,7 @@ private:
   std::vector<App> apps;
 
   std::vector<ControlInterface::Client> fbClients;
-  std::unordered_map<pid_t, SharedFB> fbBuffers;
+  std::unordered_map<pid_t, Buffer> fbBuffers;
 
   unistdpp::FD signalPipe;
 

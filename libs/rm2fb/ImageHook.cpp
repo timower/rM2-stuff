@@ -11,7 +11,7 @@ qimageHook(void (*orig)(void*, int, int, int),
            int format) {
   static bool firstAlloc = true;
 
-  if (const auto& fb = SharedFB::getInstance();
+  if (const auto& fb = getGlobalFrameBuffer();
       width == fb_width && height == fb_height && firstAlloc && fb.isValid()) {
     static const auto q_image_ctor_with_buffer = (void (*)(
       void*, uint8_t*, int32_t, int32_t, int32_t, int, void (*)(void*), void*))

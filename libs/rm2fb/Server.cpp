@@ -78,7 +78,7 @@ checkDebugMode() {
 }
 
 bool
-doTCPUpdate(unistdpp::FD& fd, const SharedFB& fb, const UpdateParams& params) {
+doTCPUpdate(unistdpp::FD& fd, const Buffer& fb, const UpdateParams& params) {
   if (auto res = fd.writeAll(params); !res) {
     std::cerr << "Error writing: " << to_string(res.error()) << "\n";
     fd.close();
@@ -126,7 +126,7 @@ doTCPUpdate(unistdpp::FD& fd, const SharedFB& fb, const UpdateParams& params) {
 }
 
 void
-handleMsg(const SharedFB& fb,
+handleMsg(const Buffer& fb,
           unistdpp::FD& fd,
           const AllUinputDevices& devs,
           GetUpdate msg) {
@@ -144,7 +144,7 @@ handleMsg(const SharedFB& fb,
 }
 
 void
-handleMsg(const SharedFB& fb,
+handleMsg(const Buffer& fb,
           unistdpp::FD& fd,
           const AllUinputDevices& devs,
           const Input& msg) {
@@ -157,7 +157,7 @@ handleMsg(const SharedFB& fb,
 }
 
 void
-handleMsg(const SharedFB& fb,
+handleMsg(const Buffer& fb,
           unistdpp::FD& fd,
           const AllUinputDevices& devs,
           const PowerButton& msg) {

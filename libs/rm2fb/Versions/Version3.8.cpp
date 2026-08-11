@@ -27,7 +27,7 @@ struct ImageInfo {
 int
 createThreadsHook(ImageInfo* info) {
   puts("HOOK: Create threads called!");
-  const auto& fb = SharedFB::getInstance();
+  const auto& fb = getGlobalFrameBuffer();
   info->width = fb_width;
   info->height = fb_height;
   info->stride = fb_width;
@@ -46,7 +46,7 @@ void*
 mallocHook(void* (*orig)(size_t), size_t size) {
   if (size == 0x503580) {
     std::cout << "HOOK: malloc redirected to shared FB\n";
-    const auto& fb = SharedFB::getInstance();
+    const auto& fb = getGlobalFrameBuffer();
     PreloadHook::getInstance().unhook<PreloadHook::Malloc>();
     return fb.getFb();
   }
@@ -136,7 +136,7 @@ struct AddressInfo : public AddressInfoBase {
     ImageInfo info{};
     createThreads.call<void*, ImageInfo*>(&info);
     assert([&] {
-      const auto& fb = SharedFB::getInstance();
+      const auto& fb = getGlobalFrameBuffer();
       return info.data == fb.getFb();
     }() && "Malloc wasn't hooked?");
     waitForInit();
