@@ -8,7 +8,6 @@
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
-#include <fstream>
 #include <iostream>
 #include <linux/fb.h>
 #include <mutex>
@@ -38,11 +37,6 @@
 //                                   LUT, 128 temperature entries x 0x88 bytes)
 //                                   read by the render kernel FUN_0004e7b8 as
 //                                   uVar40*0x88 + base.
-
-LUTEntry::~LUTEntry() {
-  if (data)
-    free(data); // Using free() since malloc() was used
-}
 
 int
 create_pid_file() {
@@ -226,46 +220,46 @@ init_framebuffer_with_fd(const FbInitParams& fb_info, int fd) {
 // immediates are byte-position encoded: #0x410000 == 0x00410000, #0x20000 ==
 // 0x00020000, etc.
 void
-init_lut_sub(uint32_t* param_1, int param_2) {
-  uint32_t* puVar3 = param_1;
-  uint32_t* puVar5 = param_1 + 0x104;
-  while (puVar3 != puVar5) {
-    puVar3[0] = 0x410000;
-    puVar3[1] = 0x410000;
-    puVar3[2] = 0x410000;
-    puVar3[3] = 0x410000;
-    puVar3 += 4;
+init_lut_sub(uint32_t* lut, int pattern) {
+  uint32_t* fill_ptr = lut;
+  uint32_t* end = lut + 0x104;
+  while (fill_ptr != end) {
+    fill_ptr[0] = 0x410000;
+    fill_ptr[1] = 0x410000;
+    fill_ptr[2] = 0x410000;
+    fill_ptr[3] = 0x410000;
+    fill_ptr += 4;
   }
 
-  uint32_t* p = param_1 + 7;
+  uint32_t* mark_ptr = lut + 7;
   do {
-    p++;
-    *p |= 0x200000;
-  } while (p != param_1 + 18);
+    mark_ptr++;
+    *mark_ptr |= 0x200000;
+  } while (mark_ptr != lut + 18);
 
-  uint32_t* puVar4 = param_1 + 55;
+  uint32_t* or_ptr = lut + 55;
   do {
-    puVar4[0] |= 0x20000;
-    puVar4[1] |= 0x20000;
-    puVar4[2] |= 0x20000;
-    puVar4[3] |= 0x20000;
-    puVar4 += 4;
-  } while (puVar4 != param_1 + 255);
+    or_ptr[0] |= 0x20000;
+    or_ptr[1] |= 0x20000;
+    or_ptr[2] |= 0x20000;
+    or_ptr[3] |= 0x20000;
+    or_ptr += 4;
+  } while (or_ptr != lut + 255);
 
-  if (param_2 == -1)
+  if (pattern == -1)
     return;
 
-  uint32_t* p2 = param_1 + 26;
-  while (p2 != puVar5) {
-    p2[0] |= 0x100000;
-    p2[1] |= 0x100000;
-    p2 += 2;
+  uint32_t* pair_ptr = lut + 26;
+  while (pair_ptr != end) {
+    pair_ptr[0] |= 0x100000;
+    pair_ptr[1] |= 0x100000;
+    pair_ptr += 2;
   }
-  uint32_t* p3 = param_1 + 26;
-  while (p3 != puVar5) {
-    p3[0] |= param_2;
-    p3[1] |= param_2;
-    p3 += 2;
+  uint32_t* pattern_ptr = lut + 26;
+  while (pattern_ptr != end) {
+    pattern_ptr[0] |= pattern;
+    pattern_ptr[1] |= pattern;
+    pattern_ptr += 2;
   }
 }
 
@@ -299,10 +293,10 @@ fill_lut_pattern(void* dest, int pattern) {
   init_lut_sub(buf + 0x208, -1);
   init_lut_sub(buf + 0x30c, pattern);
 
-  uint32_t* puVar2 = buf + 0x410;
-  while (puVar2 != buf + 0x59600) {
-    memcpy(puVar2, buf + 0x30c, 0x410); // 0x410 bytes = 0x104 words
-    puVar2 += 0x104;
+  uint32_t* dst_ptr = buf + 0x410;
+  while (dst_ptr != buf + 0x59600) {
+    memcpy(dst_ptr, buf + 0x30c, 0x410); // 0x410 bytes = 0x104 words
+    dst_ptr += 0x104;
   }
 }
 
@@ -327,184 +321,6 @@ write_lut_pattern(void* dest, int pattern) {
   fill_lut_pattern(dest, pattern);
 }
 
-bool
-load_waveform(std::vector<ModeEntry*>* waveform_struct, const char* path) {
-  std::ifstream file(path, std::ios::binary);
-  if (!file) {
-    std::cerr << "wfb: unable to open file: " << path << std::endl;
-    return false;
-  }
-
-  file.seekg(0, std::ios::end);
-  size_t sz = file.tellg();
-  if (sz < 0x31) {
-    std::cerr << "wbf: file size too small: " << sz << std::endl;
-    return false;
-  }
-
-  file.seekg(0, std::ios::beg);
-  std::vector<uint8_t> wbf(sz);
-  if (!file.read((char*)wbf.data(), sz)) {
-    std::cerr << "wbf: unable to read wbf file" << std::endl;
-    return false;
-  }
-
-  uint32_t hdr_sz = *(uint32_t*)(wbf.data() + 4);
-  if (hdr_sz != sz) {
-    std::cerr << "File length mismatch: " << sz << " != " << hdr_sz << " (hdr)"
-              << std::endl;
-    return false;
-  }
-
-  uint8_t* ptr = wbf.data();
-  uint8_t mode_count = ptr[0x25];
-  uint8_t temp_count = ptr[0x26];
-  uint8_t pad_val = ptr[0x28];
-  uint32_t mode_table_offset = *(uint32_t*)(ptr + 0x20) & 0xffffff;
-
-  int iVar27 = ((ptr[0x24] & 0xc) == 4) ? 0x20 : 0x10;
-
-  const char* mode_names[] = { "INIT",       "DU",         "GC16",   "GL16",
-                               "GC16_REGAL", "GL16_REGAL", "A2",     "DU4",
-                               "mode8",      "mode9",      "mode10", "mode11" };
-
-  // mode_count (ptr[0x25]) is an inclusive maximum index, matching
-  // load_waveform
-  // @0x458e8 which loops modes 0..ptr[0x25].
-  for (int mode_idx = 0; mode_idx <= mode_count; mode_idx++) {
-    ModeEntry* mode = new ModeEntry();
-    if (mode_idx < 12)
-      mode->name = mode_names[mode_idx];
-    else
-      mode->name = "mode" + std::to_string(mode_idx);
-
-    for (int temp_idx = 0; temp_idx <= temp_count; temp_idx++) {
-      uint32_t mode_table = mode_table_offset;
-      uint32_t temp_table_offset =
-        *(uint32_t*)(ptr + mode_table + mode_idx * 4) & 0xffffff;
-      uint32_t wave_offset =
-        *(uint32_t*)(ptr + temp_table_offset + temp_idx * 4) & 0xffffff;
-      uint8_t* wave_data = ptr + wave_offset;
-
-      uint8_t uVar8 = wave_data[0];
-      if (uVar8 == pad_val) {
-        continue;
-      }
-
-      // RLE decode, mirroring FUN_00054560. ptr[0x29] is the run marker
-      // that toggles run mode; in run mode the byte after a value is its
-      // (length-1), so the read index advances by 2 (value + length byte).
-      int out_size = 0;
-      int i = 0;
-      bool bVar1 = true;
-      uint8_t curr = uVar8;
-      do {
-        if (ptr[0x29] == curr) {
-          bVar1 = !bVar1;
-        } else {
-          int run;
-          if (bVar1) {
-            i++;
-            run = wave_data[i] + 1;
-          } else {
-            run = 1;
-          }
-          out_size += run * 4;
-        }
-        i++;
-        curr = wave_data[i];
-      } while (curr != pad_val);
-
-      if (out_size == 0)
-        continue;
-
-      std::vector<uint32_t> decoded(out_size / 4);
-      int out_idx = 0;
-      i = 0;
-      bVar1 = true;
-      curr = wave_data[0];
-      do {
-        if (ptr[0x29] == curr) {
-          bVar1 = !bVar1;
-        } else {
-          int run;
-          if (bVar1) {
-            i++;
-            run = wave_data[i] + 1;
-          } else {
-            run = 1;
-          }
-          uint32_t val = (curr & 3) | (((curr & 0xf) >> 2) << 8) |
-                         (((curr & 0x3f) >> 4) << 16) | ((curr >> 6) << 24);
-          for (int j = 0; j < run; j++) {
-            decoded[out_idx++] = val;
-          }
-        }
-        i++;
-        curr = wave_data[i];
-      } while (curr != pad_val);
-
-      std::shared_ptr<LUTEntry> lut = std::make_shared<LUTEntry>();
-      lut->size_kb = out_size >> 10;
-      lut->mode_width = iVar27;
-      lut->temperature = (float)ptr[0x30 + temp_idx];
-      lut->bit_depth = 2;
-
-      int uVar14 = out_size >> 10;
-      int uVar3 = (7 + uVar14) / 8;
-      int iVar5 = iVar27 * iVar27 * uVar3 + uVar3;
-      int dest_size = iVar5 * 2;
-      lut->data = malloc(dest_size);
-      memset(lut->data, 0, dest_size);
-
-      uint16_t* dest = (uint16_t*)lut->data;
-      uint8_t* src = (uint8_t*)decoded.data();
-
-      // Pack the decoded plane into the mode LUT. The destination column
-      // index runs 0..iVar27*iVar27-1 across the whole block: for source
-      // row iVar26 it starts at iVar26*iVar27 (iVar28) and runs a full
-      // iVar27-wide span. This must match load_waveform @0x458e8 exactly,
-      // otherwise the display-thread gather reads out-of-range LUT indices.
-      int iVar28 = 0;
-      int iVar24 = iVar27;
-      for (int iVar26 = 0; iVar26 < iVar27; iVar26++) {
-        int iVar19 = iVar28;
-        uint8_t* iVar29 = src + iVar26;
-        do {
-          if (uVar14 != 0) {
-            uint32_t uVar15 = 0;
-            uint32_t uVar16 = 0;
-            while (uVar16 < (uint32_t)uVar14) {
-              uint32_t uVar9 = uVar16 + 1;
-              uint32_t uVar1 = (uint32_t)iVar29[uVar16 * 0x400]
-                               << ((uVar16 & 7) * 2);
-              uint16_t uVar5 = (uint16_t)uVar15;
-              uVar15 = uVar15 | (uVar1 & 0xffff);
-              if ((uVar9 & 7) != 0 && (uint32_t)(uVar14 - 1) != uVar16) {
-                uVar16 = uVar9;
-                continue;
-              }
-              dest[(uVar16 >> 3) * 0x401 + iVar19] = uVar5 | (uint16_t)uVar1;
-              uVar15 = 0;
-              uVar16 = uVar9;
-            }
-          }
-          iVar19++;
-          iVar29 += iVar27;
-        } while (iVar19 != iVar24);
-        iVar28 += iVar27;
-        iVar24 += iVar27;
-      }
-
-      mode->luts.push_back(lut);
-    }
-
-    waveform_struct->push_back(mode);
-  }
-
-  return true;
-}
-
 namespace {
 
 // The real library's search order (qsgepaper_init's directory-list
@@ -518,12 +334,12 @@ const char* const kWaveformSearchDirs[] = {
 } // namespace
 
 // Not in the anonymous namespace above (unlike read_factory_barcode below):
-// these five are pure - no hardcoded device paths of their own - so they're
-// declared in init.h and unit-tested directly against synthetic inputs
-// (temp dirs, in-memory barcode strings, small fixture files) instead of
-// only indirectly through find_waveform_path's real /dev/mmcblk2boot1 +
-// kWaveformSearchDirs orchestration, which isn't something a host test can
-// drive at all.
+// these four, plus read_wbf_match_fields (wbf.cpp), are pure - no hardcoded
+// device paths of their own - so they're declared in init.h and
+// unit-tested directly against synthetic inputs (temp dirs, in-memory
+// barcode strings, small fixture files) instead of only indirectly through
+// find_waveform_path's real /dev/mmcblk2boot1 + kWaveformSearchDirs
+// orchestration, which isn't something a host test can drive at all.
 
 bool
 has_wbf_suffix(const char* name) {
@@ -556,50 +372,6 @@ list_wbf_files(const std::string& dir, std::vector<std::string>* out) {
   closedir(d);
 }
 
-// Mirrors FUN_00054628: pulls a .wbf file's own matching fields - fpl_lot
-// (u16 @ header offset 0xE) and the 2-char TFT_VID code embedded at a fixed
-// offset inside the XWIA extended-info text (offset 0x1c is a 3-byte offset
-// to a length-prefixed string; TFT_VID sits at that string's own offset
-// 0x18). Both confirmed byte-for-byte against real .wbf files pulled off a
-// device image: e.g. 320_R299_..._ED103TC2U2_...wbf has fpl_lot=299 and its
-// xwia text (which is just the filename itself) slices to "U2" at that exact
-// offset. Returns false only if the file is too short to even hold a
-// header; a missing/oversized XWIA block just yields the "00" wildcard
-// TFT_VID rather than failing outright (matches FUN_00054628, which never
-// fails on XWIA content, only on a null wbf_read_file result).
-bool
-read_wbf_match_fields(const std::string& path,
-                      uint16_t* fpl_lot,
-                      char tft_vid[3]) {
-  std::ifstream file(path, std::ios::binary);
-  if (!file)
-    return false;
-  file.seekg(0, std::ios::end);
-  size_t sz = file.tellg();
-  if (sz < 0x20)
-    return false;
-  file.seekg(0, std::ios::beg);
-  std::vector<uint8_t> data(sz);
-  if (!file.read((char*)data.data(), sz))
-    return false;
-
-  *fpl_lot = *(uint16_t*)(data.data() + 0xe);
-
-  tft_vid[0] = '0';
-  tft_vid[1] = '0';
-  tft_vid[2] = '\0';
-  uint32_t xwia = (*(uint32_t*)(data.data() + 0x1c)) & 0xffffff;
-  if (xwia + 1 >= sz)
-    return true;
-  uint8_t xwia_len = data[xwia];
-  if (xwia_len < 0x1a || xwia + 1 + xwia_len > sz)
-    return true;
-  const uint8_t* xwia_text = data.data() + xwia + 1;
-  tft_vid[0] = (char)xwia_text[0x18];
-  tft_vid[1] = (char)xwia_text[0x19];
-  return true;
-}
-
 // Mirrors FUN_00053528: decodes a two-character FPL_LOT pair (barcode bytes
 // [6:8]) into a single int. Alphabet skips 'I'/'O' (a classic lot-code
 // convention avoiding confusion with 1/0). Empirically confirmed against a
@@ -612,15 +384,15 @@ read_wbf_match_fields(const std::string& path,
 int
 decode_fpl_lot_pair(char c1, char c2) {
   int v1 = (uint8_t)c1 - 0x30;
-  int iVar1;
+  int first_val;
   if (v1 >= 0 && v1 <= 9) {
-    iVar1 = v1;
+    first_val = v1;
   } else if (v1 >= 0x11 && v1 <= 0x18) {
-    iVar1 = c1 - 0x37;
+    first_val = c1 - 0x37;
   } else if (v1 >= 0x1a && v1 <= 0x1e) {
-    iVar1 = c1 - 0x38;
+    first_val = c1 - 0x38;
   } else if (v1 >= 0x21 && v1 <= 0x2a) {
-    iVar1 = c1 - 0x3a;
+    first_val = c1 - 0x3a;
   } else {
     return -1;
   }
@@ -630,21 +402,21 @@ decode_fpl_lot_pair(char c1, char c2) {
     // First letter was digit/'A'-'H': second can be
     // digit/'A'-'H'/'J'-'N'/'Q'-'Z'.
     if (v2 >= 0 && v2 <= 9) {
-      if (iVar1 == 0 && v2 == 0)
+      if (first_val == 0 && v2 == 0)
         return -1;
-      return iVar1 * 10 + v2;
+      return first_val * 10 + v2;
     } else if (v2 >= 0x11 && v2 <= 0x18) {
-      return iVar1 * 0x17 + (c2 - 0x37) + 0x5a;
+      return first_val * 0x17 + (c2 - 0x37) + 0x5a;
     } else if (v2 >= 0x1a && v2 <= 0x1e) {
-      return iVar1 * 0x17 + (c2 - 0x38) + 0x5a;
+      return first_val * 0x17 + (c2 - 0x38) + 0x5a;
     } else if (v2 >= 0x21 && v2 <= 0x2a) {
-      return iVar1 * 0x17 + (c2 - 0x3a) + 0x5a;
+      return first_val * 0x17 + (c2 - 0x3a) + 0x5a;
     }
     return -1;
   } else {
     // First letter was 'J'-'N'/'Q'-'Z': second letter must be a digit.
     if ((uint8_t)c2 >= 0x30 && (uint8_t)c2 <= 0x39)
-      return iVar1 * 10 + (c2 - 0x30);
+      return first_val * 10 + (c2 - 0x30);
     return -1;
   }
 }

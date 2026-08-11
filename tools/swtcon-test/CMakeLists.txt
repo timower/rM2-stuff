@@ -38,7 +38,7 @@ set_source_files_properties(${SWTCON_LIB_DIR}/playback_kernel_intrinsics.cpp
 # the library independently rather than through swtcon.cpp's production
 # load_lib() path.
 add_executable(playback-kernel-bench playback_kernel_bench.cpp
-                                      ${SWTCON_LIB_DIR}/init.cpp ${SWTCON_LIB_DIR}/update.cpp
+                                      ${SWTCON_LIB_DIR}/init.cpp ${SWTCON_LIB_DIR}/wbf.cpp ${SWTCON_LIB_DIR}/update.cpp
                                       ${SWTCON_LIB_DIR}/display.cpp ${SWTCON_LIB_DIR}/playback_kernel_intrinsics.cpp
                                       ${SWTCON_LIB_DIR}/playback_kernel.s ${SWTCON_LIB_DIR}/playback_kernel_aligned.s)
 target_link_libraries(playback-kernel-bench dl)

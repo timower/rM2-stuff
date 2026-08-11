@@ -17,6 +17,12 @@ struct LUTEntry {
   ~LUTEntry();
 };
 
+// Byte size of a LUTEntry's packed `data` blob, derived from size_kb/mode_width
+// the same way load_waveform sizes its own allocation - shared with anything
+// that reads/checksums/dumps that data afterward.
+size_t
+lut_data_size(const LUTEntry& lut);
+
 // Sizes of the fixed, single-instance buffers init_statebuffer/
 // init_lut allocate - each is duplicated (as a raw literal) at every
 // site that (re)allocates, fills, or checksums that buffer, so this is the

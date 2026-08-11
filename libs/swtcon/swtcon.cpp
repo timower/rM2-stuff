@@ -296,9 +296,7 @@ swtcon_dump_waveform() {
               << "' luts=" << m->luts.size() << std::endl;
     for (size_t li = 0; li < m->luts.size(); li++) {
       LUTEntry* lut = m->luts[li].get();
-      int uVar3 = (7 + lut->size_kb) / 8;
-      int words = lut->mode_width * lut->mode_width * uVar3 + uVar3;
-      size_t len = (size_t)words * 2;
+      size_t len = lut_data_size(*lut);
       uint32_t sum = 2166136261u;
       if (lut->data) {
         uint8_t* p = (uint8_t*)lut->data;

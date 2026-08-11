@@ -24,6 +24,7 @@ set_source_files_properties(playback_kernel_intrinsics.cpp PROPERTIES COMPILE_OP
 add_library(${PROJECT_NAME} STATIC
   swtcon.cpp
   init.cpp
+  wbf.cpp
   update.cpp
   display.cpp
   playback_kernel_intrinsics.cpp
