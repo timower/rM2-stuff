@@ -27,7 +27,13 @@ struct BaseDevice {
 std::optional<BaseDevice>
 getBaseDevice(std::string_view name);
 
-// TODO: battery paths
+struct BatteryInfo {
+  int percentage = 0;
+  bool isCharging = false;
+};
+
+std::optional<BatteryInfo>
+getBatteryInfo();
 
 std::vector<std::string>
 listDirectory(std::string_view path, bool onlyFiles = true);

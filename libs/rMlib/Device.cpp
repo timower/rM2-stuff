@@ -3,6 +3,7 @@
 #include <unistdpp/file.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <dirent.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -124,6 +125,39 @@ listDirectory(std::string_view path, bool onlyFiles) {
 
   std::sort(result.begin(), result.end());
   return result;
+}
+
+std::optional<BatteryInfo>
+getBatteryInfo() {
+#ifdef EMULATE
+  return BatteryInfo{ .percentage = 100, .isCharging = false };
+#else
+  auto type = getDeviceType();
+  if (!type) {
+    return std::nullopt;
+  }
+
+  const auto* capacityPath =
+    *type == DeviceType::reMarkable1
+      ? "/sys/class/power_supply/bq27441-0/capacity"
+      : "/sys/class/power_supply/max77818_battery/capacity";
+  const auto* statusPath =
+    *type == DeviceType::reMarkable1
+      ? "/sys/class/power_supply/bq27441-0/status"
+      : "/sys/class/power_supply/max77818-charger/status";
+
+  auto capacity = unistdpp::readFile(capacityPath);
+  if (!capacity) {
+    return std::nullopt;
+  }
+
+  auto status = unistdpp::readFile(statusPath);
+
+  return BatteryInfo{
+    .percentage = std::atoi(capacity->c_str()),
+    .isCharging = status && status->find("Charging") != std::string::npos,
+  };
+#endif
 }
 
 bool

@@ -8,8 +8,10 @@
 
 #include <rm2fb/ControlSocket.h>
 
+#include <Device.h>
 #include <UI.h>
 #include <UI/Rotate.h>
+#include <UI/Stack.h>
 
 #include <utility>
 
@@ -30,6 +32,7 @@ class LauncherState : public rmlib::StateBase<LauncherWidget> {
   constexpr static auto default_sleep_timeout = 10;
   constexpr static auto retry_sleep_timeout = 8;
   constexpr static auto default_inactivity_timeout = 20;
+  constexpr static auto battery_poll_interval = std::chrono::minutes(10);
 
   constexpr static rmlib::Size splash_size = { 512, 512 };
 
@@ -68,6 +71,22 @@ public:
       Column(Padding(Text(text, 2 * default_text_size), Insets::all(10)),
              button),
       Insets::all(50)));
+  }
+
+  auto statusBar() const {
+    using namespace rmlib;
+
+    return Row(Expanded(Text("")),
+               Padding(Text(batteryText()), Insets::all(10)));
+  }
+
+  static std::string batteryText() {
+    auto battery = rmlib::device::getBatteryInfo();
+    if (!battery.has_value()) {
+      return "Battery: unknown";
+    }
+    return "Battery: " + std::to_string(battery->percentage) + "%" +
+           (battery->isCharging ? " (charging)" : "");
   }
 
   auto runningApps() const {
@@ -118,7 +137,12 @@ public:
   auto launcher(rmlib::AppContext& context) const {
     using namespace rmlib;
 
-    return Cleared(Column(header(context), runningApps(), appList(context)));
+    std::vector<DynamicWidget> layers;
+    layers.emplace_back(Positioned(statusBar(), Point{ 0, 0 }));
+    layers.emplace_back(
+      Column(header(context), runningApps(), appList(context)));
+
+    return Cleared(Stack(std::move(layers)));
   }
 
   auto build(rmlib::AppContext& context,
@@ -185,6 +209,7 @@ private:
   std::unordered_map<pid_t, Buffer> fbBuffers;
 
   unistdpp::FD signalPipe;
+  unistdpp::FD batteryTimerFd;
 
   rmlib::TimerHandle sleepTimer;
   rmlib::TimerHandle inactivityTimer;

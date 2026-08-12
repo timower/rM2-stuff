@@ -3,6 +3,8 @@
 #include <systemdpp/sdbus.h>
 #include <unistdpp/file.h>
 
+#include <sys/timerfd.h>
+
 using namespace rmlib;
 
 namespace {
@@ -19,6 +21,27 @@ signalHandler(int sig) {
     return;
   }
   writeFd.writeAll(sig).or_else([](auto err) {});
+}
+
+// CLOCK_BOOTTIME_ALARM (needs CAP_WAKE_ALARM, held by root) wakes the device
+// from suspend too, unlike a regular timerfd, so the cached battery
+// percentage doesn't go stale for hours while sleeping.
+unistdpp::Result<unistdpp::FD>
+makeBatteryTimerFd(std::chrono::seconds interval) {
+  auto fd = unistdpp::FD(timerfd_create(CLOCK_BOOTTIME_ALARM, TFD_CLOEXEC));
+  if (!fd.isValid()) {
+    return tl::unexpected(unistdpp::getErrno());
+  }
+
+  const itimerspec spec{
+    .it_interval = { .tv_sec = interval.count(), .tv_nsec = 0 },
+    .it_value = { .tv_sec = interval.count(), .tv_nsec = 0 },
+  };
+  if (timerfd_settime(fd.fd, 0, &spec, nullptr) == -1) {
+    return tl::unexpected(unistdpp::getErrno());
+  }
+
+  return fd;
 }
 
 } // namespace
@@ -53,6 +76,19 @@ LauncherState::init(rmlib::AppContext& context,
   sigaction(SIGCONT, &sigAct, nullptr);
 
   readApps();
+
+  makeBatteryTimerFd(battery_poll_interval)
+    .transform([this, &context](auto fd) {
+      batteryTimerFd = std::move(fd);
+      context.listenFd(batteryTimerFd.fd, [this] {
+        batteryTimerFd.readAll<uint64_t>().or_else([](auto /*unused*/) {});
+        setState([](auto& /*unused*/) {});
+      });
+    })
+    .or_else([](auto err) {
+      std::cerr << "Failed to create battery timer: "
+                << unistdpp::to_string(err) << "\n";
+    });
 
   takeInhibitorLock();
   inactivityTimer = context.addTimer(
