@@ -29,10 +29,20 @@ uninstall() {
   exit 0
 }
 
-start_server() {
-  # Try to copy wifi networks config, but home might already be unmounted.
+copy_wifi_config() {
   cp /home/root/.config/remarkable/wifi_networks.conf \
     /run/nextroot/etc/wpa_supplicant.conf || true
+
+  mkdir -p /run/nextroot/etc/NetworkManager/system-connections
+  cp /home/root/.config/NetworkManager/system-connections/*.nmconnection \
+    /run/nextroot/etc/NetworkManager/system-connections/ || true
+  # NetworkManager ignores connection files that aren't 600.
+  chmod 600 /run/nextroot/etc/NetworkManager/system-connections/*.nmconnection || true
+}
+
+start_server() {
+  # Try to copy wifi config, but home might already be unmounted.
+  copy_wifi_config
 
   # Copy firmware, required for resume after suspend.
   mkdir -p "/run/nextroot/lib/firmware"
@@ -115,9 +125,7 @@ boot() {
     systemctl daemon-reload
   fi
 
-  # Copy wifi networks config
-  cp /home/root/.config/remarkable/wifi_networks.conf \
-    /run/nextroot/etc/wpa_supplicant.conf || true
+  copy_wifi_config
 
   # Copy waveforms
   mkdir -p "/run/nextroot/var/lib/uboot"

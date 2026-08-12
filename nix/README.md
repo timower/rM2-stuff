@@ -54,6 +54,22 @@ To start NixOS, reboot into it. Each of these commands will do the same:
 
 To exit NixOS, simply reboot again.
 
+Wifi
+----
+
+`nixctl` copies your saved wifi networks over from xochitl's config on every
+boot, so it works out of the box on NixOS too. It copies both the
+`wpa_supplicant`-style `wifi_networks.conf` and any NetworkManager
+`*.nmconnection` profiles it finds; only the one actually in use is picked
+up, based on which config.nix option you enable, matching your xochitl
+version:
+
+ * `networking.wireless.enable = true;` for xochitl < 3.28
+   (`wpa_supplicant`).
+ * `networking.networkmanager.enable = true;` for xochitl >= 3.28 beta
+   (NetworkManager). Add your login user to the `networkmanager` group,
+   otherwise it can't talk to NetworkManager over D-Bus.
+
 Installing
 ----------
 
