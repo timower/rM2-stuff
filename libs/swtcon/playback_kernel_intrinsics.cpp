@@ -22,6 +22,20 @@
 #error "Unsupported kernel mode"
 #endif
 
+// tools/swtcon-test/playback_kernel_bench.cpp compiles this file three times
+// (once per KERNEL_MODE) into one binary to compare them directly, so each
+// build needs its own link symbol - defaults to empty (the real, single-mode
+// production name) when unset.
+#ifndef SWTCON_KERNEL_SYMBOL_SUFFIX
+#define SWTCON_KERNEL_SYMBOL_SUFFIX
+#endif
+#define SWTCON_CONCAT_(a, b) a##b
+#define SWTCON_CONCAT(a, b) SWTCON_CONCAT_(a, b)
+#define PLAYBACK_KERNEL_PLAIN_FN                                               \
+  SWTCON_CONCAT(playback_kernel_plain_intrinsics, SWTCON_KERNEL_SYMBOL_SUFFIX)
+#define PLAYBACK_KERNEL_ALIGNED_FN                                             \
+  SWTCON_CONCAT(playback_kernel_aligned_intrinsics, SWTCON_KERNEL_SYMBOL_SUFFIX)
+
 // Native reimplementation of FUN_0004a140 (0x4a140, the "plain" playback
 // kernel) - fully reversed via a dedicated probe tool (isolated by-address
 // calls against the real library with guard-paged buffers, cross-checked
@@ -65,10 +79,21 @@
 // (threads, globals, ...) into the same file.
 //
 // Non-static (extern, declared in display.h): tools/swtcon-test/
-// playback_kernel_bench.cpp calls this directly to isolate the compute cost
-// of the real, shipped kernel from the threading/dispatch machinery around
-// it - real hardware confirmed this is currently much slower than the
-// library's NEON-hand-tuned equivalent (see that file for the benchmark).
+// playback_kernel_bench.cpp calls these directly to isolate the compute cost
+// of the kernel from the threading/dispatch machinery around it, and to A/B
+// the NEON intrinsics port against the raw-assembly transliteration.
+
+// Stores one group's 16-bit result into a frame slot. Overwrite=false is the
+// "plain" kernel (playback_kernel_plain): OR-accumulate over existing content.
+// Overwrite=true is the "aligned" kernel (playback_kernel_aligned): store
+// directly, like the real library's aligned kernel, the guaranteed first/only
+// writer into freshly-zeroed slots at an 8-aligned phase. On zeroed slots the
+// two produce identical output; only the store cost differs.
+template<bool Overwrite>
+static inline void
+store_group(uint16_t* dest, uint16_t value) {
+  *dest = Overwrite ? value : (uint16_t)(*dest | value);
+}
 
 // Computes shared[8]: shared[b] = OR over r=0..7 of
 // (((lut_words[r] >> 2b) & 3) << ((7-row)*2)) - i.e. an 8x8 transpose of
@@ -113,11 +138,22 @@
 // swtcon-ab-test A/B harness (native builds are deterministic and
 // self-consistent regardless of which path compiled in).
 #if KERNEL_MODE == KERNEL_MODE_NEON
-#define SWTCON_PLAYBACK_KERNEL_NEON 1
 #include <arm_neon.h>
 
+// Fused gather + 8x8 transpose for one 8-row group. `transitions` holds the
+// group's 8 raw transition values (one 128-bit load); each is turned into a
+// LUT-word address and load-duplicated STRAIGHT into a NEON register
+// (vld1q_dup_u16), never materializing an 8-word array on the stack - this is
+// the real leading-group loop's own structure (FUN_0004a234's .L0x3a538:
+// `vmov.u16 rN, dX[lane]` / `add` / `vld1.16 {dY[],dZ[]}` per row), which
+// fuses the data-dependent LUT gather into the transpose instead of the
+// previous port's write-lut_words[8]-to-stack-then-vld1q_dup-it-back round
+// trip.
 static inline void
-compute_shared_subphase_words(const uint16_t lut_words[8], uint16_t shared[8]) {
+gather_and_transpose(uint16x8_t transitions,
+                     const uint16_t* lut_data,
+                     size_t lut_word_base,
+                     uint16_t shared[8]) {
   // Extracts subphase b's 2-bit field from a row's LUT word via a right
   // shift of 2b (vshlq_u16's per-lane shift is signed; negative shifts
   // right) - the same constant vector for every row, matching the real
@@ -130,22 +166,24 @@ compute_shared_subphase_words(const uint16_t lut_words[8], uint16_t shared[8]) {
   uint16x8_t acc = vdupq_n_u16(0);
 
   // Manually unrolled (not a `for` loop) so the per-row reposition shift
-  // below is a true compile-time immediate (vshlq_n_u16 requires one),
-  // matching the real kernel's own per-row immediate-shift instructions
-  // rather than a runtime-computed shift amount. Row 7 needs no reposition
-  // shift at all (matching the real kernel emitting no shift instruction
-  // for it either), so it gets its own macro rather than a `shift == 0`
-  // branch inside a single one - `vshlq_n_u16(x, 0)` isn't guaranteed to be
-  // a valid immediate on every NEON intrinics header.
+  // below is a true compile-time immediate (vshlq_n_u16 requires one), and
+  // so vgetq_lane_u16's lane index is a constant too - both match the real
+  // kernel's own per-row immediate-shift/lane-extract instructions rather
+  // than runtime-computed ones. Row 7 needs no reposition shift at all
+  // (matching the real kernel emitting no shift for it either), so it gets
+  // its own macro rather than a `shift == 0` branch - `vshlq_n_u16(x, 0)`
+  // isn't guaranteed to be a valid immediate on every NEON intrinsics header.
 #define SWTCON_PLAYBACK_ROW(r, shift)                                          \
   do {                                                                         \
-    uint16x8_t rep = vld1q_dup_u16(&lut_words[r]);                             \
+    uint16_t t = vgetq_lane_u16(transitions, r);                               \
+    uint16x8_t rep = vld1q_dup_u16(&lut_data[lut_word_base + t]);              \
     uint16x8_t extracted = vandq_u16(vshlq_u16(rep, extract_shift), three);    \
     acc = vaddq_u16(acc, vshlq_n_u16(extracted, shift));                       \
   } while (0)
 #define SWTCON_PLAYBACK_ROW_NOSHIFT(r)                                         \
   do {                                                                         \
-    uint16x8_t rep = vld1q_dup_u16(&lut_words[r]);                             \
+    uint16_t t = vgetq_lane_u16(transitions, r);                               \
+    uint16x8_t rep = vld1q_dup_u16(&lut_data[lut_word_base + t]);              \
     uint16x8_t extracted = vandq_u16(vshlq_u16(rep, extract_shift), three);    \
     acc = vaddq_u16(acc, extracted);                                           \
   } while (0)
@@ -162,8 +200,104 @@ compute_shared_subphase_words(const uint16_t lut_words[8], uint16_t shared[8]) {
 
   vst1q_u16(shared, acc);
 }
+
+// Processes every 8-row group of one column, advancing each frame slot's dest
+// pointer in place: a 4-group bulk loop (the real aligned kernel's own case-8
+// strategy) then a 1-group-at-a-time remainder.
+//
+// Bulk (FUN_0004a234's .L0x3d54c): 4 row-groups per iteration so the expensive
+// per-transition NEON->ARM gather moves (vmov.u16, ~20 cyc latency on
+// Cortex-A7) of 4 independent groups overlap, instead of stalling a tight
+// per-group dependency chain. vld4q_u16 deinterleaves the block's 32
+// contiguous transitions so val[k] lane 2g = group g's row k, lane 2g+1 = row
+// k+4 (k=0..3). After the scalar LUT gather (still data-dependent - no NEON
+// gather exists), each needed subphase b is extracted from all 4 groups at
+// once:
+//   contrib_k = (val[k] >> 2b) & 3   (even lane rows 0..3, odd rows 4..7)
+//   res = (c0<<6)+(c1<<4)+(c2<<2)+c3
+// packing, per group, rows 0..3 into res's even lane and rows 4..7 into its
+// odd lane. vrev32 swaps the pair into little-endian low/high byte order (row
+// 0 -> bit 14 ... row 7 -> bit 0, same layout as
+// compute_shared_subphase_words), vmovn packs 4 groups' 16-bit results into one
+// d-register.
+//
+// Store, aligned (Overwrite): a direct vst1_lane_u16 per group straight to its
+// strided slot address - matches the real aligned kernel's own per-group
+// vst1.16 {d[j]} stores, touching only the 4 target halfwords. Store, plain
+// (OR): the 4 results are zero-interleaved to the even halfword positions and
+// merged with vld1q/vorrq/vst1q over the block's 8 contiguous halfwords (odd
+// ones in between RMW-preserved). Either way no result leaves NEON for a GPR.
+//
+// dest_ptrs is built here rather than passed in on purpose: taking a local
+// array's address to pass it defeats GCC's scalar-replacement-of-aggregates,
+// forcing all 8 pointers through the stack across the bulk loop instead of
+// registers (measured ~4.5% slower on full-screen fc=8). Keeping it local -
+// its address never escapes - lets them stay in registers.
+template<bool Overwrite>
+static inline void
+process_column(void** frame_slots,
+               size_t byte_off,
+               int frame_count,
+               int num_groups,
+               const uint16_t* transitionData,
+               size_t col_base,
+               const uint16_t* lut_data,
+               size_t lut_word_base,
+               int phase_bit0) {
+  // Group stride within a slot is the +4 bytes = 2 uint16_t advanced below.
+  uint16_t* dest_ptrs[8];
+  for (int k = 0; k < frame_count; k++)
+    dest_ptrs[k] = (uint16_t*)((uint8_t*)frame_slots[k] + byte_off);
+
+  int g = 0;
+  const uint16x8_t three = vdupq_n_u16(3);
+  for (; g + 4 <= num_groups; g += 4) {
+    size_t base_idx = col_base + (size_t)g * 8;
+    uint16_t lw[32];
+    for (int i = 0; i < 32; i++)
+      lw[i] = lut_data[lut_word_base + transitionData[base_idx + i]];
+    uint16x8x4_t gw = vld4q_u16(lw);
+
+    for (int k = 0; k < frame_count; k++) {
+      int b = phase_bit0 + k;
+      int16x8_t esh = vdupq_n_s16((int16_t)(-2 * b));
+      uint16x8_t c0 = vandq_u16(vshlq_u16(gw.val[0], esh), three);
+      uint16x8_t c1 = vandq_u16(vshlq_u16(gw.val[1], esh), three);
+      uint16x8_t c2 = vandq_u16(vshlq_u16(gw.val[2], esh), three);
+      uint16x8_t c3 = vandq_u16(vshlq_u16(gw.val[3], esh), three);
+      uint16x8_t res =
+        vaddq_u16(vaddq_u16(vshlq_n_u16(c0, 6), vshlq_n_u16(c1, 4)),
+                  vaddq_u16(vshlq_n_u16(c2, 2), c3));
+      res = vrev32q_u16(res);
+      uint16x4_t vals = vreinterpret_u16_u8(vmovn_u16(res));
+      uint16_t* d = dest_ptrs[k];
+      if constexpr (Overwrite) {
+        vst1_lane_u16(d + 0, vals, 0);
+        vst1_lane_u16(d + 2, vals, 1);
+        vst1_lane_u16(d + 4, vals, 2);
+        vst1_lane_u16(d + 6, vals, 3);
+      } else {
+        uint16x4x2_t z = vzip_u16(vals, vdup_n_u16(0));
+        uint16x8_t spread = vcombine_u16(z.val[0], z.val[1]);
+        vst1q_u16(d, vorrq_u16(vld1q_u16(d), spread));
+      }
+    }
+    for (int k = 0; k < frame_count; k++)
+      dest_ptrs[k] += 8; // 4 groups * 2 uint16_t
+  }
+
+  for (; g < num_groups; g++) {
+    size_t idx0 = col_base + (size_t)g * 8;
+    uint16_t shared[8];
+    uint16x8_t transitions = vld1q_u16(&transitionData[idx0]);
+    gather_and_transpose(transitions, lut_data, lut_word_base, shared);
+    for (int k = 0; k < frame_count; k++) {
+      store_group<Overwrite>(dest_ptrs[k], shared[phase_bit0 + k]);
+      dest_ptrs[k] += 2;
+    }
+  }
+}
 #elif KERNEL_MODE == KERNEL_MODE_C
-#define SWTCON_PLAYBACK_KERNEL_NEON 0
 
 static inline void
 compute_shared_subphase_words(const uint16_t lut_words[8], uint16_t shared[8]) {
@@ -178,16 +312,50 @@ compute_shared_subphase_words(const uint16_t lut_words[8], uint16_t shared[8]) {
     }
   }
 }
+
+// Portable scalar counterpart of the NEON process_column above (non-ARM host
+// builds): one group at a time, materializing lut_words[8] for the transpose.
+template<bool Overwrite>
+static inline void
+process_column(void** frame_slots,
+               size_t byte_off,
+               int frame_count,
+               int num_groups,
+               const uint16_t* transitionData,
+               size_t col_base,
+               const uint16_t* lut_data,
+               size_t lut_word_base,
+               int phase_bit0) {
+  uint16_t* dest_ptrs[8];
+  for (int k = 0; k < frame_count; k++)
+    dest_ptrs[k] = (uint16_t*)((uint8_t*)frame_slots[k] + byte_off);
+
+  for (int g = 0; g < num_groups; g++) {
+    size_t idx0 = col_base + (size_t)g * 8;
+    uint16_t lut_words[8];
+    for (int r = 0; r < 8; r++)
+      lut_words[r] = lut_data[lut_word_base + transitionData[idx0 + r]];
+    uint16_t shared[8];
+    compute_shared_subphase_words(lut_words, shared);
+    for (int k = 0; k < frame_count; k++) {
+      store_group<Overwrite>(dest_ptrs[k], shared[phase_bit0 + k]);
+      dest_ptrs[k] += 2;
+    }
+  }
+}
 #endif
 
 #if KERNEL_MODE != KERNEL_MODE_ASM
 
-void
-playback_kernel_plain_intrinsics(void** frame_slots,
-                                 WorkItem* item,
-                                 int frame_count,
-                                 int chunk_index,
-                                 int chunk_count) {
+// The plain (Overwrite=false) and aligned (Overwrite=true) kernels differ only
+// in how process_column stores results - see store_group.
+template<bool Overwrite>
+static inline void
+playback_kernel_impl(void** frame_slots,
+                     WorkItem* item,
+                     int frame_count,
+                     int chunk_index,
+                     int chunk_count) {
   if (item->rectY1 < item->rectY0 || item->rectX1 < item->rectX0)
     return;
 
@@ -216,82 +384,47 @@ playback_kernel_plain_intrinsics(void** frame_slots,
 
   for (int c = col_lo; c <= col_hi; c++) {
     int col = item->rectX0 + c;
-    // Loop-invariant across this column's groups/rows - only `row` varies
-    // inside the group loop below, so this multiply need not be repeated
-    // per row (was previously recomputed 8x per group).
+    // transitionData is already rebased to THIS item's own rect origin (see
+    // WorkItem::transitionDataPtr's comment / commit_item), so the index is
+    // item-rect-relative: group g row r sits at col_base + g*8 + r - which is
+    // why a group's (and a 4-group block's) rows are contiguous.
     const size_t col_base = (size_t)stride * (col - item->rectX0);
 
-    // byte_off(g) = ((col+3)*0x104 + (rectY0>>3) + g + 0x1a) * 4 is an
-    // arithmetic sequence in g with a constant stride of 4 bytes - the real
-    // library precomputes this whole sequence for a column in one pass
-    // rather than re-deriving it via multiplication per group (see
-    // AGENTS.md's Phase 9 entry on FUN_0004a140's case-8 handler); a running
-    // accumulator gets the same effect without needing a scratch array.
+    // Group g's result lands at frame slot byte offset
+    // ((col+3)*0x104 + (rectY0>>3) + g + 0x1a)*4 - a 4-byte per-group stride;
+    // process_column resolves each slot's base from this and walks it.
     size_t byte_off =
       (size_t)((col + 3) * 0x104 + (item->rectY0 >> 3) + 0x1a) * 4;
 
-    for (int g = 0; g < num_groups; g++, byte_off += 4) {
-      int row_base = item->rectY0 + g * 8;
-
-      // transitionDataPtr (transitionData) is already rebased to THIS item's
-      // own rect origin (see WorkItem::transitionDataPtr's comment /
-      // commit_item), so the index here must be item-rect-relative,
-      // not pixelTransitions-relative - indexing with
-      // (col-pixelTransitions->x0)/(row-pixelTransitions->y0) here would
-      // double-apply the rebase and run off the end of the pixelTransitions
-      // buffer for any narrowed item (item rect always a subset of
-      // pixelTransitions' own, outward-8-aligned rect) - confirmed via
-      // AddressSanitizer, which caught a heap-buffer-overflow read here on
-      // the very first narrowed item.
-      uint16_t lut_words[8];
-#if SWTCON_PLAYBACK_KERNEL_NEON
-      // A group's 8 rows are contiguous in `transitionData` (idx increases
-      // by exactly 1 per row - see the comment above), so all 8 transition
-      // values can be gathered with a single 128-bit load instead of 8
-      // scalar ones - confirmed directly in the real aligned kernel's own
-      // case-8 handler (FUN_0004a234, 0x4d1c0: `vld1.16 {d6,d7},[r3]` loads
-      // exactly one group's 8 transitions at once, vs. this port's previous
-      // 8 separate `ldrh`-equivalent scalar reads). The subsequent per-lane
-      // extract (vgetq_lane_u16) is still scalar because the LUT lookup
-      // itself is a genuine data-dependent gather - this target's NEON has
-      // no gather instruction, and the real kernel doesn't have one either
-      // (see AGENTS.md's Phase 9 entry).
-      size_t idx0 = col_base + (size_t)(row_base - item->rectY0);
-      uint16x8_t transitions = vld1q_u16(&transitionData[idx0]);
-      lut_words[0] = lut_data[lut_word_base + vgetq_lane_u16(transitions, 0)];
-      lut_words[1] = lut_data[lut_word_base + vgetq_lane_u16(transitions, 1)];
-      lut_words[2] = lut_data[lut_word_base + vgetq_lane_u16(transitions, 2)];
-      lut_words[3] = lut_data[lut_word_base + vgetq_lane_u16(transitions, 3)];
-      lut_words[4] = lut_data[lut_word_base + vgetq_lane_u16(transitions, 4)];
-      lut_words[5] = lut_data[lut_word_base + vgetq_lane_u16(transitions, 5)];
-      lut_words[6] = lut_data[lut_word_base + vgetq_lane_u16(transitions, 6)];
-      lut_words[7] = lut_data[lut_word_base + vgetq_lane_u16(transitions, 7)];
-#else
-      for (int r = 0; r < 8; r++) {
-        int row = row_base + r;
-        size_t idx = col_base + (size_t)(row - item->rectY0);
-        uint16_t transition = transitionData[idx];
-        lut_words[r] = lut_data[lut_word_base + transition];
-      }
-#endif
-
-      uint16_t shared[8];
-      compute_shared_subphase_words(lut_words, shared);
-
-      for (int k = 0; k < frame_count; k++) {
-        auto* dest = (uint16_t*)((uint8_t*)frame_slots[k] + byte_off);
-        *dest = (uint16_t)(*dest | shared[phase_bit0 + k]);
-      }
-    }
+    process_column<Overwrite>(frame_slots,
+                              byte_off,
+                              frame_count,
+                              num_groups,
+                              transitionData,
+                              col_base,
+                              lut_data,
+                              lut_word_base,
+                              phase_bit0);
   }
 }
+
 void
-playback_kernel_aligned_intrinsics(void** frame_slots,
-                                   WorkItem* item,
-                                   int frame_count,
-                                   int chunk_index,
-                                   int chunk_count) {
-  playback_kernel_plain_intrinsics(
+PLAYBACK_KERNEL_PLAIN_FN(void** frame_slots,
+                         WorkItem* item,
+                         int frame_count,
+                         int chunk_index,
+                         int chunk_count) {
+  playback_kernel_impl<false>(
+    frame_slots, item, frame_count, chunk_index, chunk_count);
+}
+
+void
+PLAYBACK_KERNEL_ALIGNED_FN(void** frame_slots,
+                           WorkItem* item,
+                           int frame_count,
+                           int chunk_index,
+                           int chunk_count) {
+  playback_kernel_impl<true>(
     frame_slots, item, frame_count, chunk_index, chunk_count);
 }
 

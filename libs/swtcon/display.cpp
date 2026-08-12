@@ -776,13 +776,10 @@ playback_chunk_count(const WorkItem* item) {
 
 // Mirrors FUN_0003f294 (0x3f294, "plain" kernel wrapper - CONFIRMED): picks
 // the chunk count and dispatches through FUN_0003ec78 with the "plain"
-// kernel - playback_kernel_plain (playback_kernel.s), a direct assembly
-// transliteration of the real FUN_0004a140, not by-address anymore and not
-// the from-scratch NEON-intrinsics playback_kernel_plain_intrinsics either (see
-// AGENTS.md's Phase 9 "fifth pass": the intrinsics port passed every
-// black-box verification this codebase has - probe, ab-test, bench - but
-// still produced visible real-hardware artifacts; the literal
-// transliteration fixed them, root cause still unidentified).
+// kernel - playback_kernel_plain_intrinsics (playback_kernel_intrinsics.cpp),
+// the NEON-intrinsics port that ships by default; the raw ASM transliteration
+// (playback_kernel_plain) is a manual fallback (libs/swtcon/CMakeLists.txt's
+// SWTCON_KERNEL_MODE), not the production default.
 static void
 dispatch_plain_kernel(void** frame_slots, WorkItem* item, int frame_count) {
   int chunk_count = playback_chunk_count(item);

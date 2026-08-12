@@ -1,14 +1,5 @@
 project(swtcon CXX ASM)
 
-# The ARMv7/NEON asm kernels only assemble for arm; other targets (e.g.
-# dev-host) get playback_kernel_intrinsics.cpp's portable KERNEL_MODE_C.
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
-  set(SWTCON_KERNEL_MODE 2) # KERNEL_MODE_ASM
-  set(SWTCON_ASM_SOURCES playback_kernel.s playback_kernel_aligned.s)
-else()
-  set(SWTCON_KERNEL_MODE 1) # KERNEL_MODE_C
-  set(SWTCON_ASM_SOURCES)
-endif()
 
 # The project's "release" preset ships MinSizeRel (-Os, optimize for code
 # size) - a reasonable default for the binary as a whole, but a bad fit for
@@ -28,9 +19,26 @@ add_library(${PROJECT_NAME} STATIC
   update.cpp
   display.cpp
   playback_kernel_intrinsics.cpp
-  ${SWTCON_ASM_SOURCES})
+  )
+
+# arm ships the NEON-intrinsics kernel by default; other targets (e.g.
+# dev-host) get playback_kernel_intrinsics.cpp's portable KERNEL_MODE_C.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
+  target_compile_options(${PROJECT_NAME} PRIVATE -mfpu=neon)
+  set(SWTCON_KERNEL_MODE 3) # KERNEL_MODE_NEON; set to 2 for KERNEL_MODE_ASM
+else()
+  set(SWTCON_KERNEL_MODE 1) # KERNEL_MODE_C
+endif()
+
+# Not selected above - kept so flipping SWTCON_KERNEL_MODE to 2 (KERNEL_MODE_ASM)
+# is a one-line change to fall back to the raw ASM kernels below.
+if(SWTCON_KERNEL_MODE STREQUAL "2")
+  target_sources(${PROJECT_NAME}
+    PRIVATE playback_kernel.s playback_kernel_aligned.s)
+endif()
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE SWTCON_KERNEL_MODE=${SWTCON_KERNEL_MODE})
+
 
 set_property(TARGET ${PROJECT_NAME} PROPERTY POSITION_INDEPENDENT_CODE ON)
 

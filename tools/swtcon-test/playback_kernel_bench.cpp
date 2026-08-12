@@ -1,54 +1,101 @@
-// Microbenchmark for playback_kernel_plain_intrinsics (display.cpp) - the
-// native port of the worker-side playback kernels FUN_0004a140/FUN_0004a234
-// (see AGENTS.md). Real-hardware testing found the ported kernel noticeably
-// slower than the library it replaces, which implements it as hand-tuned
-// NEON - this tool isolates just the kernel's own compute cost (no
-// threading/dispatch/list-bookkeeping around it) so an optimization pass has
-// a concrete before/after number, rather than only "the panel feels slower".
+// Microbenchmark comparing every "pure" (no dlopen, no shared globals)
+// worker-side playback kernel implementation in this codebase, on the same
+// synthetic WorkItem/transitions/LUT input:
+//   - scalar: the portable KERNEL_MODE_C fallback in
+//     playback_kernel_intrinsics.cpp (playback_kernel_plain_intrinsics_c).
+//   - neon: the from-scratch KERNEL_MODE_NEON intrinsics port in the same
+//     file (playback_kernel_plain_intrinsics_neon) - no longer in the
+//     production dispatch path (see doc/swtcon_porting.md Phase 9's fifth
+//     pass), kept here as the thing an optimization pass on the intrinsics
+//     port should be measured against.
+//   - asm-plain/asm-aligned: the raw ARM/NEON assembly port
+//     (playback_kernel.s/playback_kernel_aligned.s) - a line-for-line
+//     transliteration of the real library's own FUN_0004a140/FUN_0004a234,
+//     and the actual production kernel today. This is the target the neon
+//     port needs to close the gap with.
+// See libs/swtcon/playback_kernel_intrinsics.cpp's SWTCON_KERNEL_SYMBOL_SUFFIX
+// comment and tools/swtcon-test/CMakeLists.txt for how all three get linked
+// into one binary (the same source file compiled three times, once per
+// KERNEL_MODE, under a distinct symbol each time).
 //
-// Two things this tool measures, both against the same synthetic WorkItem/
-// transitions/LUT input:
-//   1. playback_kernel_plain_intrinsics's wall-clock cost across a matrix of
-//      rect sizes and frameCounts representative of real update traffic
-//      (see swtcon_architecture.md §6.4/§6.5 for where these shapes and the
-//      dominant frameCount=8 case come from).
-//   2. The same input run through the real library's FUN_0004a140 and
-//      FUN_0004a234 (dlopen'd by address, same technique as
-//      playback_kernel_probe.cpp) - the NEON reference this port needs to
-//      close the gap with. Optional: skipped with --no-lib, or automatically
-//      if libqsgepaper.so isn't found (useful once Phase 8 drops the
-//      production dlopen entirely).
+// Previously this tool instead dlopen'd the real on-device
+// libqsgepaper.so and called its FUN_0004a140/FUN_0004a234 by address (the
+// same technique as playback_kernel_probe.cpp) - useful while that library
+// was still the ground truth to port against, but no longer necessary now
+// that the ASM port is a confirmed byte-for-byte + real-hardware-verified
+// transliteration of it (see doc/swtcon_porting.md) and production no longer
+// calls the library at all. Dropping the dlopen dependency also means this
+// tool no longer needs the real device rootfs to run anywhere useful.
 //
 // Caveat: absolute ns/call numbers are only meaningful relative to each
 // other WITHIN one run of this tool on one machine - comparing an emulator
 // run's numbers to a hardware run's numbers is not valid, but the
-// native-vs-library RATIO computed in each run should be roughly comparable
-// across environments, which is why running this on the emulator first
-// (per the user's request) is a reasonable way to gauge how much NEON work
-// is worth it before burning a hardware round-trip.
+// neon-vs-asm RATIO computed in each run should be roughly comparable across
+// environments.
 #include <chrono>
-#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <dlfcn.h>
-#include <string>
-#include <ucontext.h>
 #include <vector>
 
-#include "display.h" // playback_kernel_plain_intrinsics
+#include "display.h" // WorkItem via update.h
 #include "init.h"    // LUTEntry
 #include "update.h"  // WorkItem, RegionRows
 
-#define INSTANCE_ADDR 0x35de0
-#define PLAIN_PLAYBACK_KERNEL_ADDR 0x4a140
-// FUN_0004a234 was originally called "overlap-aware" (it's selected using
-// the item's overlap-dependency intList), but that's backwards: it only
-// fires when there's NO active overlap dependency left AND phase is
-// 8-aligned - it's an alignment fast path, not an overlap-driven one. See
-// display.cpp's dispatch_aligned_kernel for the full story.
-#define ALIGNED_PLAYBACK_KERNEL_ADDR 0x4a234
+// This bench doesn't link swtcon.cpp (see CMakeLists.txt) - it never uses
+// SWTCON_LIBIMPL library mode, so a permanently-false stub plus null
+// function-pointer globals are enough to satisfy update.cpp's link
+// requirements.
+bool
+swtcon_lib_impl_enabled() {
+  return false;
+}
+void (*qsgepaper_lock)() = nullptr;
+void (*qsgepaper_update)(update_data*) = nullptr;
+void (*qsgepaper_unlock_post)() = nullptr;
+void (*qsgepaper_wait)() = nullptr;
+
+extern "C" void
+playback_kernel_plain(void** frame_slots,
+                      WorkItem* item,
+                      int frame_count,
+                      int chunk_index,
+                      int chunk_count);
+extern "C" void
+playback_kernel_aligned(void** frame_slots,
+                        WorkItem* item,
+                        int frame_count,
+                        int chunk_index,
+                        int chunk_count);
+void
+playback_kernel_plain_intrinsics_c(void** frame_slots,
+                                   WorkItem* item,
+                                   int frame_count,
+                                   int chunk_index,
+                                   int chunk_count);
+void
+playback_kernel_plain_intrinsics_neon(void** frame_slots,
+                                      WorkItem* item,
+                                      int frame_count,
+                                      int chunk_index,
+                                      int chunk_count);
+// The overwrite (non-OR) intrinsics variants, mirroring asm-aligned. On the
+// cleared slots this bench uses they produce identical output to the plain
+// variants; they exist to compare the store strategy (see the kernel's
+// playback_kernel_impl<Overwrite> template).
+void
+playback_kernel_aligned_intrinsics_c(void** frame_slots,
+                                     WorkItem* item,
+                                     int frame_count,
+                                     int chunk_index,
+                                     int chunk_count);
+void
+playback_kernel_aligned_intrinsics_neon(void** frame_slots,
+                                        WorkItem* item,
+                                        int frame_count,
+                                        int chunk_index,
+                                        int chunk_count);
 
 // One full hardware frame slot, bytes - see playback_kernel_probe.cpp's
 // comment (matches init_lut's 0x165800-byte LUT blob size, not a
@@ -65,76 +112,6 @@ constexpr size_t kFrameSlotBytes = 0x165800;
 // (the whole pipeline - dispatch, both kernels, panning - shares it across
 // however many in-flight items there are), but the only concrete real-time
 // deadline in this codebase to size "is this fast enough" against.
-
-typedef void (*PlaybackKernelFn)(void**, WorkItem*, int, int, int);
-
-static uintptr_t g_runtime_offset = 0;
-uintptr_t
-swtcon_runtime_offset() {
-  return g_runtime_offset;
-}
-
-// This bench doesn't link swtcon.cpp (see CMakeLists.txt), which normally
-// owns these - it never uses SWTCON_LIBIMPL library mode, so a
-// permanently-false/null stub is enough to satisfy update.cpp's link
-// requirements.
-bool
-swtcon_lib_impl_enabled() {
-  return false;
-}
-void (*qsgepaper_lock)() = nullptr;
-void (*qsgepaper_update)(update_data*) = nullptr;
-void (*qsgepaper_unlock_post)() = nullptr;
-void (*qsgepaper_wait)() = nullptr;
-
-static void
-segv_handler(int sig, siginfo_t* si, void* ucv) {
-  auto* uc = (ucontext_t*)ucv;
-  unsigned long pc = uc->uc_mcontext.arm_pc;
-  unsigned long lr = uc->uc_mcontext.arm_lr;
-  fprintf(stderr,
-          "\n*** SIGSEGV: fault_addr=%p pc=0x%lx lr=0x%lx\n",
-          si->si_addr,
-          pc,
-          lr);
-  fprintf(stderr,
-          "*** ghidra: pc=0x%lx lr=0x%lx (runtime_offset=0x%lx)\n",
-          pc - g_runtime_offset,
-          lr - g_runtime_offset,
-          (unsigned long)g_runtime_offset);
-  fflush(stderr);
-  signal(sig, SIG_DFL);
-  raise(sig);
-}
-
-// Best-effort: unlike the correctness probes, a benchmark tool shouldn't
-// hard-require the library (Phase 8 plans to drop the production dlopen
-// entirely, and this tool should still be useful for pure native-vs-native
-// A/B optimization passes afterward).
-static bool
-try_load_library(uintptr_t* offset_out) {
-  void* handle = dlopen("/usr/lib/plugins/scenegraph/libqsgepaper.so",
-                        RTLD_NOW | RTLD_GLOBAL);
-  if (!handle)
-    handle = dlopen("./libqsgepaper.so", RTLD_NOW | RTLD_GLOBAL);
-  if (!handle) {
-    fprintf(
-      stderr,
-      "note: libqsgepaper.so not found (%s) - skipping library comparison\n",
-      dlerror());
-    return false;
-  }
-  void* instance_func = dlsym(handle, "_ZN13EPFramebuffer8instanceEv");
-  if (!instance_func) {
-    fprintf(stderr,
-            "note: known export symbol not found (%s) - skipping library "
-            "comparison\n",
-            dlerror());
-    return false;
-  }
-  *offset_out = (uintptr_t)instance_func - INSTANCE_ADDR;
-  return true;
-}
 
 // Number of 16-bit words a LUTEntry needs for mode_width x mode_width packed
 // pixels across phases 0..lutWidth-1 - same formula as
@@ -277,34 +254,76 @@ print_row(const char* label, const BenchItem& bi, const Result& r) {
          r.iterations);
 }
 
-int
-main(int argc, char** argv) {
-  setvbuf(stdout, nullptr, _IONBF, 0);
-  bool want_lib = true;
-  for (int i = 1; i < argc; i++)
-    if (std::string(argv[i]) == "--no-lib")
-      want_lib = false;
-
-  struct sigaction sa;
-  memset(&sa, 0, sizeof(sa));
-  sa.sa_sigaction = segv_handler;
-  sa.sa_flags = SA_SIGINFO;
-  sigaction(SIGSEGV, &sa, nullptr);
-
-  bool have_lib = want_lib && try_load_library(&g_runtime_offset);
-  PlaybackKernelFn lib_plain = nullptr;
-  PlaybackKernelFn lib_aligned = nullptr;
-  if (have_lib) {
-    lib_plain =
-      (PlaybackKernelFn)(g_runtime_offset + PLAIN_PLAYBACK_KERNEL_ADDR);
-    lib_aligned =
-      (PlaybackKernelFn)(g_runtime_offset + ALIGNED_PLAYBACK_KERNEL_ADDR);
-    printf("Library loaded, runtime_offset=0x%lx - will benchmark "
-           "FUN_0004a140/FUN_0004a234 too\n\n",
-           (unsigned long)g_runtime_offset);
-  } else {
-    printf("Running native-only (no library comparison)\n\n");
+// Runs `fn` into a freshly-cleared copy of the 8 frame slots and returns them,
+// so two kernels' full output can be compared byte-for-byte. The kernels OR
+// (accumulate) into their target, so clearing first makes the result a pure
+// function of the input - a mismatch is a real behavioural divergence.
+using Slots = std::vector<std::vector<uint8_t>>;
+template<typename Fn>
+static Slots
+run_into_fresh_slots(Fn&& fn) {
+  Slots slots(8);
+  std::vector<void*> ptrs(8);
+  for (int i = 0; i < 8; i++) {
+    slots[i].assign(kFrameSlotBytes, 0);
+    ptrs[i] = slots[i].data();
   }
+  fn(ptrs.data());
+  return slots;
+}
+
+// Cross-checks every kernel against asm-aligned (the shipped production
+// kernel, ground truth) on one scenario - the bench otherwise only measures
+// speed and would happily report a fast but wrong kernel. Returns false on any
+// mismatch.
+static bool
+verify_matches_reference(BenchItem& bi, int frame_count) {
+  auto ref = run_into_fresh_slots([&](void** fs) {
+    playback_kernel_aligned(fs, &bi.item, frame_count, 0, 1);
+  });
+  struct Candidate {
+    const char* name;
+    void (*fn)(void**, WorkItem*, int, int, int);
+  };
+  Candidate candidates[] = {
+    { "scalar", playback_kernel_plain_intrinsics_c },
+    { "neon", playback_kernel_plain_intrinsics_neon },
+    { "scalar-aligned", playback_kernel_aligned_intrinsics_c },
+    { "neon-aligned", playback_kernel_aligned_intrinsics_neon },
+    { "asm-plain", playback_kernel_plain },
+  };
+  bool ok = true;
+  for (auto& c : candidates) {
+    auto got = run_into_fresh_slots(
+      [&](void** fs) { c.fn(fs, &bi.item, frame_count, 0, 1); });
+    for (int i = 0; i < 8; i++) {
+      if (memcmp(got[i].data(), ref[i].data(), kFrameSlotBytes) != 0) {
+        printf(
+          "    !! %s MISMATCH vs asm-aligned in frame slot %d\n", c.name, i);
+        ok = false;
+        break;
+      }
+    }
+  }
+  if (ok)
+    printf("    (all kernels match asm-aligned)\n");
+  return ok;
+}
+
+static void
+print_ratio(const char* subject,
+            const Result& r,
+            const char* baseline_label,
+            const Result& baseline) {
+  printf("    -> %s is %.2fx the %s's time\n",
+         subject,
+         r.ns_per_call / baseline.ns_per_call,
+         baseline_label);
+}
+
+int
+main() {
+  setvbuf(stdout, nullptr, _IONBF, 0);
 
   void** frame_slots = (void**)malloc(8 * sizeof(void*));
   for (int i = 0; i < 8; i++)
@@ -317,8 +336,8 @@ main(int argc, char** argv) {
   // Rect shapes spanning the real range of update sizes - from a single
   // 8-row glyph strip up to a full-panel HQ refresh (1404x1872,
   // 234 8-row groups) - crossed with the two frameCount extremes:
-  // frameCount=8 is what the ab-test's real traffic hits almost exclusively
-  // (see AGENTS.md's FUN_0004a140 entry), frameCount=1 is the opposite,
+  // frameCount=8 is what real traffic hits almost exclusively (see
+  // doc/swtcon_porting.md's Phase 9 entry), frameCount=1 is the opposite,
   // most-general-case end of the (phase&7)+k loop.
   Scenario scenarios[] = {
     { "tiny 32x8 (1 group)", 0, 0, 7, 31, 8 },
@@ -352,51 +371,75 @@ main(int argc, char** argv) {
                /*lut_width=*/16,
                /*seed=*/0xC0FFEEu + sc.y1);
 
+    verify_matches_reference(bi, sc.frame_count);
+
     clear_slots();
-    auto native_result = run_bench([&] {
-      playback_kernel_plain_intrinsics(frame_slots,
-                                       &bi.item,
-                                       sc.frame_count,
-                                       /*chunk_index=*/0,
-                                       /*chunk_count=*/1);
+    auto scalar_result = run_bench([&] {
+      playback_kernel_plain_intrinsics_c(frame_slots,
+                                         &bi.item,
+                                         sc.frame_count,
+                                         /*chunk_index=*/0,
+                                         /*chunk_count=*/1);
     });
-    print_row("native", bi, native_result);
+    print_row("scalar", bi, scalar_result);
 
-    if (have_lib) {
-      clear_slots();
-      auto lib_plain_result = run_bench([&] {
-        lib_plain(frame_slots,
-                  &bi.item,
-                  sc.frame_count,
-                  /*chunk_index=*/0,
-                  /*chunk_count=*/1);
-      });
-      print_row("lib-plain", bi, lib_plain_result);
-      printf("    -> native is %.2fx the library plain kernel's time\n",
-             native_result.ns_per_call / lib_plain_result.ns_per_call);
+    clear_slots();
+    auto neon_result = run_bench([&] {
+      playback_kernel_plain_intrinsics_neon(frame_slots,
+                                            &bi.item,
+                                            sc.frame_count,
+                                            /*chunk_index=*/0,
+                                            /*chunk_count=*/1);
+    });
+    print_row("neon", bi, neon_result);
+    print_ratio("neon", neon_result, "scalar kernel", scalar_result);
 
-      // The aligned kernel is only ever selected at an 8-aligned
-      // phase (advance_work_item_frames's selection rule, see AGENTS.md) -
-      // this synthetic item's phase=0 satisfies that.
-      clear_slots();
-      auto lib_aligned_result = run_bench([&] {
-        lib_aligned(frame_slots,
-                    &bi.item,
-                    sc.frame_count,
-                    /*chunk_index=*/0,
-                    /*chunk_count=*/1);
-      });
-      print_row("lib-aligned", bi, lib_aligned_result);
-      printf("    -> native is %.2fx the library aligned kernel's time\n",
-             native_result.ns_per_call / lib_aligned_result.ns_per_call);
-    }
+    clear_slots();
+    auto neon_aligned_result = run_bench([&] {
+      playback_kernel_aligned_intrinsics_neon(frame_slots,
+                                              &bi.item,
+                                              sc.frame_count,
+                                              /*chunk_index=*/0,
+                                              /*chunk_count=*/1);
+    });
+    print_row("neon-align", bi, neon_aligned_result);
+
+    clear_slots();
+    auto asm_plain_result = run_bench([&] {
+      playback_kernel_plain(frame_slots,
+                            &bi.item,
+                            sc.frame_count,
+                            /*chunk_index=*/0,
+                            /*chunk_count=*/1);
+    });
+    print_row("asm-plain", bi, asm_plain_result);
+    print_ratio("neon", neon_result, "asm-plain kernel", asm_plain_result);
+
+    // The aligned kernel is only ever selected at an 8-aligned phase
+    // (advance_work_item_frames's selection rule) - this synthetic item's
+    // phase=0 satisfies that.
+    clear_slots();
+    auto asm_aligned_result = run_bench([&] {
+      playback_kernel_aligned(frame_slots,
+                              &bi.item,
+                              sc.frame_count,
+                              /*chunk_index=*/0,
+                              /*chunk_count=*/1);
+    });
+    print_row("asm-aligned", bi, asm_aligned_result);
+    print_ratio("neon", neon_result, "asm-aligned kernel", asm_aligned_result);
+    print_ratio("neon-align",
+                neon_aligned_result,
+                "asm-aligned kernel",
+                asm_aligned_result);
+
     printf("\n");
   }
 
   printf("Note: absolute ns/call numbers are only meaningful within this "
          "single run/machine - the\n"
-         "native-vs-library ratios are the portable signal. The %.2fms figure "
-         "is the whole display\n"
+         "neon-vs-asm ratios are the portable signal. The %.2fms figure is "
+         "the whole display\n"
          "pipeline's per-frame-tick pacing budget (display.cpp), not this "
          "kernel's own budget\n"
          "in isolation - shown for scale, not as a hard per-call target.\n",
