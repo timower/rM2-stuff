@@ -242,18 +242,18 @@ private:
   Axis axis;
 };
 
+// Factory functions, not Flex subclasses: a subclass would inherit
+// createRenderObject() and get tagged as Flex<...>, breaking type-id diffing.
 template<typename... Children>
-class Column : public Flex<Children...> {
-public:
-  Column(Children... children)
-    : Flex<Children...>(Axis::Vertical, std::move(children)...) {}
-};
+Flex<Children...>
+Column(Children... children) {
+  return Flex<Children...>(Axis::Vertical, std::move(children)...);
+}
 
 template<typename... Children>
-class Row : public Flex<Children...> {
-public:
-  Row(Children... children)
-    : Flex<Children...>(Axis::Horizontal, std::move(children)...) {}
-};
+Flex<Children...>
+Row(Children... children) {
+  return Flex<Children...>(Axis::Horizontal, std::move(children)...);
+}
 
 } // namespace rmlib
