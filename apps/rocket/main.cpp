@@ -42,6 +42,8 @@ int
 main(int argc, char* argv[]) {
   // Connect ctrl client here to make sure rm2fb server is started.
   ControlClient ctlClient;
+
+#ifndef EMULATE
   unistdpp::fatalOnError(ctlClient.init(),
                          "Failed to connnect to rm2fb.control: ");
   unistdpp::fatalOnError(ctlClient.getClients(), "Failed to list clients: ");
@@ -55,13 +57,22 @@ main(int argc, char* argv[]) {
       unistdpp::fatalOnError(manager.waitForInput({}));
     }
   }
+#endif
 
   // Finally, tell systemd we're ready.
 #ifdef __linux__
   sd_notify(0, "READY=1");
 #endif
 
-  unistdpp::fatalOnError(runApp(
-    LauncherWidget(ctlClient, readAppDescriptions), {}, /*clearOnExit=*/true));
+  // Useful for nixos testing.
+  std::string timeOverride;
+  if (auto* str = getenv("ROCKET_TIME_OVERRIDE"); str != nullptr) {
+    timeOverride = str;
+  }
+
+  unistdpp::fatalOnError(
+    runApp(LauncherWidget(ctlClient, readAppDescriptions, timeOverride),
+           {},
+           /*clearOnExit=*/true));
   return EXIT_SUCCESS;
 }

@@ -13,6 +13,7 @@
 #include <UI/Rotate.h>
 #include <UI/Stack.h>
 
+#include <ctime>
 #include <utility>
 
 class LauncherState;
@@ -20,12 +21,16 @@ class LauncherState;
 class LauncherWidget : public rmlib::StatefulWidget<LauncherWidget> {
 public:
   LauncherWidget(ControlInterface& ctlClient,
-                 std::function<std::vector<AppDescription>()> appReader)
-    : ctlClient(ctlClient), appReader(std::move(appReader)) {}
+                 std::function<std::vector<AppDescription>()> appReader,
+                 std::string timeOverride = "")
+    : ctlClient(ctlClient)
+    , appReader(std::move(appReader))
+    , timeOverride(std::move(timeOverride)) {}
   static LauncherState createState();
 
   ControlInterface& ctlClient;
   std::function<std::vector<AppDescription>()> appReader;
+  std::string timeOverride;
 };
 
 class LauncherState : public rmlib::StateBase<LauncherWidget> {
@@ -76,8 +81,22 @@ public:
   auto statusBar() const {
     using namespace rmlib;
 
-    return Row(Expanded(Text("")),
+    return Row(Padding(Text(clockText()), Insets::all(10)),
+               Expanded(Text("")),
                Padding(Text(batteryText()), Insets::all(10)));
+  }
+
+  std::string clockText() const {
+    auto now = std::time(nullptr);
+    std::tm tm{};
+    localtime_r(&now, &tm);
+
+    char buf[6];
+    std::strftime(buf, sizeof(buf), "%H:%M", &tm);
+    if (getWidget().timeOverride != "") {
+      return getWidget().timeOverride;
+    }
+    return buf;
   }
 
   static std::string batteryText() {
@@ -215,6 +234,7 @@ private:
   rmlib::TimerHandle sleepTimer;
   rmlib::TimerHandle inactivityTimer;
   rmlib::TimerHandle backgroundTimer;
+  rmlib::TimerHandle clockTimer;
 
   rmlib::Rotation rotation = rmlib::Rotation::None;
   std::optional<rmlib::Canvas> background;

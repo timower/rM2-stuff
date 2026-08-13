@@ -205,7 +205,7 @@ TEST_CASE("Landscape", "[rocket][launcher]") {
   auto client = FakeClient{};
 
   auto ctx = TestContext::make(/*keyboardAttached=*/true);
-  ctx.pumpWidget(Center(LauncherWidget(client, getFakeApps)));
+  ctx.pumpWidget(Center(LauncherWidget(client, getFakeApps, "13:37")));
   auto launcher = ctx.findByType<LauncherWidget>();
 
   REQUIRE_THAT(launcher, ctx.matchesGolden("rocket-landscape.png"));
@@ -215,7 +215,7 @@ TEST_CASE("Launcher", "[rocket][launcher]") {
   auto client = FakeClient{};
 
   auto ctx = TestContext::make();
-  ctx.pumpWidget(Center(LauncherWidget(client, getFakeApps)));
+  ctx.pumpWidget(Center(LauncherWidget(client, getFakeApps, "13:37")));
   auto launcher = ctx.findByType<LauncherWidget>();
 
   REQUIRE_THAT(launcher, ctx.matchesGolden("rocket.png"));

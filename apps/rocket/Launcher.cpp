@@ -59,8 +59,9 @@ LauncherState::init(rmlib::AppContext& context,
     key->grab();
   }
 
-  unistdpp::fatalOnError(getWidget().ctlClient.setLauncher(getpid()),
-                         "Failed to set launcher: ");
+  getWidget().ctlClient.setLauncher(getpid()).or_else([](auto err) {
+    std::cerr << "Failed to set launcher: " << to_string(err) << "\n";
+  });
 
   requestClients();
 
@@ -89,6 +90,11 @@ LauncherState::init(rmlib::AppContext& context,
       std::cerr << "Failed to create battery timer: "
                 << unistdpp::to_string(err) << "\n";
     });
+
+  clockTimer = context.addTimer(
+    std::chrono::minutes(1),
+    [this] { setState([](auto& /*unused*/) {}); },
+    std::chrono::minutes(1));
 
   takeInhibitorLock();
   inactivityTimer = context.addTimer(

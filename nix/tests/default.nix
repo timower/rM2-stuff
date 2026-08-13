@@ -57,6 +57,7 @@ let
 
             systemd.services."rocket".environment = {
               ROCKET_WAIT_FOR_INPUT = "1";
+              ROCKET_TIME_OVERRIDE = "13:37";
             };
 
             users.users.test = {
