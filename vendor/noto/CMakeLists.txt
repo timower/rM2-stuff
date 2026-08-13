@@ -7,10 +7,12 @@ endif()
 
 set(BUILD_INCLUDE_DIR "${CMAKE_BINARY_DIR}/include")
 set(FONT_HEADER "${BUILD_INCLUDE_DIR}/noto-sans-mono.h")
+set(FONT_FILE "NotoSansMono-Regular.ttf")
 add_custom_command(
   OUTPUT "${FONT_HEADER}"
+  DEPENDS "${FONT_FILE}"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${BUILD_INCLUDE_DIR}"
-  COMMAND ${XXD} -i "NotoSansMono-Regular.ttf" "${FONT_HEADER}"
+  COMMAND ${XXD} -i "${FONT_FILE}" "${FONT_HEADER}"
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 
 add_library(NotoFont INTERFACE "${FONT_HEADER}")

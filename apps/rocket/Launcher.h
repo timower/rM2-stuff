@@ -83,10 +83,11 @@ public:
   static std::string batteryText() {
     auto battery = rmlib::device::getBatteryInfo();
     if (!battery.has_value()) {
-      return "Battery: unknown";
+      return "󰂃";
     }
-    return "Battery: " + std::to_string(battery->percentage) + "%" +
-           (battery->isCharging ? " (charging)" : "");
+
+    std::string prefix = battery->isCharging ? "󰂄 " : "󰁹 ";
+    return prefix + std::to_string(battery->percentage) + "%";
   }
 
   auto runningApps() const {
