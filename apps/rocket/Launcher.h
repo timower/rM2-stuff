@@ -37,7 +37,7 @@ class LauncherState : public rmlib::StateBase<LauncherWidget> {
   constexpr static auto default_sleep_timeout = 10;
   constexpr static auto retry_sleep_timeout = 8;
   constexpr static auto default_inactivity_timeout = 20;
-  constexpr static auto battery_poll_interval = std::chrono::minutes(10);
+  constexpr static auto battery_poll_interval = std::chrono::minutes(15);
 
   constexpr static rmlib::Size splash_size = { 512, 512 };
 

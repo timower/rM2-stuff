@@ -12,6 +12,7 @@
 #include <linux/ioctl.h>
 #include <linux/limits.h>
 #include <mxcfb.h>
+#include <sys/timerfd.h>
 
 #include "print.h"
 
@@ -349,6 +350,43 @@ mmap64(void* addr, size_t len, int prot, int flags, int fd, off64_t offset) {
                                      off64_t off))dlsym(RTLD_NEXT, "mmap64");
 
   return func_mmap(addr, len, prot, flags, fd, offset);
+}
+
+// Ad-hoc trace of the one wake-capable timerfd xochitl arms (see
+// FUN_00ca6264 in Ghidra) - dumps the requested delay to stdout.
+int
+timerfd_settime(int fd,
+                int flags,
+                const itimerspec* new_value,
+                itimerspec* old_value) {
+  if (inXochitl) {
+    std::cout << "timerfd_settime(fd=" << fd << ", value=" << std::dec
+              << new_value->it_value.tv_sec << "."
+              << new_value->it_value.tv_nsec
+              << "s, interval=" << new_value->it_interval.tv_sec << "."
+              << new_value->it_interval.tv_nsec << "s)\n";
+  }
+
+  static auto func_timerfd_settime =
+    (int (*)(int, int, const itimerspec*, itimerspec*))dlsym(RTLD_NEXT,
+                                                             "timerfd_settime");
+  return func_timerfd_settime(fd, flags, new_value, old_value);
+}
+
+int
+timerfd_create(clockid_t clockid, int flags) {
+  int fd;
+  {
+    static auto func_timerfd_create =
+      (int (*)(clockid_t, int))dlsym(RTLD_NEXT, "timerfd_create");
+    fd = func_timerfd_create(clockid, flags);
+  }
+
+  if (inXochitl) {
+    std::cout << "timerfd_create(clockid=" << clockid << ", flags=" << flags
+              << ") = " << fd << "\n";
+  }
+  return fd;
 }
 
 int

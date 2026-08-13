@@ -33,9 +33,17 @@ makeBatteryTimerFd(std::chrono::seconds interval) {
     return tl::unexpected(unistdpp::getErrno());
   }
 
+  // Align the first fire to a wall-clock multiple of `interval` past the
+  // hour (e.g. :00/:15/:30/:45), rather than just `interval` from whenever
+  // the launcher happened to start.
+  const auto nowSecs = std::chrono::duration_cast<std::chrono::seconds>(
+    std::chrono::system_clock::now().time_since_epoch());
+  const auto firstFire =
+    interval - std::chrono::seconds(nowSecs.count() % interval.count());
+
   const itimerspec spec{
     .it_interval = { .tv_sec = interval.count(), .tv_nsec = 0 },
-    .it_value = { .tv_sec = interval.count(), .tv_nsec = 0 },
+    .it_value = { .tv_sec = firstFire.count(), .tv_nsec = 0 },
   };
   if (timerfd_settime(fd.fd, 0, &spec, nullptr) == -1) {
     return tl::unexpected(unistdpp::getErrno());
