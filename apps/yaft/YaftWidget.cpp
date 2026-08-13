@@ -84,6 +84,7 @@ YaftState::~YaftState() {
   if (term) {
     term_die(term.get());
   }
+  signal(SIGCHLD, SIG_DFL);
 }
 
 void
