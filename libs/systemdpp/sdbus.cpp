@@ -96,6 +96,43 @@ waitForSleep() {
 #endif
 }
 
+bool
+powerOff() {
+#ifdef __linux__
+  sd_bus* bus = nullptr;
+  int res = sd_bus_open_system(&bus);
+  if (res < 0) {
+    std::cerr << "Error opening system bus: " << strerror(-res) << "\n";
+    return false;
+  }
+
+  sd_bus_error error = SD_BUS_ERROR_NULL;
+  sd_bus_message* reply = nullptr;
+  res = sd_bus_call_method(bus,
+                           "org.freedesktop.login1",
+                           "/org/freedesktop/login1",
+                           "org.freedesktop.login1.Manager",
+                           "PowerOff",
+                           &error,
+                           &reply,
+                           "b",
+                           /* interactive */ 0);
+  if (res < 0) {
+    std::cerr << "Error powering off: " << strerror(-res) << "\n";
+    sd_bus_error_free(&error);
+    sd_bus_unref(bus);
+    return false;
+  }
+
+  sd_bus_message_unref(reply);
+  sd_bus_error_free(&error);
+  sd_bus_unref(bus);
+  return true;
+#else
+  return true;
+#endif
+}
+
 unistdpp::Result<unistdpp::FD>
 getInhibitLock() {
 #ifdef __linux__

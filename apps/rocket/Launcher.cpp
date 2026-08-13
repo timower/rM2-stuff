@@ -1,7 +1,6 @@
 #include "Launcher.h"
 
 #include <systemdpp/sdbus.h>
-#include <unistdpp/file.h>
 
 #include <sys/timerfd.h>
 
@@ -91,6 +90,7 @@ LauncherState::init(rmlib::AppContext& context,
       batteryTimerFd = std::move(fd);
       context.listenFd(batteryTimerFd.fd, [this] {
         batteryTimerFd.readAll<uint64_t>().or_else([](auto /*unused*/) {});
+        checkBatteryShutdown();
         setState([](auto& /*unused*/) {});
       });
     })
@@ -98,6 +98,7 @@ LauncherState::init(rmlib::AppContext& context,
       std::cerr << "Failed to create battery timer: "
                 << unistdpp::to_string(err) << "\n";
     });
+  checkBatteryShutdown();
 
   clockTimer = context.addTimer(
     std::chrono::minutes(1),
@@ -138,23 +139,20 @@ LauncherState::takeInhibitorLock() {
     });
 }
 
-bool
-LauncherState::sleep() {
-  if (systemdpp::waitForSleep()) {
-    // Get the reason
-    auto irq = unistdpp::readFile("/sys/power/pm_wakeup_irq");
-    if (!irq.has_value()) {
-      std::cout << "Error getting reason: " << unistdpp::to_string(irq.error())
-                << std::endl;
-
-      // If there is no irq it must be the user which pressed the button:
-      return true;
-    }
-    std::cout << "Reason for wake irq: " << *irq << std::endl;
-    return false;
+void
+LauncherState::checkBatteryShutdown() const {
+  auto battery = getWidget().power.getBattery();
+  if (!battery.has_value() || battery->isCharging ||
+      battery->percentage >= battery_shutdown_percentage) {
+    return;
   }
 
-  return false;
+  getWidget().power.powerOff();
+}
+
+bool
+LauncherState::sleep() const {
+  return getWidget().power.suspend();
 }
 void
 LauncherState::stopTimer() {

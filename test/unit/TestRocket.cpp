@@ -201,11 +201,25 @@ struct FakeClient : ControlInterface {
   unistdpp::Result<void> setLauncher(pid_t pid) override { return {}; }
 };
 
+struct FakePower : PowerInterface {
+  std::optional<rmlib::device::BatteryInfo> battery =
+    rmlib::device::BatteryInfo{ .percentage = 100, .isCharging = false };
+  bool suspendResult = true;
+  bool didPowerOff = false;
+
+  std::optional<rmlib::device::BatteryInfo> getBattery() override {
+    return battery;
+  }
+  bool suspend() override { return suspendResult; }
+  void powerOff() override { didPowerOff = true; }
+};
+
 TEST_CASE("Landscape", "[rocket][launcher]") {
   auto client = FakeClient{};
+  auto power = FakePower{};
 
   auto ctx = TestContext::make(/*keyboardAttached=*/true);
-  ctx.pumpWidget(Center(LauncherWidget(client, getFakeApps, "13:37")));
+  ctx.pumpWidget(Center(LauncherWidget(client, power, getFakeApps, "13:37")));
   auto launcher = ctx.findByType<LauncherWidget>();
 
   REQUIRE_THAT(launcher, ctx.matchesGolden("rocket-landscape.png"));
@@ -213,10 +227,54 @@ TEST_CASE("Landscape", "[rocket][launcher]") {
 
 TEST_CASE("Launcher", "[rocket][launcher]") {
   auto client = FakeClient{};
+  auto power = FakePower{};
 
   auto ctx = TestContext::make();
-  ctx.pumpWidget(Center(LauncherWidget(client, getFakeApps, "13:37")));
+
+  ctx.pumpWidget(Center(LauncherWidget(client, power, getFakeApps, "13:37")));
   auto launcher = ctx.findByType<LauncherWidget>();
 
   REQUIRE_THAT(launcher, ctx.matchesGolden("rocket.png"));
+}
+
+TEST_CASE("Launcher battery: shows a warning icon below 10%, unrelated to "
+          "the shutdown threshold",
+          "[rocket][launcher]") {
+  auto client = FakeClient{};
+  auto power = FakePower{};
+  power.battery =
+    rmlib::device::BatteryInfo{ .percentage = 9, .isCharging = false };
+
+  auto ctx = TestContext::make();
+  ctx.pumpWidget(Center(LauncherWidget(client, power, getFakeApps, "13:37")));
+
+  REQUIRE_FALSE(ctx.findByText("\U000f0083 9%").empty());
+  CHECK_FALSE(power.didPowerOff);
+}
+
+TEST_CASE("Launcher battery: requests a shutdown below 9%",
+          "[rocket][launcher]") {
+  auto client = FakeClient{};
+  auto power = FakePower{};
+  power.battery =
+    rmlib::device::BatteryInfo{ .percentage = 8, .isCharging = false };
+
+  auto ctx = TestContext::make();
+  ctx.pumpWidget(Center(LauncherWidget(client, power, getFakeApps, "13:37")));
+
+  CHECK(power.didPowerOff);
+}
+
+TEST_CASE("Launcher battery: charging suppresses the shutdown even below 9%",
+          "[rocket][launcher]") {
+  auto client = FakeClient{};
+  auto power = FakePower{};
+  power.battery =
+    rmlib::device::BatteryInfo{ .percentage = 5, .isCharging = true };
+
+  auto ctx = TestContext::make();
+  ctx.pumpWidget(Center(LauncherWidget(client, power, getFakeApps, "13:37")));
+
+  REQUIRE_FALSE(ctx.findByText("\U000f0084 5%").empty());
+  CHECK_FALSE(power.didPowerOff);
 }

@@ -3,12 +3,12 @@
 #include "App.h"
 #include "AppWidgets.h"
 #include "Hideable.h"
+#include "Power.h"
 
 #include "rm2fb/SharedBuffer.h"
 
 #include <rm2fb/ControlSocket.h>
 
-#include <Device.h>
 #include <UI.h>
 #include <UI/Rotate.h>
 #include <UI/Stack.h>
@@ -21,14 +21,18 @@ class LauncherState;
 class LauncherWidget : public rmlib::StatefulWidget<LauncherWidget> {
 public:
   LauncherWidget(ControlInterface& ctlClient,
+                 PowerInterface& power,
                  std::function<std::vector<AppDescription>()> appReader,
                  std::string timeOverride = "")
     : ctlClient(ctlClient)
+    , power(power)
     , appReader(std::move(appReader))
     , timeOverride(std::move(timeOverride)) {}
+
   static LauncherState createState();
 
   ControlInterface& ctlClient;
+  PowerInterface& power;
   std::function<std::vector<AppDescription>()> appReader;
   std::string timeOverride;
 };
@@ -37,7 +41,10 @@ class LauncherState : public rmlib::StateBase<LauncherWidget> {
   constexpr static auto default_sleep_timeout = 10;
   constexpr static auto retry_sleep_timeout = 8;
   constexpr static auto default_inactivity_timeout = 20;
+
   constexpr static auto battery_poll_interval = std::chrono::minutes(15);
+  constexpr static auto battery_warning_percentage = 10;
+  constexpr static auto battery_shutdown_percentage = 9;
 
   constexpr static rmlib::Size splash_size = { 512, 512 };
 
@@ -99,13 +106,18 @@ public:
     return buf;
   }
 
-  static std::string batteryText() {
-    auto battery = rmlib::device::getBatteryInfo();
+  std::string batteryText() const {
+    auto battery = getWidget().power.getBattery();
     if (!battery.has_value()) {
-      return "󰂃";
+      return "󱉝 ";
     }
 
-    std::string prefix = battery->isCharging ? "󰂄 " : "󰁹 ";
+    std::string prefix = "󰁹 ";
+    if (battery->isCharging) {
+      prefix = "󰂄 ";
+    } else if (battery->percentage < battery_warning_percentage) {
+      prefix = "󰂃 ";
+    }
     return prefix + std::to_string(battery->percentage) + "%";
   }
 
@@ -195,7 +207,8 @@ public:
   }
 
 private:
-  static bool sleep();
+  bool sleep() const;
+  void checkBatteryShutdown() const;
 
   void startTimer(rmlib::AppContext& context, int time = default_sleep_timeout);
   void stopTimer();

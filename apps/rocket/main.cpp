@@ -42,6 +42,7 @@ int
 main(int argc, char* argv[]) {
   // Connect ctrl client here to make sure rm2fb server is started.
   ControlClient ctlClient;
+  SystemPowerInterface power;
 
 #ifndef EMULATE
   unistdpp::fatalOnError(ctlClient.init(),
@@ -71,7 +72,7 @@ main(int argc, char* argv[]) {
   }
 
   unistdpp::fatalOnError(
-    runApp(LauncherWidget(ctlClient, readAppDescriptions, timeOverride),
+    runApp(LauncherWidget(ctlClient, power, readAppDescriptions, timeOverride),
            {},
            /*clearOnExit=*/true));
   return EXIT_SUCCESS;
