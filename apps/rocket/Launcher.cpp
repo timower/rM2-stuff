@@ -88,17 +88,15 @@ LauncherState::init(rmlib::AppContext& context,
   makeBatteryTimerFd(battery_poll_interval)
     .transform([this, &context](auto fd) {
       batteryTimerFd = std::move(fd);
-      context.listenFd(batteryTimerFd.fd, [this] {
-        batteryTimerFd.readAll<uint64_t>().or_else([](auto /*unused*/) {});
-        checkBatteryShutdown();
-        setState([](auto& /*unused*/) {});
-      });
+      context.listenFd(batteryTimerFd.fd, [this] { refreshBattery(true); });
     })
     .or_else([](auto err) {
       std::cerr << "Failed to create battery timer: "
                 << unistdpp::to_string(err) << "\n";
     });
-  checkBatteryShutdown();
+
+  // Make sure drawing finishes before shutdown on startup.
+  context.doLater([this] { refreshBattery(false); });
 
   clockTimer = context.addTimer(
     std::chrono::minutes(1),
@@ -108,16 +106,7 @@ LauncherState::init(rmlib::AppContext& context,
   takeInhibitorLock();
   inactivityTimer = context.addTimer(
     std::chrono::minutes(1),
-    [this, &context] {
-      inactivityCountdown -= 1;
-      if (inactivityCountdown == 0) {
-        releaseInhibitorLock();
-        setState([&context](auto& self) {
-          self.startTimer(context);
-          self.show();
-        });
-      }
-    },
+    [this, &context] { tickInactivity(context); },
     std::chrono::minutes(1));
 
   updateRotation(context);
@@ -126,21 +115,12 @@ LauncherState::init(rmlib::AppContext& context,
 }
 
 void
-LauncherState::releaseInhibitorLock() {
-  inhibitorLock.close();
-}
+LauncherState::refreshBattery(bool clearTimer) const {
+  if (clearTimer) {
+    batteryTimerFd.readAll<uint64_t>().or_else([](auto /*unused*/) {});
+    setState([](auto& /*unused*/) {});
+  }
 
-void
-LauncherState::takeInhibitorLock() {
-  systemdpp::getInhibitLock()
-    .transform([this](auto fd) { inhibitorLock = std::move(fd); })
-    .or_else([](auto errc) {
-      std::cerr << "Could not get inhibit lock: " << to_string(errc) << "\n";
-    });
-}
-
-void
-LauncherState::checkBatteryShutdown() const {
   auto battery = getWidget().power.getBattery();
   if (!battery.has_value() || battery->isCharging ||
       battery->percentage >= battery_shutdown_percentage) {
@@ -157,12 +137,13 @@ LauncherState::sleep() const {
 void
 LauncherState::stopTimer() {
   sleepTimer.disable();
-  sleepCountdown = -1;
+  sleepPhase = Idle{};
 }
 
 void
 LauncherState::startTimer(rmlib::AppContext& context, int time) {
-  sleepCountdown = time;
+  sleepPhase = time <= 0 ? SleepPhase{ AboutToSuspend{} }
+                         : SleepPhase{ CountingDown{ time } };
   sleepTimer.disable();
   sleepTimer = context.addTimer(
     std::chrono::seconds(time == 0 ? 0 : 1),
@@ -173,19 +154,31 @@ LauncherState::startTimer(rmlib::AppContext& context, int time) {
 void
 LauncherState::tick() const {
   setState([](auto& self) {
-    self.sleepCountdown -= 1;
+    auto next = std::visit(
+      overloaded{
+        [](const CountingDown& cd) -> std::optional<SleepPhase> {
+          return cd.secondsLeft <= 1
+                   ? SleepPhase{ AboutToSuspend{} }
+                   : SleepPhase{ CountingDown{ cd.secondsLeft - 1 } };
+        },
+        [&self](const AboutToSuspend&) -> std::optional<SleepPhase> {
+          if (self.sleep()) {
+            // If the user pressed the button, stop the timer and return to
+            // the current app.
+            self.resetInactivity();
+            self.sleepTimer.disable();
+            self.hide(nullptr);
+            return SleepPhase{ Idle{} };
+          }
+          // Retry sleeping if failed or something else woke us.
+          return SleepPhase{ CountingDown{ retry_sleep_timeout } };
+        },
+        [](const Idle&) -> std::optional<SleepPhase> { return std::nullopt; },
+      },
+      self.sleepPhase);
 
-    if (self.sleepCountdown == -1) {
-      if (self.sleep()) {
-        // If the user pressed the button, stop the timer and return to the
-        // current app.
-        self.resetInactivity();
-        self.sleepTimer.disable();
-        self.hide(nullptr);
-      } else {
-        // Retry sleeping if failed or something else woke us.
-        self.sleepCountdown = retry_sleep_timeout;
-      }
+    if (next) {
+      self.sleepPhase = std::move(*next);
     }
   });
 }
@@ -193,32 +186,34 @@ LauncherState::tick() const {
 void
 LauncherState::toggle(rmlib::AppContext& context) {
   background.reset();
-  if (visible) {
-    bool shouldStartTimer = sleepCountdown <= 0;
+  backgroundTimer.disable();
+
+  if (std::holds_alternative<Visible>(visibility)) {
+    const bool shouldStartTimer =
+      !std::holds_alternative<CountingDown>(sleepPhase);
     stopTimer();
     hide(shouldStartTimer ? &context : nullptr);
-  } else {
-    // Deferred to onSignal()'s SIGCONT - show()'s switchTo() can be held up
-    // server-side until xochitl reports idle, so starting the countdown here
-    // would eat into it before the launcher is even visible.
-    startSleepTimerOnShow = true;
-    show();
+  } else if (std::holds_alternative<Hidden>(visibility)) {
+    show(context);
   }
+  // Ignore repeated presses while a show request (PendingVisible) is in
+  // flight.
 }
 
 void
-LauncherState::show() {
-  if (visible) {
+LauncherState::show(rmlib::AppContext& context) {
+  if (!std::holds_alternative<Hidden>(visibility)) {
     return;
   }
 
+  pid_t returnTo = -1;
   const auto clientsOrErr = getWidget().ctlClient.getClients();
   if (clientsOrErr) {
     const auto it =
       std::find_if(clientsOrErr->begin(),
                    clientsOrErr->end(),
                    [](const auto& client) { return client.active; });
-    lastActive = it == clientsOrErr->end() ? -1 : it->pid;
+    returnTo = it == clientsOrErr->end() ? -1 : it->pid;
   } else {
     std::cerr << "Error getting clients: " << to_string(clientsOrErr.error())
               << "\n";
@@ -226,16 +221,33 @@ LauncherState::show() {
   if (auto err = getWidget().ctlClient.switchTo(getpid()); !err) {
     std::cerr << "Error switching: " << to_string(err.error()) << "\n";
   }
+
+  // `timeout` self-heals if the expected SIGCONT ack never arrives, so a
+  // failed/dropped switch can't leave us stuck in PendingVisible forever.
+  visibility = PendingVisible{
+    returnTo,
+    context.addTimer(show_timeout,
+                     [this] {
+                       setState([](auto& self) {
+                         if (std::holds_alternative<PendingVisible>(
+                               self.visibility)) {
+                           std::cerr << "Timed out waiting to become visible\n";
+                           self.visibility = Hidden{};
+                         }
+                       });
+                     }),
+  };
 }
 
 void
 LauncherState::hide(rmlib::AppContext* context) {
-  if (!visible) {
+  const auto* vis = std::get_if<Visible>(&visibility);
+  if (vis == nullptr) {
     return;
   }
 
-  if (lastActive != -1) {
-    switchApp(lastActive);
+  if (vis->returnTo != -1) {
+    switchApp(vis->returnTo);
   } else if (context != nullptr) {
     // sleep?
     startTimer(*context, 0);
@@ -277,14 +289,16 @@ LauncherState::onSignal(rmlib::AppContext& context) {
 
   if (*sigOrErr == SIGUSR1) {
     stopTimer();
-    visible = false;
+    visibility = Hidden{};
     background.reset();
   } else if (*sigOrErr == SIGCONT) {
-    visible = true;
-
-    if (startSleepTimerOnShow) {
-      startSleepTimerOnShow = false;
+    if (auto* pending = std::get_if<PendingVisible>(&visibility)) {
+      visibility = Visible{ pending->returnTo };
       startTimer(context);
+    } else {
+      // Spurious/unrequested SIGCONT: become visible with no known app to
+      // return to.
+      visibility = Visible{ -1 };
     }
 
     readApps();
@@ -366,12 +380,18 @@ LauncherState::readApps() {
   });
 }
 
-bool
-LauncherState::isRunning(pid_t pid) const {
-  return std::find_if(
-           fbClients.begin(), fbClients.end(), [pid](const auto& client) {
-             return client.pid == pid;
-           }) != fbClients.end();
+void
+LauncherState::releaseInhibitorLock() {
+  inhibitorLock.close();
+}
+
+void
+LauncherState::takeInhibitorLock() {
+  systemdpp::getInhibitLock()
+    .transform([this](auto fd) { inhibitorLock = std::move(fd); })
+    .or_else([](auto errc) {
+      std::cerr << "Could not get inhibit lock: " << to_string(errc) << "\n";
+    });
 }
 
 void
@@ -381,6 +401,21 @@ LauncherState::resetInactivity() const {
     const_cast<LauncherState*>(this)->takeInhibitorLock();
   }
   inactivityCountdown = default_inactivity_timeout;
+}
+
+void
+LauncherState::tickInactivity(rmlib::AppContext& context) const {
+  inactivityCountdown -= 1;
+  if (inactivityCountdown == 0) {
+    setState([&context](auto& self) {
+      self.releaseInhibitorLock();
+      if (std::holds_alternative<Hidden>(self.visibility)) {
+        self.show(context);
+      } else {
+        self.startTimer(context);
+      }
+    });
+  }
 }
 
 void

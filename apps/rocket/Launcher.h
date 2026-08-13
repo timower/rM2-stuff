@@ -14,9 +14,20 @@
 #include <UI/Stack.h>
 
 #include <ctime>
+#include <functional>
 #include <utility>
+#include <variant>
 
 class LauncherState;
+
+namespace {
+template<class... Ts>
+struct overloaded : Ts... {
+  using Ts::operator()...;
+};
+template<class... Ts>
+overloaded(Ts...) -> overloaded<Ts...>;
+} // namespace
 
 class LauncherWidget : public rmlib::StatefulWidget<LauncherWidget> {
 public:
@@ -47,6 +58,7 @@ class LauncherState : public rmlib::StateBase<LauncherWidget> {
   constexpr static auto battery_shutdown_percentage = 9;
 
   constexpr static rmlib::Size splash_size = { 512, 512 };
+  constexpr static auto show_timeout = std::chrono::seconds(10);
 
 public:
   void init(rmlib::AppContext& context, const rmlib::BuildContext& /*unused*/);
@@ -54,30 +66,33 @@ public:
   auto header(rmlib::AppContext& context) const {
     using namespace rmlib;
 
-    const auto text = [this]() -> std::string {
-      switch (sleepCountdown) {
-        case -1:
-          return "Welcome";
-        case 0:
-          return "Sleeping";
-        default:
-          return "Sleeping in : " + std::to_string(sleepCountdown);
-      }
-    }();
+    const auto text = std::visit(
+      overloaded{
+        [](const Idle&) -> std::string { return "Welcome"; },
+        [](const AboutToSuspend&) -> std::string { return "Sleeping"; },
+        [](const CountingDown& cd) -> std::string {
+          return "Sleeping in : " + std::to_string(cd.secondsLeft);
+        },
+      },
+      sleepPhase);
 
-    auto button = [this, &context] {
-      if (sleepCountdown > 0) {
-        return Button(
-          "Stop", [this] { setState([](auto& self) { self.stopTimer(); }); });
-      }
-      if (sleepCountdown == 0) {
-        // TODO: make hideable?
-        return Button("...", [] {});
-      }
-      return Button("Sleep", [this, &context] {
-        setState([&context](auto& self) { self.startTimer(context, 0); });
-      });
-    }();
+    auto button = std::visit(
+      overloaded{
+        [this](const CountingDown&) {
+          return Button(
+            "Stop", [this] { setState([](auto& self) { self.stopTimer(); }); });
+        },
+        [](const AboutToSuspend&) {
+          // TODO: make hideable?
+          return Button("...", [] {});
+        },
+        [this, &context](const Idle&) {
+          return Button("Sleep", [this, &context] {
+            setState([&context](auto& self) { self.startTimer(context, 0); });
+          });
+        },
+      },
+      sleepPhase);
 
     return Center(Padding(
       Column(Padding(Text(text, 2 * default_text_size), Insets::all(10)),
@@ -124,6 +139,9 @@ public:
   auto runningApps() const {
     using namespace rmlib;
 
+    const auto* vis = std::get_if<Visible>(&visibility);
+    const pid_t returnTo = vis != nullptr ? vis->returnTo : -1;
+
     std::vector<RunningAppWidget> widgets;
     const auto myPid = getpid();
     for (const auto& client : fbClients) {
@@ -147,7 +165,7 @@ public:
             kill(-getpgid(client.pid), SIGTERM);
           });
         },
-        client.pid == lastActive,
+        client.pid == returnTo,
         invert(rotation));
     }
     return Wrap(widgets);
@@ -182,7 +200,7 @@ public:
     using namespace rmlib;
 
     auto ui = [&]() -> std::optional<DynamicWidget> {
-      if (!visible) {
+      if (!std::holds_alternative<Visible>(visibility)) {
         return {};
       }
 
@@ -207,24 +225,73 @@ public:
   }
 
 private:
+  // Whether the launcher is the visible/active client, driven externally by
+  // the SIGUSR1/SIGCONT the multiplexer sends to ack a switchTo() request.
+  struct Hidden {};
+  struct Visible {
+    pid_t returnTo = -1; // app to switch back to when hidden again.
+  };
+  struct PendingVisible {
+    pid_t returnTo = -1;
+    rmlib::TimerHandle timeout;
+  };
+  using Visibility = std::variant<Hidden, PendingVisible, Visible>;
+
+  // Sleep countdown, independent of visibility.
+  struct Idle {};
+  struct CountingDown {
+    int secondsLeft;
+  };
+  struct AboutToSuspend {};
+  using SleepPhase = std::variant<Idle, CountingDown, AboutToSuspend>;
+
+  /// Suspends sync, returns false on failure or non-powerbutton resume.
   bool sleep() const;
-  void checkBatteryShutdown() const;
 
+  /// Power off if battery < battery_shutdown_percentage
+  void refreshBattery(bool clearTimer) const;
+
+  /// Set sleepPhase to CountingDown (or AboutToSuspend if time = 0).
+  /// Will start calling tick every second.
   void startTimer(rmlib::AppContext& context, int time = default_sleep_timeout);
+  /// Cancels an in-progress timer and sets the sleepPhase to Idle.
   void stopTimer();
-
-  void resetInactivity() const;
+  /// Decrements the CountingDown timer.
+  /// If <= 1 second left will transition to AboutToSuspend
+  /// If AboutToSuspend will call sleep:
+  ///  * On successful calls hide and sets the phase to Idle.
+  ///  * On fail will retry
+  /// Has no effect in Idle
   void tick() const;
 
-  void show();
+  /// Resets the inactivityCountdown and makes sure an idle lock is taken.
+  void resetInactivity() const;
+  /// Ticks the inactivity timer. If zero will suspend.
+  void tickInactivity(rmlib::AppContext& context) const;
+
+  /// Take an idle inhibitor lock, so logind doesn't behave weird.
+  void takeInhibitorLock();
+  /// Release the idle inhibitor.
+  void releaseInhibitorLock();
+
+  /// If Hidden will request rm2fb to become visible.
+  /// Will store the current active client in 'returnTo'.
+  /// visibility is PendingVisible until rm2fb notifies us.
+  void show(rmlib::AppContext& context);
+  /// If Visible will request rm2fb to switch to the 'returnTo' app.
+  /// If no app to return to, will suspend (startTimer) if context is not null.
   void hide(rmlib::AppContext* context);
+  /// If Visible will stop the timer, try 'hide()' or suspend.
+  /// If Hidden will show and start the timer.
   void toggle(rmlib::AppContext& context);
 
   void launch(rmlib::AppContext& ctx, App& app);
   void switchApp(pid_t pid);
 
+  /// On USR1 will stop the timer and set state to Hidden.
+  /// On CONT will set state to Visible and start the sleep timer.
+  /// Also refreshes apps & clients.
   void onSignal(rmlib::AppContext& context);
-  bool isRunning(pid_t pid) const;
 
   void readApps();
   void requestClients();
@@ -232,9 +299,6 @@ private:
   void updateRotation(rmlib::AppContext& ctx);
 
   void onKey(rmlib::AppContext& ctx, int keycode, bool down) const;
-
-  void takeInhibitorLock();
-  void releaseInhibitorLock();
 
   std::vector<App> apps;
 
@@ -252,13 +316,10 @@ private:
   rmlib::Rotation rotation = rmlib::Rotation::None;
   std::optional<rmlib::Canvas> background;
 
-  int sleepCountdown = -1;
+  SleepPhase sleepPhase{ Idle{} };
   mutable int inactivityCountdown = default_inactivity_timeout;
-  bool visible = true;
-  bool startSleepTimerOnShow = false;
+  Visibility visibility{ Visible{} };
 
   bool modPressed = false;
   unistdpp::FD inhibitorLock;
-
-  pid_t lastActive = -1;
 };

@@ -8,7 +8,9 @@
 #include "AppWidgets.h"
 #include "Launcher.h"
 
+#include <csignal>
 #include <fstream>
+#include <unistd.h>
 
 using namespace rmlib;
 
@@ -194,10 +196,20 @@ getFakeApps() {
 }
 
 struct FakeClient : ControlInterface {
-  unistdpp::Result<std::vector<Client>> getClients() override { return {}; }
+  std::vector<Client> clients;
+  pid_t lastSwitchTo = -1;
+  int switchToCount = 0;
+
+  unistdpp::Result<std::vector<Client>> getClients() override {
+    return clients;
+  }
   unistdpp::Result<int> getFramebuffer(pid_t pid) override { return {}; }
 
-  unistdpp::Result<void> switchTo(pid_t pid) override { return {}; }
+  unistdpp::Result<void> switchTo(pid_t pid) override {
+    lastSwitchTo = pid;
+    switchToCount++;
+    return {};
+  }
   unistdpp::Result<void> setLauncher(pid_t pid) override { return {}; }
 };
 
@@ -213,6 +225,31 @@ struct FakePower : PowerInterface {
   bool suspend() override { return suspendResult; }
   void powerOff() override { didPowerOff = true; }
 };
+
+// Simulates a physical key press/release, e.g. the power button.
+void
+sendKey(TestContext& ctx, int keyCode, bool down) {
+  SDL_Event ev{};
+  ev.type = down ? SDL_KEYDOWN : SDL_KEYUP;
+  ev.key.keysym.scancode = static_cast<SDL_Scancode>(keyCode);
+  ctx.sendEv(ev);
+}
+
+void
+pressPower(TestContext& ctx) {
+  // Under EMULATE, Launcher.cpp's KEY_POWER is remapped to SDL_SCANCODE_POWER
+  // (see EmulatedKeyCodes.h) rather than the real evdev KEY_POWER (116).
+  sendKey(ctx, SDL_SCANCODE_POWER, true);
+  sendKey(ctx, SDL_SCANCODE_POWER, false);
+  ctx.pump(std::chrono::milliseconds(10));
+}
+
+// Simulates the multiplexer acking/revoking a switch via SIGCONT/SIGUSR1.
+void
+raiseAndPump(TestContext& ctx, int sig) {
+  raise(sig);
+  ctx.pump(std::chrono::milliseconds(20));
+}
 
 TEST_CASE("Landscape", "[rocket][launcher]") {
   auto client = FakeClient{};
@@ -235,6 +272,144 @@ TEST_CASE("Launcher", "[rocket][launcher]") {
   auto launcher = ctx.findByType<LauncherWidget>();
 
   REQUIRE_THAT(launcher, ctx.matchesGolden("rocket.png"));
+}
+
+TEST_CASE("Launcher FSM: toggle defers the sleep timer until visible",
+          "[rocket][launcher]") {
+  auto client = FakeClient{};
+  client.clients = { ControlInterface::Client{
+    .pid = 4242, .active = true, .format = {}, .name = "other" } };
+  auto power = FakePower{};
+
+  auto ctx = TestContext::make();
+  ctx.pumpWidget(Center(LauncherWidget(client, power, getFakeApps)));
+
+  // Starts visible (rocket is the foreground app when it launches).
+  REQUIRE_FALSE(ctx.findByText("Welcome").empty());
+
+  // The multiplexer switches away: launcher goes hidden. (Hideable doesn't
+  // detach the render tree when hiding, only skips drawing/input for it, so
+  // we can't assert "Welcome" is gone here - only that becoming visible
+  // again behaves as if it were. See show()'s Hidden guard below.)
+  raiseAndPump(ctx, SIGUSR1);
+
+  // User presses power: requests to become visible again, but the sleep
+  // countdown must not start until that's confirmed.
+  pressPower(ctx);
+  CHECK(client.switchToCount == 1);
+  CHECK(client.lastSwitchTo == getpid());
+  REQUIRE(ctx.findByText("Sleeping in : 10").empty());
+
+  // The multiplexer acks the switch: *now* the countdown starts.
+  raiseAndPump(ctx, SIGCONT);
+  REQUIRE_FALSE(ctx.findByText("Sleeping in : 10").empty());
+}
+
+TEST_CASE("Launcher FSM: a pending show self-heals if the ack never arrives",
+          "[rocket][launcher]") {
+  auto client = FakeClient{};
+  auto power = FakePower{};
+
+  auto ctx = TestContext::make();
+  ctx.pumpWidget(Center(LauncherWidget(client, power, getFakeApps)));
+
+  raiseAndPump(ctx, SIGUSR1);
+
+  pressPower(ctx);
+  CHECK(client.switchToCount == 1);
+
+  // A repeated press while a show request is already pending is ignored.
+  pressPower(ctx);
+  CHECK(client.switchToCount == 1);
+
+  // Once the pending request times out (no SIGCONT ever arrived), the
+  // launcher reverts to hidden, so a fresh press issues a new request.
+  ctx.pump(std::chrono::milliseconds(10500));
+  pressPower(ctx);
+  CHECK(client.switchToCount == 2);
+}
+
+TEST_CASE(
+  "Launcher FSM: hide() returns to the previous app, or sleeps if none is "
+  "known",
+  "[rocket][launcher]") {
+  auto client = FakeClient{};
+  client.clients = { ControlInterface::Client{
+    .pid = 777, .active = true, .format = {}, .name = "other" } };
+  auto power = FakePower{};
+
+  auto ctx = TestContext::make();
+  ctx.pumpWidget(Center(LauncherWidget(client, power, getFakeApps)));
+
+  raiseAndPump(ctx, SIGUSR1);
+  pressPower(ctx);
+  raiseAndPump(ctx, SIGCONT); // Visible{returnTo=777}, counting down.
+  REQUIRE_FALSE(ctx.findByText("Sleeping in : 10").empty());
+
+  // Cancel the countdown via the Stop button.
+  auto stop = ctx.findByText("Stop");
+  REQUIRE(stop.size() == 1);
+  ctx.tap(stop);
+  ctx.pump();
+  REQUIRE_FALSE(ctx.findByText("Welcome").empty());
+
+  // Pressing power again returns to the known app rather than sleeping.
+  pressPower(ctx);
+  CHECK(client.lastSwitchTo == 777);
+}
+
+TEST_CASE(
+  "Launcher FSM: pressing power sleeps immediately when nothing to return to",
+  "[rocket][launcher]") {
+  // Force the retry branch so it's observable instead of racing a real tick.
+  auto client = FakeClient{}; // getClients() -> empty, no known active app.
+  auto power = FakePower{};
+  power.suspendResult = false;
+
+  auto ctx = TestContext::make();
+  ctx.pumpWidget(Center(LauncherWidget(client, power, getFakeApps)));
+
+  // Launcher starts visible & idle; with nothing to return to, pressing
+  // power should attempt to sleep right away rather than no-op.
+  pressPower(ctx);
+  ctx.pump(std::chrono::milliseconds(50));
+
+  REQUIRE_FALSE(ctx.findByText("Sleeping in : 8").empty()); // retry timeout
+  CHECK(client.switchToCount == 0);
+}
+
+TEST_CASE("Launcher FSM: a successful sleep returns to idle",
+          "[rocket][launcher]") {
+  auto client = FakeClient{};
+  auto power = FakePower{};
+
+  auto ctx = TestContext::make();
+  ctx.pumpWidget(Center(LauncherWidget(client, power, getFakeApps)));
+
+  pressPower(ctx); // Idle -> AboutToSuspend (immediate, no returnTo).
+  ctx.pump(std::chrono::milliseconds(50));
+
+  REQUIRE_FALSE(ctx.findByText("Welcome").empty());
+  CHECK(client.switchToCount == 0); // Nothing to switch back to.
+}
+
+TEST_CASE("Launcher FSM: sleep countdown decrements every second",
+          "[rocket][launcher]") {
+  auto client = FakeClient{};
+  client.clients = { ControlInterface::Client{
+    .pid = 555, .active = true, .format = {}, .name = "other" } };
+  auto power = FakePower{};
+
+  auto ctx = TestContext::make();
+  ctx.pumpWidget(Center(LauncherWidget(client, power, getFakeApps)));
+
+  raiseAndPump(ctx, SIGUSR1);
+  pressPower(ctx);
+  raiseAndPump(ctx, SIGCONT);
+  REQUIRE_FALSE(ctx.findByText("Sleeping in : 10").empty());
+
+  ctx.pump(std::chrono::milliseconds(1100));
+  REQUIRE_FALSE(ctx.findByText("Sleeping in : 9").empty());
 }
 
 TEST_CASE("Launcher battery: shows a warning icon below 10%, unrelated to "
