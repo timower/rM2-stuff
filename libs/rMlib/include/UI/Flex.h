@@ -92,6 +92,32 @@ protected:
       result.width = constraints.min.width;
     }
 
+    // A child whose own size didn't change still needs to redraw if its
+    // offset moved - e.g. cross-axis centering shifts it when a sibling's
+    // size changes. Without this, an unchanged child's draw()/cleanup()
+    // never runs, so its cached (now stale) position gets composed with its
+    // ancestors' fresh ones during cleanup, clearing the wrong rect.
+    {
+      const auto maxSize = isVertical() ? result.height : result.width;
+      auto offset = (maxSize - totalSize) / 2;
+      for (auto i = 0U; i < num_children; i++) {
+        const auto& size = childSizes[i];
+        const auto otherOffset = isVertical()
+                                   ? (result.width - size.width) / 2
+                                   : (result.height - size.height) / 2;
+        const auto offsetPoint = isVertical()
+                                   ? rmlib::Point{ otherOffset, offset }
+                                   : rmlib::Point{ offset, otherOffset };
+
+        if (offsetPoint != childOffsets[i]) {
+          childOffsets[i] = offsetPoint;
+          this->children[i]->markNeedsDraw();
+        }
+
+        offset += isVertical() ? size.height : size.width;
+      }
+    }
+
     return result;
   }
 
@@ -204,6 +230,8 @@ private:
   // TODO: remove both:
   std::array<Size, num_children> childSizes;
   int totalSize{};
+
+  std::array<rmlib::Point, num_children> childOffsets{};
 };
 
 template<typename... Children>

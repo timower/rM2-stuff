@@ -172,6 +172,89 @@ TEST_CASE("Flex", "[rmlib][ui]") {
   }
 }
 
+// Mirrors rocket's Launcher::header() shape: Column(Padding(Text(label)),
+// Button). `initialWideLabel` seeds the starting state so a test can mount
+// directly into a target state, for comparison against another instance
+// that reaches the same state incrementally via setState.
+class FlexOffsetRepro : public StatefulWidget<FlexOffsetRepro> {
+  class State : public StateBase<FlexOffsetRepro> {
+  public:
+    void init(AppContext& /*unused*/, const BuildContext& /*unused*/) {
+      wideLabel = getWidget().initialWideLabel;
+    }
+
+    auto build(AppContext& /*unused*/, const BuildContext& /*unused*/) const {
+      auto label = wideLabel ? std::string("Sleeping in : 10")
+                             : std::string("Sleeping in : 9");
+      // Button's own text/onClick never changes in this test - only its
+      // *position* moves, driven purely by the label sibling resizing.
+      auto button = Button("Stop", [] {});
+
+      auto header = Center(Padding(
+        Column(Padding(Text(label), Insets::all(10)), std::move(button)),
+        Insets::all(50)));
+
+      // A plain GestureDetector, not a Button: tapping a Button toggles its
+      // own `down` state for the pressed-visual, which would incidentally
+      // redraw the label row too and isn't what's under test here.
+      return Column(
+        std::move(header),
+        GestureDetector(Text("ToggleLabel"), Gestures{}.onTap([this] {
+          setState([](auto& self) { self.wideLabel = !self.wideLabel; });
+        })));
+    }
+
+    bool wideLabel = true;
+  };
+
+public:
+  explicit FlexOffsetRepro(bool initialWideLabel = true)
+    : initialWideLabel(initialWideLabel) {}
+  static State createState() { return State{}; }
+
+  bool initialWideLabel;
+};
+
+TEST_CASE("Flex: a child whose offset shifts because a sibling resized must "
+          "still redraw, even when its own content is unchanged",
+          "[rmlib][ui]") {
+  // Reach "label already shrunk" incrementally, by toggling the label after
+  // an initial mount. The Button's own content never changes, so if its
+  // offset doesn't get refreshed when the label resizes, its composed
+  // on-screen rect goes stale relative to its (freshly redrawn) ancestors.
+  auto ctx = TestContext::make();
+  ctx.pumpWidget(FlexOffsetRepro{});
+  REQUIRE_FALSE(ctx.findByText("Sleeping in : 10").empty());
+
+  ctx.tap(ctx.findByText("ToggleLabel"));
+  ctx.pump();
+  REQUIRE_FALSE(ctx.findByText("Sleeping in : 9").empty());
+
+  auto incrementalButton = ctx.findByType<Button>();
+  REQUIRE(incrementalButton.size() == 1);
+  auto incrementalRect = incrementalButton.front().rect();
+
+  // Ground truth: mount fresh directly into the same target state. A first
+  // draw is always a full draw, so this position is unquestionably correct.
+  auto freshCtx = TestContext::make();
+  freshCtx.pumpWidget(FlexOffsetRepro{ /*initialWideLabel=*/false });
+  REQUIRE_FALSE(freshCtx.findByText("Sleeping in : 9").empty());
+
+  auto freshButton = freshCtx.findByType<Button>();
+  REQUIRE(freshButton.size() == 1);
+  auto freshRect = freshButton.front().rect();
+
+  INFO("incremental=(" << incrementalRect.topLeft.x << ","
+                       << incrementalRect.topLeft.y << ")-("
+                       << incrementalRect.bottomRight.x << ","
+                       << incrementalRect.bottomRight.y << ") fresh=("
+                       << freshRect.topLeft.x << "," << freshRect.topLeft.y
+                       << ")-(" << freshRect.bottomRight.x << ","
+                       << freshRect.bottomRight.y << ")");
+  CHECK(incrementalRect.topLeft == freshRect.topLeft);
+  CHECK(incrementalRect.bottomRight == freshRect.bottomRight);
+}
+
 TEST_CASE("Dynamic", "[rmlib][ui]") {
   auto ctx = TestContext::make();
   ctx.pumpWidget(Center(DynamicWidget(Text("12"))));
