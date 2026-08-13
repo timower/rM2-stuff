@@ -42,7 +42,8 @@ int
 main(int argc, char* argv[]) {
   // Connect ctrl client here to make sure rm2fb server is started.
   ControlClient ctlClient;
-  SystemPowerInterface power;
+  auto power = unistdpp::fatalOnError(SystemPowerInterface::open(),
+                                      "Failed to open system bus: ");
 
 #ifndef EMULATE
   unistdpp::fatalOnError(ctlClient.init(),

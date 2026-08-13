@@ -1,7 +1,5 @@
 #include "Launcher.h"
 
-#include <systemdpp/sdbus.h>
-
 #include <sys/timerfd.h>
 
 using namespace rmlib;
@@ -104,6 +102,13 @@ LauncherState::init(rmlib::AppContext& context,
     std::chrono::minutes(1));
 
   takeInhibitorLock();
+
+  if (auto fd = getWidget().power.sleepFd(); fd >= 0) {
+    context.listenFd(fd,
+                     [this, &context] { modify().onSleepFdReady(context); });
+  }
+  takeSleepLock();
+
   inactivityTimer = context.addTimer(
     std::chrono::minutes(1),
     [this, &context] { tickInactivity(context); },
@@ -130,10 +135,67 @@ LauncherState::refreshBattery(bool clearTimer) const {
   getWidget().power.powerOff();
 }
 
-bool
-LauncherState::sleep() const {
-  return getWidget().power.suspend();
+void
+LauncherState::onSleepFdReady(rmlib::AppContext& context) {
+  // pollSleep() only ever returns a single transition, so a queued
+  // true-then-false pair (e.g. after the process itself was frozen for the
+  // actual suspend) needs draining in a loop to react to both in order.
+  for (;;) {
+    auto update = getWidget().power.pollSleep();
+    if (!update.has_value()) {
+      return;
+    }
+
+    if (update->sleeping) {
+      onPrepareSleep(context);
+    } else {
+      onResume(context, update->wokenByUser);
+    }
+  }
 }
+
+void
+LauncherState::onPrepareSleep(rmlib::AppContext& context) {
+  if (std::holds_alternative<Visible>(visibility)) {
+    // build() turns this into a synced GC16 refresh, guaranteeing
+    // "Sleeping" is actually on the panel before we let suspend proceed -
+    // regardless of what triggered it.
+    sleepTimer.disable();
+    sleepPhase = AboutToSuspend{};
+  }
+
+  // Deferred so the release lands after the *next* draw (which now reflects
+  // the state above, if we just set it) rather than before it - see
+  // AppContext::step()'s doAllLaters() placement. Detaches sleepLock's raw
+  // fd rather than calling releaseSleepLock() later: a resume can arrive
+  // (and re-acquire a fresh lock into the member) before this runs, and
+  // closing by member reference would then release the wrong one. (Callback
+  // must stay copyable for std::function, hence the raw int instead of
+  // moving the FD itself.)
+  auto fd = std::exchange(sleepLock.fd, unistdpp::FD::invalid_fd);
+  context.doLater([fd] { unistdpp::FD{ fd }.close(); });
+}
+
+void
+LauncherState::onResume(rmlib::AppContext& context, bool wokenByUser) {
+  takeSleepLock();
+
+  if (!std::holds_alternative<AboutToSuspend>(sleepPhase)) {
+    // Not a suspend we reacted to (rocket wasn't on screen) - nothing else
+    // to do.
+    return;
+  }
+
+  if (wokenByUser) {
+    resetInactivity();
+    hide(nullptr);
+    sleepPhase = Idle{};
+  } else {
+    // Retry sleeping if something else woke us.
+    startTimer(context, retry_sleep_timeout);
+  }
+}
+
 void
 LauncherState::stopTimer() {
   sleepTimer.disable();
@@ -142,38 +204,28 @@ LauncherState::stopTimer() {
 
 void
 LauncherState::startTimer(rmlib::AppContext& context, int time) {
-  sleepPhase = time <= 0 ? SleepPhase{ AboutToSuspend{} }
-                         : SleepPhase{ CountingDown{ time } };
+  sleepPhase = CountingDown{ time };
   sleepTimer.disable();
   sleepTimer = context.addTimer(
-    std::chrono::seconds(time == 0 ? 0 : 1),
-    [this] { tick(); },
+    std::chrono::seconds(1),
+    [this, &context] { tick(context); },
     std::chrono::seconds(1));
 }
 
 void
-LauncherState::tick() const {
-  setState([](auto& self) {
+LauncherState::tick(rmlib::AppContext& context) const {
+  setState([&context](auto& self) {
     auto next = std::visit(
       overloaded{
-        [](const CountingDown& cd) -> std::optional<SleepPhase> {
-          return cd.secondsLeft <= 1
-                   ? SleepPhase{ AboutToSuspend{} }
-                   : SleepPhase{ CountingDown{ cd.secondsLeft - 1 } };
-        },
-        [&self](const AboutToSuspend&) -> std::optional<SleepPhase> {
-          if (self.sleep()) {
-            // If the user pressed the button, stop the timer and return to
-            // the current app.
-            self.resetInactivity();
-            self.sleepTimer.disable();
-            self.hide(nullptr);
-            return SleepPhase{ Idle{} };
+        [&self, &context](const CountingDown& cd) -> std::optional<SleepPhase> {
+          if (cd.secondsLeft > 1) {
+            return SleepPhase{ CountingDown{ cd.secondsLeft - 1 } };
           }
-          // Retry sleeping if failed or something else woke us.
-          return SleepPhase{ CountingDown{ retry_sleep_timeout } };
+
+          self.sleepNow(context);
+          return std::nullopt;
         },
-        [](const Idle&) -> std::optional<SleepPhase> { return std::nullopt; },
+        [](const auto&) -> std::optional<SleepPhase> { return std::nullopt; },
       },
       self.sleepPhase);
 
@@ -181,6 +233,18 @@ LauncherState::tick() const {
       self.sleepPhase = std::move(*next);
     }
   });
+}
+
+void
+LauncherState::sleepNow(rmlib::AppContext& context) {
+  // onPrepareSleep() is what actually moves to AboutToSuspend, once
+  // PrepareForSleep(true) confirms the suspend is really happening.
+  sleepTimer.disable();
+  if (!getWidget().power.requestSuspend()) {
+    // The request itself failed - retry, since no PrepareForSleep will
+    // ever arrive to drive things otherwise.
+    startTimer(context, retry_sleep_timeout);
+  }
 }
 
 void
@@ -249,8 +313,7 @@ LauncherState::hide(rmlib::AppContext* context) {
   if (vis->returnTo != -1) {
     switchApp(vis->returnTo);
   } else if (context != nullptr) {
-    // sleep?
-    startTimer(*context, 0);
+    sleepNow(*context);
   }
 }
 
@@ -387,10 +450,22 @@ LauncherState::releaseInhibitorLock() {
 
 void
 LauncherState::takeInhibitorLock() {
-  systemdpp::getInhibitLock()
+  getWidget()
+    .power.acquireIdleLock()
     .transform([this](auto fd) { inhibitorLock = std::move(fd); })
     .or_else([](auto errc) {
       std::cerr << "Could not get inhibit lock: " << to_string(errc) << "\n";
+    });
+}
+
+void
+LauncherState::takeSleepLock() {
+  getWidget()
+    .power.acquireSleepLock()
+    .transform([this](auto fd) { sleepLock = std::move(fd); })
+    .or_else([](auto errc) {
+      std::cerr << "Could not get sleep inhibit lock: " << to_string(errc)
+                << "\n";
     });
 }
 

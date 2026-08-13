@@ -88,7 +88,7 @@ public:
         },
         [this, &context](const Idle&) {
           return Button("Sleep", [this, &context] {
-            setState([&context](auto& self) { self.startTimer(context, 0); });
+            setState([&context](auto& self) { self.sleepNow(context); });
           });
         },
       },
@@ -213,7 +213,13 @@ public:
       return Rotated(rotation, launcher(context));
     }();
 
-    return GestureDetector(Hideable(std::move(ui)),
+    // AboutToSuspend must land as a genuine synced GC16 refresh - FullRefresh
+    // blocks in swtcon until the draw completes, which is what lets us know
+    // "Sleeping" actually hit the panel before suspend is allowed to proceed.
+    const bool aboutToSuspend =
+      std::holds_alternative<AboutToSuspend>(sleepPhase);
+
+    return GestureDetector(Hideable(std::move(ui), aboutToSuspend),
                            Gestures{}
                              .onKeyUp([this, &context](auto keyCode) {
                                onKey(context, keyCode, false);
@@ -244,25 +250,21 @@ private:
   };
   struct AboutToSuspend {};
   using SleepPhase = std::variant<Idle, CountingDown, AboutToSuspend>;
-
-  /// Suspends sync, returns false on failure or non-powerbutton resume.
-  bool sleep() const;
-
   /// Power off if battery < battery_shutdown_percentage
   void refreshBattery(bool clearTimer) const;
 
-  /// Set sleepPhase to CountingDown (or AboutToSuspend if time = 0).
-  /// Will start calling tick every second.
+  /// Sets sleepPhase to CountingDown{time} and starts calling tick every
+  /// second.
   void startTimer(rmlib::AppContext& context, int time = default_sleep_timeout);
   /// Cancels an in-progress timer and sets the sleepPhase to Idle.
   void stopTimer();
-  /// Decrements the CountingDown timer.
-  /// If <= 1 second left will transition to AboutToSuspend
-  /// If AboutToSuspend will call sleep:
-  ///  * On successful calls hide and sets the phase to Idle.
-  ///  * On fail will retry
-  /// Has no effect in Idle
-  void tick() const;
+  /// Decrements the CountingDown timer. Once it reaches zero, requests a
+  /// suspend - onPrepareSleep() is what actually moves to AboutToSuspend,
+  /// once PrepareForSleep(true) confirms it's really happening.
+  void tick(rmlib::AppContext& context) const;
+  /// Requests a suspend right away, retrying (via startTimer) if the
+  /// request itself fails.
+  void sleepNow(rmlib::AppContext& context);
 
   /// Resets the inactivityCountdown and makes sure an idle lock is taken.
   void resetInactivity() const;
@@ -273,6 +275,17 @@ private:
   void takeInhibitorLock();
   /// Release the idle inhibitor.
   void releaseInhibitorLock();
+
+  /// Take the sleep delay lock, deferring an in-progress suspend.
+  void takeSleepLock();
+
+  /// Handles a PrepareForSleep transition read from pollSleep().
+  void onSleepFdReady(rmlib::AppContext& context);
+  /// Sets sleepPhase to AboutToSuspend if rocket is visible, which build()
+  /// turns into a synced "Sleeping" draw before the sleep lock is released.
+  void onPrepareSleep(rmlib::AppContext& context);
+  /// Re-acquires the sleep lock; resumes to the current app or retries.
+  void onResume(rmlib::AppContext& context, bool wokenByUser);
 
   /// If Hidden will request rm2fb to become visible.
   /// Will store the current active client in 'returnTo'.
@@ -322,4 +335,5 @@ private:
 
   bool modPressed = false;
   unistdpp::FD inhibitorLock;
+  unistdpp::FD sleepLock;
 };

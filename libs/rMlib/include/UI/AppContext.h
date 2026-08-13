@@ -144,10 +144,15 @@ public:
         updateRegion.region, updateRegion.waveform, updateRegion.flags);
     }
 
+    // Run before waitForInput/checkTimers so a doLater() queued from a
+    // listenFd callback (which runs inside waitForInput, before this step's
+    // own checkTimers) only executes here on the *next* step - i.e. after
+    // that step's draw, not before it.
+    doAllLaters();
+
     const auto duration = getNextDuration();
     const auto evsOrError = waitForInput(duration);
     checkTimers();
-    doAllLaters();
 
     if (!evsOrError.has_value()) {
       std::cerr << evsOrError.error().msg << std::endl;

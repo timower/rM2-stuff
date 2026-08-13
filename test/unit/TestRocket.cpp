@@ -6,7 +6,11 @@
 
 #include "App.h"
 #include "AppWidgets.h"
+#include "Hideable.h"
 #include "Launcher.h"
+
+#include <unistdpp/pipe.h>
+#include <unistdpp/poll.h>
 
 #include <csignal>
 #include <fstream>
@@ -176,6 +180,51 @@ TEST_CASE("AppWidget", "[rocket]") {
   }
 }
 
+TEST_CASE("Hideable: forceRefresh requests a genuine GC16 full refresh",
+          "[rocket]") {
+  auto ctx = TestContext::make();
+  const auto constraints = Constraints{ { 0, 0 }, { 100, 100 } };
+
+  Hideable<Text> initial{ std::nullopt };
+  auto ro = initial.createRenderObject();
+  auto& hideableRO = static_cast<HideableRenderObject<Text>&>(*ro);
+
+  hideableRO.layout(constraints);
+  hideableRO.draw(ctx.getFramebuffer().canvas,
+                  { 0, 0 }); // consume initial draw.
+
+  SECTION("becoming visible without forceRefresh only upgrades the waveform") {
+    Hideable<Text> shown{ Text("hi") };
+    hideableRO.update(shown);
+    hideableRO.layout(constraints);
+
+    auto result = hideableRO.draw(ctx.getFramebuffer().canvas, { 0, 0 });
+    CHECK(result.waveform == fb::Waveform::GC16Fast);
+    CHECK(result.flags == fb::UpdateFlags::None);
+  }
+
+  SECTION("forceRefresh forces GC16 + FullRefresh") {
+    Hideable<Text> shown{ Text("hi"), /*forceRefresh=*/true };
+    hideableRO.update(shown);
+    hideableRO.layout(constraints);
+
+    auto result = hideableRO.draw(ctx.getFramebuffer().canvas, { 0, 0 });
+    CHECK(result.waveform == fb::Waveform::GC16Fast);
+    CHECK(result.flags == fb::UpdateFlags::FullRefresh);
+  }
+
+  SECTION("forceRefresh is consumed after a single draw") {
+    Hideable<Text> shown{ Text("hi"), /*forceRefresh=*/true };
+    hideableRO.update(shown);
+    hideableRO.layout(constraints);
+    hideableRO.draw(ctx.getFramebuffer().canvas, { 0, 0 });
+
+    hideableRO.markNeedsDraw();
+    auto result = hideableRO.draw(ctx.getFramebuffer().canvas, { 0, 0 });
+    CHECK(result.flags == fb::UpdateFlags::None);
+  }
+}
+
 std::vector<AppDescription>
 getFakeApps() {
   std::vector<AppDescription> res;
@@ -213,18 +262,104 @@ struct FakeClient : ControlInterface {
   unistdpp::Result<void> setLauncher(pid_t pid) override { return {}; }
 };
 
+// Simulates the real fd+pollSleep() surface SystemPowerInterface exposes,
+// so tests exercise the same context.listenFd()/pollSleep() wiring
+// LauncherState actually uses, rather than bypassing it. Lock fds are real
+// pipe ends too, so a test can observe whether Launcher actually released
+// one (see sleepLockReleased()) instead of trusting a self-reported flag.
 struct FakePower : PowerInterface {
   std::optional<rmlib::device::BatteryInfo> battery =
     rmlib::device::BatteryInfo{ .percentage = 100, .isCharging = false };
-  bool suspendResult = true;
   bool didPowerOff = false;
+
+  int suspendRequests = 0;
+  bool suspendShouldFail = false;
+
+  int acquireSleepLockCalls = 0;
+  unistdpp::FD sleepLockReadEnd; // test-visible: see sleepLockReleased().
+
+  int acquireIdleLockCalls = 0;
+
+  std::optional<SleepUpdate> pendingUpdate;
+  unistdpp::FD sleepReadFd;
+  unistdpp::FD sleepWriteFd;
+
+  FakePower() {
+    auto pipe = unistdpp::fatalOnError(unistdpp::pipe());
+    sleepReadFd = std::move(pipe.readPipe);
+    sleepWriteFd = std::move(pipe.writePipe);
+  }
 
   std::optional<rmlib::device::BatteryInfo> getBattery() override {
     return battery;
   }
-  bool suspend() override { return suspendResult; }
   void powerOff() override { didPowerOff = true; }
+
+  int sleepFd() override { return sleepReadFd.fd; }
+
+  std::optional<SleepUpdate> pollSleep() override {
+    // Non-blocking like the real bus fd: onSleepFdReady() calls this in a
+    // loop until it reports nothing left, so a second call with no pending
+    // byte must not block waiting for one.
+    std::vector<pollfd> fds{ unistdpp::waitFor(sleepReadFd,
+                                               unistdpp::Wait::Read) };
+    auto res = unistdpp::poll(fds, std::chrono::milliseconds(0));
+    if (!res.has_value() || *res == 0) {
+      return std::nullopt;
+    }
+
+    sleepReadFd.readAll<char>().or_else([](auto /*unused*/) {});
+    return std::exchange(pendingUpdate, std::nullopt);
+  }
+
+  bool requestSuspend() override {
+    suspendRequests++;
+    return !suspendShouldFail;
+  }
+
+  unistdpp::Result<unistdpp::FD> acquireSleepLock() override {
+    acquireSleepLockCalls++;
+    auto pipe = unistdpp::fatalOnError(unistdpp::pipe());
+    sleepLockReadEnd = std::move(pipe.readPipe);
+    return std::move(pipe.writePipe);
+  }
+
+  unistdpp::Result<unistdpp::FD> acquireIdleLock() override {
+    acquireIdleLockCalls++;
+    auto pipe = unistdpp::fatalOnError(unistdpp::pipe());
+    return std::move(pipe.writePipe);
+  }
 };
+
+// True once the write end handed out by the most recent acquireSleepLock()
+// call has been closed - i.e. the caller actually released the lock,
+// observed the same way a real pipe/eventfd consumer would (EOF/HUP).
+bool
+sleepLockReleased(FakePower& power) {
+  std::vector<pollfd> fds{ unistdpp::waitFor(power.sleepLockReadEnd,
+                                             unistdpp::Wait::Read) };
+  auto res = unistdpp::poll(fds, std::chrono::milliseconds(0));
+  return res.has_value() && *res > 0 && unistdpp::isClosed(fds[0]);
+}
+
+// Makes power's sleepFd() readable with `update` pending, as
+// SystemPowerInterface's real fd would once a PrepareForSleep signal
+// arrives, then pumps the context so it gets processed.
+void
+triggerSleepEvent(TestContext& ctx,
+                  FakePower& power,
+                  PowerInterface::SleepUpdate update) {
+  power.pendingUpdate = update;
+  power.sleepWriteFd.writeAll('x').or_else([](auto /*unused*/) {});
+  ctx.pump(std::chrono::milliseconds(10));
+}
+
+// Simulates logind's PrepareForSleep(false) resume signal.
+void
+simulateResume(TestContext& ctx, FakePower& power, bool wokenByUser) {
+  triggerSleepEvent(
+    ctx, power, { .sleeping = false, .wokenByUser = wokenByUser });
+}
 
 // Simulates a physical key press/release, e.g. the power button.
 void
@@ -361,10 +496,8 @@ TEST_CASE(
 TEST_CASE(
   "Launcher FSM: pressing power sleeps immediately when nothing to return to",
   "[rocket][launcher]") {
-  // Force the retry branch so it's observable instead of racing a real tick.
   auto client = FakeClient{}; // getClients() -> empty, no known active app.
   auto power = FakePower{};
-  power.suspendResult = false;
 
   auto ctx = TestContext::make();
   ctx.pumpWidget(Center(LauncherWidget(client, power, getFakeApps)));
@@ -374,8 +507,15 @@ TEST_CASE(
   pressPower(ctx);
   ctx.pump(std::chrono::milliseconds(50));
 
-  REQUIRE_FALSE(ctx.findByText("Sleeping in : 8").empty()); // retry timeout
+  CHECK(power.suspendRequests == 1);
   CHECK(client.switchToCount == 0);
+
+  // logind confirms it's actually suspending.
+  triggerSleepEvent(ctx, power, { .sleeping = true, .wokenByUser = false });
+
+  // Something other than the user woke it back up - retry.
+  simulateResume(ctx, power, /*wokenByUser=*/false);
+  REQUIRE_FALSE(ctx.findByText("Sleeping in : 8").empty()); // retry timeout
 }
 
 TEST_CASE("Launcher FSM: a successful sleep returns to idle",
@@ -386,11 +526,39 @@ TEST_CASE("Launcher FSM: a successful sleep returns to idle",
   auto ctx = TestContext::make();
   ctx.pumpWidget(Center(LauncherWidget(client, power, getFakeApps)));
 
-  pressPower(ctx); // Idle -> AboutToSuspend (immediate, no returnTo).
+  pressPower(ctx); // Idle -> requests suspend immediately (no returnTo).
   ctx.pump(std::chrono::milliseconds(50));
+  CHECK(power.suspendRequests == 1);
+
+  // logind confirms it's actually suspending.
+  triggerSleepEvent(ctx, power, { .sleeping = true, .wokenByUser = false });
+
+  simulateResume(ctx, power, /*wokenByUser=*/true);
 
   REQUIRE_FALSE(ctx.findByText("Welcome").empty());
   CHECK(client.switchToCount == 0); // Nothing to switch back to.
+}
+
+TEST_CASE(
+  "Launcher FSM: a failed suspend request retries without waiting for a "
+  "resume signal",
+  "[rocket][launcher]") {
+  // Distinct from the "pressing power sleeps immediately..." case above:
+  // there the *request* succeeds and it's the resume reason that's not the
+  // user; here the request itself fails, so no PrepareForSleep(false) will
+  // ever arrive to drive the retry - tick() must notice synchronously.
+  auto client = FakeClient{};
+  auto power = FakePower{};
+  power.suspendShouldFail = true;
+
+  auto ctx = TestContext::make();
+  ctx.pumpWidget(Center(LauncherWidget(client, power, getFakeApps)));
+
+  pressPower(ctx); // Idle -> requests suspend immediately (no returnTo).
+  ctx.pump(std::chrono::milliseconds(50));
+
+  CHECK(power.suspendRequests == 1);
+  REQUIRE_FALSE(ctx.findByText("Sleeping in : 8").empty()); // retry timeout
 }
 
 TEST_CASE("Launcher FSM: sleep countdown decrements every second",
@@ -410,6 +578,25 @@ TEST_CASE("Launcher FSM: sleep countdown decrements every second",
 
   ctx.pump(std::chrono::milliseconds(1100));
   REQUIRE_FALSE(ctx.findByText("Sleeping in : 9").empty());
+}
+
+TEST_CASE("Launcher FSM: an externally-triggered suspend forces a redraw "
+          "before releasing the sleep lock",
+          "[rocket][launcher]") {
+  auto client = FakeClient{};
+  auto power = FakePower{};
+
+  auto ctx = TestContext::make();
+  ctx.pumpWidget(Center(LauncherWidget(client, power, getFakeApps)));
+
+  REQUIRE(power.acquireSleepLockCalls == 1); // acquired on startup.
+  CHECK_FALSE(sleepLockReleased(power));
+  REQUIRE_FALSE(ctx.findByText("Welcome").empty());
+
+  triggerSleepEvent(ctx, power, { .sleeping = true, .wokenByUser = false });
+
+  CHECK(sleepLockReleased(power));
+  REQUIRE_FALSE(ctx.findByText("Sleeping").empty());
 }
 
 TEST_CASE("Launcher battery: shows a warning icon below 10%, unrelated to "

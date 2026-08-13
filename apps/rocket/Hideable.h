@@ -47,6 +47,11 @@ public:
         this->markNeedsDraw();
         this->markNeedsLayout(); // TODO: why!!??
       }
+
+      if (this->widget->forceRefresh) {
+        doFullRefresh = true;
+        this->markNeedsDraw();
+      }
     }
   }
 
@@ -63,10 +68,13 @@ protected:
     }
 
     auto result = this->child->draw(canvas, { 0, 0 });
-    if (doRefresh) {
+    if (doFullRefresh) {
+      doFullRefresh = false;
+      result.waveform = rmlib::fb::Waveform::GC16Fast;
+      result.flags = rmlib::fb::UpdateFlags::FullRefresh;
+    } else if (doRefresh) {
       doRefresh = false;
       result.waveform = rmlib::fb::Waveform::GC16Fast;
-      // result.flags = rmlib::fb::UpdateFlags::FullRefresh;
     }
 
     return result;
@@ -75,12 +83,14 @@ protected:
 private:
   rmlib::Size childSize{};
   bool doRefresh = false;
+  bool doFullRefresh = false;
 };
 
 template<typename Child>
 class Hideable : public rmlib::Widget<HideableRenderObject<Child>> {
 public:
-  Hideable(std::optional<Child> child) : child(std::move(child)) {}
+  Hideable(std::optional<Child> child, bool forceRefresh = false)
+    : child(std::move(child)), forceRefresh(forceRefresh) {}
 
   std::unique_ptr<rmlib::RenderObject> createRenderObject() const {
     return std::make_unique<HideableRenderObject<Child>>(*this);
@@ -89,4 +99,5 @@ public:
 private:
   friend class HideableRenderObject<Child>;
   std::optional<Child> child;
+  bool forceRefresh;
 };
