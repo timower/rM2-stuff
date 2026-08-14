@@ -22,6 +22,30 @@ signalHandler(int sig) {
   writeFd.writeAll(sig).or_else([](auto err) {});
 }
 
+// Arms fd to fire once at the next wall-clock multiple of `interval` past
+// the hour (e.g. :00/:15/:30/:45). Re-armed after every fire instead of
+// using it_interval, since an interval on CLOCK_BOOTTIME only tracks
+// elapsed monotonic time - it never resyncs to CLOCK_REALTIME, so any later
+// wall-clock jump (NTP sync, manual date change, ...) would otherwise leave
+// the schedule drifting away from the wall-clock boundaries forever.
+unistdpp::Result<void>
+armBatteryTimerFd(int fd, std::chrono::seconds interval) {
+  const auto nowSecs = std::chrono::duration_cast<std::chrono::seconds>(
+    std::chrono::system_clock::now().time_since_epoch());
+  const auto firstFire =
+    interval - std::chrono::seconds(nowSecs.count() % interval.count());
+
+  const itimerspec spec{
+    .it_interval = {},
+    .it_value = { .tv_sec = firstFire.count(), .tv_nsec = 0 },
+  };
+  if (timerfd_settime(fd, 0, &spec, nullptr) == -1) {
+    return tl::unexpected(unistdpp::getErrno());
+  }
+
+  return {};
+}
+
 // CLOCK_BOOTTIME_ALARM (needs CAP_WAKE_ALARM, held by root) wakes the device
 // from suspend too, unlike a regular timerfd, so the cached battery
 // percentage doesn't go stale for hours while sleeping.
@@ -32,20 +56,8 @@ makeBatteryTimerFd(std::chrono::seconds interval) {
     return tl::unexpected(unistdpp::getErrno());
   }
 
-  // Align the first fire to a wall-clock multiple of `interval` past the
-  // hour (e.g. :00/:15/:30/:45), rather than just `interval` from whenever
-  // the launcher happened to start.
-  const auto nowSecs = std::chrono::duration_cast<std::chrono::seconds>(
-    std::chrono::system_clock::now().time_since_epoch());
-  const auto firstFire =
-    interval - std::chrono::seconds(nowSecs.count() % interval.count());
-
-  const itimerspec spec{
-    .it_interval = { .tv_sec = interval.count(), .tv_nsec = 0 },
-    .it_value = { .tv_sec = firstFire.count(), .tv_nsec = 0 },
-  };
-  if (timerfd_settime(fd.fd, 0, &spec, nullptr) == -1) {
-    return tl::unexpected(unistdpp::getErrno());
+  if (auto res = armBatteryTimerFd(fd.fd, interval); !res) {
+    return tl::unexpected(res.error());
   }
 
   return fd;
@@ -127,6 +139,11 @@ void
 LauncherState::refreshBattery(bool clearTimer) const {
   if (clearTimer) {
     batteryTimerFd.readAll<uint64_t>().or_else([](auto /*unused*/) {});
+    armBatteryTimerFd(batteryTimerFd.fd, battery_poll_interval)
+      .or_else([](auto err) {
+        std::cerr << "Failed to re-arm battery timer: "
+                  << unistdpp::to_string(err) << "\n";
+      });
     setState([](auto& /*unused*/) {});
   }
 
