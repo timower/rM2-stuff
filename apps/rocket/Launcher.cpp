@@ -1,5 +1,7 @@
 #include "Launcher.h"
 
+#include <unistdpp/pipe.h>
+
 #include <sys/timerfd.h>
 
 using namespace rmlib;
@@ -73,7 +75,8 @@ LauncherState::init(rmlib::AppContext& context,
   auto pipe = unistdpp::fatalOnError(unistdpp::pipe());
   writeFd = std::move(pipe.writePipe);
   signalPipe = std::move(pipe.readPipe);
-  context.listenFd(signalPipe.fd, [&] { modify().onSignal(context); });
+  signalFdHandle =
+    context.listenFd(signalPipe.fd, [&] { modify().onSignal(context); });
 
   struct sigaction sigAct = {};
   sigAct.sa_flags = SA_RESTART; // make sure reading is restatart on switch.
@@ -86,7 +89,8 @@ LauncherState::init(rmlib::AppContext& context,
   makeBatteryTimerFd(battery_poll_interval)
     .transform([this, &context](auto fd) {
       batteryTimerFd = std::move(fd);
-      context.listenFd(batteryTimerFd.fd, [this] { refreshBattery(true); });
+      batteryFdHandle =
+        context.listenFd(batteryTimerFd.fd, [this] { refreshBattery(true); });
     })
     .or_else([](auto err) {
       std::cerr << "Failed to create battery timer: "
@@ -104,8 +108,8 @@ LauncherState::init(rmlib::AppContext& context,
   takeInhibitorLock();
 
   if (auto fd = getWidget().power.sleepFd(); fd >= 0) {
-    context.listenFd(fd,
-                     [this, &context] { modify().onSleepFdReady(context); });
+    sleepFdHandle = context.listenFd(
+      fd, [this, &context] { modify().onSleepFdReady(context); });
   }
   takeSleepLock();
 
@@ -249,8 +253,7 @@ LauncherState::sleepNow(rmlib::AppContext& context) {
 
 void
 LauncherState::toggle(rmlib::AppContext& context) {
-  background.reset();
-  backgroundTimer.disable();
+  clearSplash();
 
   if (std::holds_alternative<Visible>(visibility)) {
     const bool shouldStartTimer =
@@ -334,11 +337,41 @@ LauncherState::launch(rmlib::AppContext& ctx, App& app) {
     return;
   }
 
-  if (auto icon = app.icon(); icon.has_value()) {
-    background = *icon;
-    backgroundTimer = ctx.addTimer(std::chrono::seconds(3),
-                                   [this] { modify().background.reset(); });
+  auto icon = app.icon();
+  if (!icon.has_value()) {
+    return;
   }
+
+  const auto pid = app.getLaunchPid();
+  auto pidFd = app.takeLaunchPidFd();
+  if (!pidFd.isValid()) {
+    std::cerr << "Error opening pidfd for launched app\n";
+    return;
+  }
+
+  auto pidFdHandle =
+    ctx.listenFd(pidFd.fd, [this] { modify().onSplashAppExited(); });
+
+  splashPhase = Splash{
+    pid,
+    *icon,
+    std::move(pidFd),
+    std::move(pidFdHandle),
+    ctx.addTimer(splash_safety_timeout, [this] { modify().clearSplash(); }),
+  };
+}
+
+void
+LauncherState::clearSplash() {
+  splashPhase = NoSplash{};
+}
+
+void
+LauncherState::onSplashAppExited() {
+  if (const auto* splash = std::get_if<Splash>(&splashPhase)) {
+    std::cerr << "App " << splash->pid << " exited before becoming visible\n";
+  }
+  clearSplash();
 }
 
 void
@@ -353,7 +386,7 @@ LauncherState::onSignal(rmlib::AppContext& context) {
   if (*sigOrErr == SIGUSR1) {
     stopTimer();
     visibility = Hidden{};
-    background.reset();
+    clearSplash();
   } else if (*sigOrErr == SIGCONT) {
     if (auto* pending = std::get_if<PendingVisible>(&visibility)) {
       visibility = Visible{ pending->returnTo };

@@ -4,9 +4,41 @@
 #include <UI/RenderObject.h>
 #include <UI/Timer.h>
 
+#include <memory>
+#include <unordered_map>
 #include <vector>
 
 namespace rmlib {
+
+struct FdEntry {
+  Callback callback;
+  bool enabled = true;
+};
+
+// RAII handle for an AppContext::listenFd() registration, mirroring
+// TimerHandle: disabling just flags the entry, actual removal happens
+// lazily on the next waitForInput() so self-disabling from inside the
+// callback that's currently firing stays safe.
+struct FdHandle {
+  FdHandle() = default;
+  explicit FdHandle(std::shared_ptr<FdEntry> entry) : entry(std::move(entry)) {}
+  ~FdHandle() { disable(); }
+
+  FdHandle(FdHandle&&) = default;
+  FdHandle& operator=(FdHandle&&) = default;
+  FdHandle(const FdHandle&) = delete;
+  FdHandle& operator=(const FdHandle&) = delete;
+
+  void disable() {
+    if (entry != nullptr) {
+      entry->enabled = false;
+      entry = nullptr;
+    }
+  }
+
+private:
+  std::shared_ptr<FdEntry> entry;
+};
 
 class AppContext {
 public:
@@ -78,8 +110,13 @@ public:
     onDeviceUpdates.emplace_back(std::move(fn));
   }
 
-  void listenFd(int fd, Callback callback) {
-    extraFds.emplace(fd, std::move(callback));
+  // Caller must keep the returned handle alive for as long as the
+  // callback should stay registered - dropping it deregisters the fd.
+  [[nodiscard]] FdHandle listenFd(int fd, Callback callback) {
+    auto entry =
+      std::make_shared<FdEntry>(FdEntry{ std::move(callback), true });
+    extraFds.emplace(fd, entry);
+    return FdHandle(std::move(entry));
   }
 
   ErrorOr<std::vector<input::Event>> waitForInput(
@@ -96,6 +133,16 @@ public:
     std::size_t startDevices = inputManager.numDevices();
     std::vector<input::Event> result;
 
+    // Drop fds whose handle was disabled since the last poll, mirroring how
+    // disabled Timers get dropped from the queue in checkTimers().
+    for (auto it = extraFds.begin(); it != extraFds.end();) {
+      if (it->second->enabled) {
+        ++it;
+      } else {
+        it = extraFds.erase(it);
+      }
+    }
+
     if (!extraFds.empty()) {
       std::vector<pollfd> pollFds;
       for (const auto& [fd, _] : extraFds) {
@@ -106,8 +153,12 @@ public:
       auto evs = TRY(inputManager.waitForInput(pollFds, milliDuration));
 
       for (const auto& poll : pollFds) {
-        if (unistdpp::canRead(poll)) {
-          extraFds[poll.fd]();
+        if (!unistdpp::canRead(poll)) {
+          continue;
+        }
+        auto it = extraFds.find(poll.fd);
+        if (it != extraFds.end() && it->second->enabled) {
+          it->second->callback();
         }
       }
 
@@ -183,7 +234,7 @@ private:
   std::vector<Callback> doLaters;
   std::vector<Callback> onDeviceUpdates;
 
-  std::unordered_map<int, Callback> extraFds;
+  std::unordered_map<int, std::shared_ptr<FdEntry>> extraFds;
 
   bool mShouldStop = false;
 

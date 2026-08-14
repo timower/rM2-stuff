@@ -1,7 +1,7 @@
 project(unistdpp)
 
 add_library(${PROJECT_NAME} STATIC unistdpp.cpp file.cpp pipe.cpp poll.cpp
-                                   socket.cpp mmap.cpp)
+                                   socket.cpp mmap.cpp process.cpp)
 
 target_include_directories(
   ${PROJECT_NAME}

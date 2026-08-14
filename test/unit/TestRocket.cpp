@@ -244,6 +244,23 @@ getFakeApps() {
   return res;
 }
 
+// A single fake app with a real, loadable icon - unlike getFakeApps()'s
+// apps, whose .icon never resolves to an actual file - so launching it
+// exercises LauncherState::launch()'s splash path.
+std::function<std::vector<AppDescription>()>
+getFakeAppWithIcon(std::string command) {
+  return [command] {
+    std::vector<AppDescription> res;
+    res.emplace_back(AppDescription{
+      .path = "/etc/draft/icon.dart",
+      .name = "icon-app",
+      .command = command,
+      .iconPath = (assets_path / "rocket.png").string(),
+    });
+    return res;
+  };
+}
+
 struct FakeClient : ControlInterface {
   std::vector<Client> clients;
   pid_t lastSwitchTo = -1;
@@ -481,7 +498,7 @@ TEST_CASE(
   raiseAndPump(ctx, SIGCONT); // Visible{returnTo=777}, counting down.
   REQUIRE_FALSE(ctx.findByText("Sleeping in : 10").empty());
 
-  // Cancel the countdown via the Stop button.
+  // Cancel the countdown via a tap on the status bar.
   auto stop = ctx.findByText("Stop");
   REQUIRE(stop.size() == 1);
   ctx.tap(stop);
@@ -597,6 +614,65 @@ TEST_CASE("Launcher FSM: an externally-triggered suspend forces a redraw "
 
   CHECK(sleepLockReleased(power));
   REQUIRE_FALSE(ctx.findByText("Sleeping").empty());
+}
+
+TEST_CASE("Launcher FSM: the launch splash clears once the app becomes "
+          "visible via SIGUSR1",
+          "[rocket][launcher]") {
+  auto client = FakeClient{};
+  auto power = FakePower{};
+
+  auto ctx = TestContext::make();
+  // Short-lived on purpose: a real, not-yet-reaped child inherits this
+  // test binary's stdout/stderr, and ctest's output capture only sees EOF
+  // once every process holding those fds has exited - a long-lived child
+  // here would stall the test run for its whole lifetime.
+  ctx.pumpWidget(
+    Center(LauncherWidget(client, power, getFakeAppWithIcon("sleep 0.2"))));
+
+  auto appWidget = ctx.findByType<AppWidget>();
+  REQUIRE(appWidget.size() == 1);
+  ctx.tap(appWidget);
+  ctx.pump();
+
+  // Splash is up: it replaces the normal launcher UI (app list included)
+  // entirely.
+  CHECK(ctx.findByType<AppWidget>().empty());
+
+  // The multiplexer acks the app taking over the screen, then rocket is
+  // shown again later.
+  raiseAndPump(ctx, SIGUSR1);
+  pressPower(ctx);
+  raiseAndPump(ctx, SIGCONT);
+
+  // Had SIGUSR1 not cleared the splash, it would still be showing here
+  // instead of the normal launcher UI.
+  CHECK_FALSE(ctx.findByType<AppWidget>().empty());
+}
+
+TEST_CASE("Launcher FSM: the launch splash clears if the app exits before "
+          "becoming visible",
+          "[rocket][launcher]") {
+  auto client = FakeClient{};
+  auto power = FakePower{};
+
+  auto ctx = TestContext::make();
+  ctx.pumpWidget(
+    Center(LauncherWidget(client, power, getFakeAppWithIcon("true"))));
+
+  auto appWidget = ctx.findByType<AppWidget>();
+  REQUIRE(appWidget.size() == 1);
+  ctx.tap(appWidget);
+  ctx.pump();
+
+  // Splash is up.
+  CHECK(ctx.findByType<AppWidget>().empty());
+
+  // "true" exits almost instantly without ever touching rm2fb - no SIGUSR1
+  // ever arrives. The pidfd should catch that and clear the splash well
+  // before the 15s safety timeout.
+  ctx.pump(std::chrono::milliseconds(200));
+  CHECK_FALSE(ctx.findByType<AppWidget>().empty());
 }
 
 TEST_CASE("Launcher battery: shows a warning icon below 10%, unrelated to "

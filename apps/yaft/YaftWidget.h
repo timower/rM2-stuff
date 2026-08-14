@@ -91,6 +91,10 @@ private:
   unistdpp::FD inotifyFd;
   int inotifyWd;
 
+  rmlib::FdHandle inotifyFdHandle;
+  rmlib::FdHandle termFdHandle;
+  rmlib::FdHandle stdinFdHandle;
+
   YaftConfig config;
   rmlib::Rotation rotation = rmlib::Rotation::None;
   bool smallKeyboard = false;

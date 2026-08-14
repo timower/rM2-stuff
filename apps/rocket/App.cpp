@@ -1,6 +1,7 @@
 #include "App.h"
 
-#include <unistdpp/pipe.h>
+#include <unistdpp/process.h>
+#include <unistdpp/socket.h>
 
 #include <Device.h>
 
@@ -9,6 +10,7 @@
 #include <fstream>
 #include <iostream>
 
+#include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -18,9 +20,19 @@ using namespace rmlib;
 
 namespace {
 
-unistdpp::Result<pid_t>
+struct LaunchResult {
+  pid_t pid;
+  unistdpp::FD pidFd;
+};
+
+unistdpp::Result<LaunchResult>
 runCommand(std::string_view cmd) {
-  auto pipes = TRY(unistdpp::pipe());
+  int sockFds[2];
+  if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockFds) == -1) {
+    return tl::unexpected(unistdpp::getErrno());
+  }
+  auto parentSock = unistdpp::FD(sockFds[0]);
+  auto childSock = unistdpp::FD(sockFds[1]);
 
   pid_t pid = fork();
 
@@ -29,14 +41,15 @@ runCommand(std::string_view cmd) {
   }
 
   if (pid > 0) {
-    pipes.writePipe.close();
-    // Parent process, read child pid.
-    auto res = pipes.readPipe.readAll<pid_t>();
+    childSock.close();
+    // Parent process, read the grandchild's pid and its pidfd.
+    auto pidRes = TRY(parentSock.readAll<pid_t>());
+    auto fdRes = TRY(unistdpp::recvFD(parentSock));
     waitpid(pid, nullptr, 0);
-    return res;
+    return LaunchResult{ pidRes, unistdpp::FD(fdRes) };
   }
 
-  pipes.readPipe.close();
+  parentSock.close();
 
   setsid();
 
@@ -47,12 +60,20 @@ runCommand(std::string_view cmd) {
   }
 
   if (pid2 > 0) {
-    // intermediate parent, exit.
-    unistdpp::fatalOnError(pipes.writePipe.writeAll(pid2));
+    // Still pid2's real parent here, so it can't yet have been reparented
+    // and reaped elsewhere - pidfd_open is race-free at this point, unlike
+    // if the top-level parent tried it after we've exited.
+    auto pidFd = unistdpp::pidfdOpen(pid2);
+    if (!pidFd) {
+      perror("Error opening pidfd");
+      exit(EXIT_FAILURE);
+    }
+    unistdpp::fatalOnError(childSock.writeAll(pid2));
+    unistdpp::fatalOnError(unistdpp::sendFDTo(childSock, pidFd->fd));
     exit(EXIT_SUCCESS);
   }
 
-  pipes.writePipe.close();
+  childSock.close();
 
   std::cerr << "Running: " << cmd << std::endl;
   execlp("/bin/sh", "/bin/sh", "-c", cmd.data(), nullptr);
@@ -168,13 +189,14 @@ App::updateDescription(AppDescription desc) {
 
 bool
 App::launch() {
-  auto pidOrErr = runCommand(description().command);
-  if (!pidOrErr) {
-    std::cerr << "Error launching: " << unistdpp::to_string(pidOrErr.error())
+  auto resOrErr = runCommand(description().command);
+  if (!resOrErr) {
+    std::cerr << "Error launching: " << unistdpp::to_string(resOrErr.error())
               << "\n";
     return false;
   }
 
-  pid = *pidOrErr;
+  pid = resOrErr->pid;
+  pidFd = std::move(resOrErr->pidFd);
   return true;
 }

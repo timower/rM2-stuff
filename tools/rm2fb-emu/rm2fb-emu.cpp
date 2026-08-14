@@ -231,7 +231,7 @@ public:
     socket = fatalOnError(getClientSock(getWidget().host, getWidget().port),
                           "Couldn't get tcp socket: ");
 
-    appCtx.listenFd(socket.fd, [this] { handleMsg(); });
+    socketFdHandle = appCtx.listenFd(socket.fd, [this] { handleMsg(); });
 
     // Get the initial full screen image by sending a GetUpdate message.
     sendMessage(socket, ClientMsg(GetUpdate{}));
@@ -289,6 +289,7 @@ private:
   std::unique_ptr<std::vector<UpdateRegion>> pendingUpdates;
   MemoryCanvas memCanvas;
   FD socket;
+  FdHandle socketFdHandle;
   bool touch = true;
 };
 

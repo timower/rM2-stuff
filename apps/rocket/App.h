@@ -3,7 +3,7 @@
 #include <Canvas.h>
 #include <FrameBuffer.h>
 
-#include <unistdpp/pipe.h>
+#include <unistdpp/unistdpp.h>
 
 #include <optional>
 #include <string>
@@ -40,12 +40,17 @@ public:
   bool launch();
   pid_t getLaunchPid() const { return pid; }
 
+  /// Pollable fd that becomes ready once the launched process exits.
+  /// Only valid right after a successful launch(); ownership moves out.
+  unistdpp::FD takeLaunchPidFd() { return std::move(pidFd); }
+
   const AppDescription& description() const { return mDescription; }
   const std::optional<rmlib::Canvas>& icon() const { return iconCanvas; }
 
 private:
   AppDescription mDescription;
   pid_t pid = 0;
+  unistdpp::FD pidFd;
 
   std::optional<rmlib::Canvas> iconCanvas;
 };

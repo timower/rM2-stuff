@@ -119,7 +119,8 @@ YaftState::init(rmlib::AppContext& ctx, const rmlib::BuildContext& /*unused*/) {
                                     watchPath.parent_path().c_str(),
                                     IN_MODIFY | IN_CREATE | IN_CLOSE_WRITE);
 
-      ctx.listenFd(inotifyFd.fd, [this, &ctx] { readInotify(ctx); });
+      inotifyFdHandle =
+        ctx.listenFd(inotifyFd.fd, [this, &ctx] { readInotify(ctx); });
     }
   }
 
@@ -134,7 +135,7 @@ YaftState::init(rmlib::AppContext& ctx, const rmlib::BuildContext& /*unused*/) {
     std::exit(EXIT_FAILURE);
   }
 
-  ctx.listenFd(term->fd, [this] {
+  termFdHandle = ctx.listenFd(term->fd, [this] {
     std::array<char, 512> buf{};
     auto size = read(term->fd, buf.data(), buf.size());
 
@@ -151,7 +152,7 @@ YaftState::init(rmlib::AppContext& ctx, const rmlib::BuildContext& /*unused*/) {
 
   // listen to stdin in debug.
   if constexpr (USE_STDIN != 0U) {
-    ctx.listenFd(STDIN_FILENO, [this] {
+    stdinFdHandle = ctx.listenFd(STDIN_FILENO, [this] {
       std::array<char, 512> buf{};
       auto size = read(STDIN_FILENO, buf.data(), buf.size());
       if (size > 0) {

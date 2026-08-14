@@ -72,7 +72,7 @@ public:
       unistdpp::fatalOnError(unistdpp::open(getWidget().filePath, O_RDONLY));
     unistdpp::fatalOnError(unistdpp::lseek(fileFd, 0, SEEK_END));
 
-    ctx.listenFd(fileFd.fd, [this, &ctx] {
+    fileFdHandle = ctx.listenFd(fileFd.fd, [this, &ctx] {
       std::array<char, 512> buf{};
       auto size = read(fileFd.fd, buf.data(), buf.size());
       if (size < 0) {
@@ -101,6 +101,7 @@ public:
 private:
   std::unique_ptr<terminal_t> term;
   unistdpp::FD fileFd;
+  rmlib::FdHandle fileFdHandle;
 };
 
 ReaderState

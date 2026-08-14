@@ -59,14 +59,15 @@ class LauncherState : public rmlib::StateBase<LauncherWidget> {
 
   constexpr static rmlib::Size splash_size = { 512, 512 };
   constexpr static auto show_timeout = std::chrono::seconds(10);
+  // Fallback only - the splash is normally cleared as soon as the launched
+  // app takes over the screen (SIGUSR1) or its process exits first.
+  constexpr static auto splash_safety_timeout = std::chrono::seconds(15);
 
 public:
   void init(rmlib::AppContext& context, const rmlib::BuildContext& /*unused*/);
 
-  auto header(rmlib::AppContext& context) const {
-    using namespace rmlib;
-
-    const auto text = std::visit(
+  std::string sleepText() const {
+    return std::visit(
       overloaded{
         [](const Idle&) -> std::string { return "Welcome"; },
         [](const AboutToSuspend&) -> std::string { return "Sleeping"; },
@@ -75,6 +76,10 @@ public:
         },
       },
       sleepPhase);
+  }
+
+  auto header(rmlib::AppContext& context) const {
+    using namespace rmlib;
 
     auto button = std::visit(
       overloaded{
@@ -95,7 +100,7 @@ public:
       sleepPhase);
 
     return Center(Padding(
-      Column(Padding(Text(text, 2 * default_text_size), Insets::all(10)),
+      Column(Padding(Text(sleepText(), 2 * default_text_size), Insets::all(10)),
              button),
       Insets::all(50)));
   }
@@ -204,10 +209,10 @@ public:
         return {};
       }
 
-      if (background.has_value()) {
+      if (const auto* splash = std::get_if<Splash>(&splashPhase)) {
         return Center(Rotated(
           rotation,
-          Sized(Image(*background), splash_size.width, splash_size.height)));
+          Sized(Image(splash->icon), splash_size.width, splash_size.height)));
       }
 
       return Rotated(rotation, launcher(context));
@@ -250,6 +255,20 @@ private:
   };
   struct AboutToSuspend {};
   using SleepPhase = std::variant<Idle, CountingDown, AboutToSuspend>;
+
+  // Splash shown while an app launch is in flight, cleared as soon as
+  // either the app takes over the screen (SIGUSR1) or its process exits
+  // without ever doing so (crash) - safetyTimeout is just a last resort.
+  struct NoSplash {};
+  struct Splash {
+    pid_t pid;
+    rmlib::Canvas icon;
+    unistdpp::FD pidFd;
+    rmlib::FdHandle pidFdHandle;
+    rmlib::TimerHandle safetyTimeout;
+  };
+  using SplashPhase = std::variant<NoSplash, Splash>;
+
   /// Power off if battery < battery_shutdown_percentage
   void refreshBattery(bool clearTimer) const;
 
@@ -301,6 +320,12 @@ private:
   void launch(rmlib::AppContext& ctx, App& app);
   void switchApp(pid_t pid);
 
+  /// Clears the splash, if any (app became visible, safety timeout, ...).
+  void clearSplash();
+  /// Called when a launched app's process exits before ever becoming
+  /// visible - treated as a crash, so the splash is cleared right away.
+  void onSplashAppExited();
+
   /// On USR1 will stop the timer and set state to Hidden.
   /// On CONT will set state to Visible and start the sleep timer.
   /// Also refreshes apps & clients.
@@ -321,15 +346,18 @@ private:
   unistdpp::FD signalPipe;
   unistdpp::FD batteryTimerFd;
 
+  rmlib::FdHandle signalFdHandle;
+  rmlib::FdHandle batteryFdHandle;
+  rmlib::FdHandle sleepFdHandle;
+
   rmlib::TimerHandle sleepTimer;
   rmlib::TimerHandle inactivityTimer;
-  rmlib::TimerHandle backgroundTimer;
   rmlib::TimerHandle clockTimer;
 
   rmlib::Rotation rotation = rmlib::Rotation::None;
-  std::optional<rmlib::Canvas> background;
 
   SleepPhase sleepPhase{ Idle{} };
+  SplashPhase splashPhase{ NoSplash{} };
   mutable int inactivityCountdown = default_inactivity_timeout;
   Visibility visibility{ Visible{} };
 
