@@ -180,6 +180,9 @@ TEST_CASE("AppWidget", "[rocket]") {
   }
 }
 
+constexpr static auto about_to_sleep_text = "[          󰒲          ]";
+constexpr static auto retry_sleep_text = "[        󰒲        ]";
+
 TEST_CASE("Hideable: forceRefresh requests a genuine GC16 full refresh",
           "[rocket]") {
   auto ctx = TestContext::make();
@@ -437,7 +440,7 @@ TEST_CASE("Launcher FSM: toggle defers the sleep timer until visible",
   ctx.pumpWidget(Center(LauncherWidget(client, power, getFakeApps)));
 
   // Starts visible (rocket is the foreground app when it launches).
-  REQUIRE_FALSE(ctx.findByText("Welcome").empty());
+  REQUIRE_FALSE(ctx.findByText(LauncherWidget::title_text).empty());
 
   // The multiplexer switches away: launcher goes hidden. (Hideable doesn't
   // detach the render tree when hiding, only skips drawing/input for it, so
@@ -450,11 +453,11 @@ TEST_CASE("Launcher FSM: toggle defers the sleep timer until visible",
   pressPower(ctx);
   CHECK(client.switchToCount == 1);
   CHECK(client.lastSwitchTo == getpid());
-  REQUIRE(ctx.findByText("Sleeping in : 10").empty());
+  REQUIRE(ctx.findByText(about_to_sleep_text).empty());
 
   // The multiplexer acks the switch: *now* the countdown starts.
   raiseAndPump(ctx, SIGCONT);
-  REQUIRE_FALSE(ctx.findByText("Sleeping in : 10").empty());
+  REQUIRE_FALSE(ctx.findByText(about_to_sleep_text).empty());
 }
 
 TEST_CASE("Launcher FSM: a pending show self-heals if the ack never arrives",
@@ -496,14 +499,14 @@ TEST_CASE(
   raiseAndPump(ctx, SIGUSR1);
   pressPower(ctx);
   raiseAndPump(ctx, SIGCONT); // Visible{returnTo=777}, counting down.
-  REQUIRE_FALSE(ctx.findByText("Sleeping in : 10").empty());
+  REQUIRE_FALSE(ctx.findByText(about_to_sleep_text).empty());
 
   // Cancel the countdown via a tap on the status bar.
-  auto stop = ctx.findByText("Stop");
-  REQUIRE(stop.size() == 1);
-  ctx.tap(stop);
+  auto countdown = ctx.findByText(about_to_sleep_text);
+  REQUIRE(countdown.size() == 1);
+  ctx.tap(countdown);
   ctx.pump();
-  REQUIRE_FALSE(ctx.findByText("Welcome").empty());
+  REQUIRE_FALSE(ctx.findByText(LauncherWidget::title_text).empty());
 
   // Pressing power again returns to the known app rather than sleeping.
   pressPower(ctx);
@@ -532,7 +535,7 @@ TEST_CASE(
 
   // Something other than the user woke it back up - retry.
   simulateResume(ctx, power, /*wokenByUser=*/false);
-  REQUIRE_FALSE(ctx.findByText("Sleeping in : 8").empty()); // retry timeout
+  REQUIRE_FALSE(ctx.findByText(retry_sleep_text).empty()); // retry timeout
 }
 
 TEST_CASE("Launcher FSM: a successful sleep returns to idle",
@@ -552,7 +555,7 @@ TEST_CASE("Launcher FSM: a successful sleep returns to idle",
 
   simulateResume(ctx, power, /*wokenByUser=*/true);
 
-  REQUIRE_FALSE(ctx.findByText("Welcome").empty());
+  REQUIRE_FALSE(ctx.findByText(LauncherWidget::title_text).empty());
   CHECK(client.switchToCount == 0); // Nothing to switch back to.
 }
 
@@ -575,7 +578,7 @@ TEST_CASE(
   ctx.pump(std::chrono::milliseconds(50));
 
   CHECK(power.suspendRequests == 1);
-  REQUIRE_FALSE(ctx.findByText("Sleeping in : 8").empty()); // retry timeout
+  REQUIRE_FALSE(ctx.findByText(retry_sleep_text).empty()); // retry timeout
 }
 
 TEST_CASE("Launcher FSM: sleep countdown decrements every second",
@@ -591,10 +594,14 @@ TEST_CASE("Launcher FSM: sleep countdown decrements every second",
   raiseAndPump(ctx, SIGUSR1);
   pressPower(ctx);
   raiseAndPump(ctx, SIGCONT);
-  REQUIRE_FALSE(ctx.findByText("Sleeping in : 10").empty());
+  REQUIRE_FALSE(ctx.findByText(about_to_sleep_text).empty());
 
   ctx.pump(std::chrono::milliseconds(1100));
-  REQUIRE_FALSE(ctx.findByText("Sleeping in : 9").empty());
+  REQUIRE_FALSE(ctx
+                  .findByText("[         " +
+                              std::string(LauncherWidget::sleep_text) +
+                              "         ]")
+                  .empty());
 }
 
 TEST_CASE("Launcher FSM: an externally-triggered suspend forces a redraw "
@@ -608,12 +615,12 @@ TEST_CASE("Launcher FSM: an externally-triggered suspend forces a redraw "
 
   REQUIRE(power.acquireSleepLockCalls == 1); // acquired on startup.
   CHECK_FALSE(sleepLockReleased(power));
-  REQUIRE_FALSE(ctx.findByText("Welcome").empty());
+  REQUIRE_FALSE(ctx.findByText(LauncherWidget::title_text).empty());
 
   triggerSleepEvent(ctx, power, { .sleeping = true, .wokenByUser = false });
 
   CHECK(sleepLockReleased(power));
-  REQUIRE_FALSE(ctx.findByText("Sleeping").empty());
+  REQUIRE_FALSE(ctx.findByText(LauncherWidget::sleep_text).empty());
 }
 
 TEST_CASE("Launcher FSM: the launch splash clears once the app becomes "

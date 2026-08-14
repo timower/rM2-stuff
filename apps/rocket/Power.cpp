@@ -75,6 +75,9 @@ SystemPowerInterface::pollSleep() {
 
 bool
 SystemPowerInterface::requestSuspend() {
+#ifdef EMULATE
+  return false;
+#endif
   // Async: a blocking call here would deadlock us against ourselves - its
   // reply only arrives after we've released our own sleep delay lock, which
   // requires processing the PrepareForSleep signal this same call triggers.

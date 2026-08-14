@@ -139,10 +139,8 @@ in
     ];
     testScript = ''
       wait_for "startup.png"
-      tap_at 644 1064
+      tap_at 636 916
       wait_for "tilem.png"
-
-      # tap_at 804 952
     '';
   };
 
@@ -154,10 +152,8 @@ in
     ];
     testScript = ''
       wait_for "startup.png"
-      tap_at 644 1064
+      tap_at 636 916
       wait_for "tilem-full.png"
-
-      # tap_at 804 952
     '';
   };
 
@@ -169,13 +165,8 @@ in
     ];
     testScript = ''
       wait_for "startup.png"
-      tap_at 936 1052
+      tap_at 974 916
       wait_for "yaft.png"
-
-      # tap_at 56 1836
-      # sleep 1
-      # tap_at 308 1704
-      # sleep 1
     '';
   };
 
@@ -186,7 +177,7 @@ in
     ];
     testScript = ''
       wait_for "startup.png"
-      tap_at 936 1052
+      tap_at 974 916
       wait_for "yaft-user.png"
     '';
   };
@@ -198,16 +189,8 @@ in
     ];
     testScript = ''
       wait_for "startup.png"
-      tap_at 476 1038
+      tap_at 460 916
       wait_for "koreader.png" 30
-
-      # tap_at 920 122
-      # sleep 3
-      # tap_at 1340 76
-      # sleep 2
-      # tap_at 266 1108
-      # sleep 2
-      # tap_at 172 652
     '';
   };
 
@@ -224,7 +207,7 @@ in
     ];
     testScript = ''
       wait_for "startup.png"
-      tap_at 782 1046
+      tap_at 802 916
       wait_for "xochitl_3.20.png" 200
     '';
   };
@@ -255,7 +238,7 @@ in
     # present in 3.20, so this can't reuse xochitl's golden screenshot.
     testScript = ''
       wait_for "startup.png"
-      tap_at 782 1046
+      tap_at 802 916
       wait_for "xochitl_latest.png" 120
     '';
   };

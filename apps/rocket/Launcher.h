@@ -31,6 +31,9 @@ overloaded(Ts...) -> overloaded<Ts...>;
 
 class LauncherWidget : public rmlib::StatefulWidget<LauncherWidget> {
 public:
+  constexpr static auto title_text = "";
+  constexpr static auto sleep_text = "󰒲";
+
   LauncherWidget(ControlInterface& ctlClient,
                  PowerInterface& power,
                  std::function<std::vector<AppDescription>()> appReader,
@@ -69,48 +72,29 @@ public:
   std::string sleepText() const {
     return std::visit(
       overloaded{
-        [](const Idle&) -> std::string { return "Welcome"; },
-        [](const AboutToSuspend&) -> std::string { return "Sleeping"; },
+        [](const Idle&) -> std::string { return LauncherWidget::title_text; },
+        [](const AboutToSuspend&) -> std::string {
+          return LauncherWidget::sleep_text;
+        },
         [](const CountingDown& cd) -> std::string {
-          return "Sleeping in : " + std::to_string(cd.secondsLeft);
+          const auto progress = std::string(cd.secondsLeft, ' ');
+          return "[" + progress + "󰒲" + progress + "]";
         },
       },
       sleepPhase);
   }
 
-  auto header(rmlib::AppContext& context) const {
-    using namespace rmlib;
-
-    auto button = std::visit(
-      overloaded{
-        [this](const CountingDown&) {
-          return Button(
-            "Stop", [this] { setState([](auto& self) { self.stopTimer(); }); });
-        },
-        [](const AboutToSuspend&) {
-          // TODO: make hideable?
-          return Button("...", [] {});
-        },
-        [this, &context](const Idle&) {
-          return Button("Sleep", [this, &context] {
-            setState([&context](auto& self) { self.sleepNow(context); });
-          });
-        },
-      },
-      sleepPhase);
-
-    return Center(Padding(
-      Column(Padding(Text(sleepText(), 2 * default_text_size), Insets::all(10)),
-             button),
-      Insets::all(50)));
-  }
-
+  // Tapping the status bar cancels an in-progress sleep countdown, keeping
+  // the launcher visible.
   auto statusBar() const {
     using namespace rmlib;
 
-    return Row(Padding(Text(clockText()), Insets::all(10)),
-               Expanded(Text("")),
-               Padding(Text(batteryText()), Insets::all(10)));
+    return GestureDetector(Row(Padding(Text(clockText()), Insets::all(10)),
+                               Expanded(Text(sleepText())),
+                               Padding(Text(batteryText()), Insets::all(10))),
+                           Gestures{}.onTap([this] {
+                             setState([&](auto& self) { self.stopTimer(); });
+                           }));
   }
 
   std::string clockText() const {
@@ -194,10 +178,11 @@ public:
 
     std::vector<DynamicWidget> layers;
     layers.emplace_back(Positioned(statusBar(), Point{ 0, 0 }));
-    layers.emplace_back(
-      Column(header(context), runningApps(), appList(context)));
+    layers.emplace_back(Column(runningApps(), appList(context)));
 
-    return Cleared(Stack(std::move(layers)));
+    // Both layers need input: the status bar handles taps to cancel the
+    // sleep countdown, on top of the app list below it.
+    return Cleared(Stack(std::move(layers), /*onlyTopInput=*/false));
   }
 
   auto build(rmlib::AppContext& context,
