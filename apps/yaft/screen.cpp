@@ -115,7 +115,7 @@ ScreenRenderObject::doDraw(rmlib::Canvas& canvas) {
                    : term.lines * CELL_HEIGHT <= currentRect.height();
     fb->doUpdate(canvas.subCanvas(currentRect),
                  useA2 ? fb::Waveform::A2 : fb::Waveform::DU,
-                 useA2 ? fb::UpdateFlags::None : fb::UpdateFlags::Priority);
+                 useA2 ? fb::UpdateFlags::None : fb::UpdateFlags::FastDraw);
 
     currentRect = {};
     numUpdates++;
@@ -133,8 +133,7 @@ ScreenRenderObject::doDraw(rmlib::Canvas& canvas) {
   if (shouldRefresh()) {
     term.shouldClear = false;
     numUpdates = 0;
-    // TODO: sync
-    return { canvas.rect(), fb::Waveform::GC16, fb::UpdateFlags::FullRefresh };
+    return { canvas.rect(), fb::Waveform::GC16, fb::UpdateFlags::Sync };
   }
 
   return {};

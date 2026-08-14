@@ -71,7 +71,7 @@ protected:
     if (doFullRefresh) {
       doFullRefresh = false;
       result.waveform = rmlib::fb::Waveform::GC16Fast;
-      result.flags = rmlib::fb::UpdateFlags::FullRefresh;
+      result.flags = rmlib::fb::UpdateFlags::Sync;
     } else if (doRefresh) {
       doRefresh = false;
       result.waveform = rmlib::fb::Waveform::GC16Fast;

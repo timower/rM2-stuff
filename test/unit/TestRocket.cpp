@@ -203,14 +203,14 @@ TEST_CASE("Hideable: forceRefresh requests a genuine GC16 full refresh",
     CHECK(result.flags == fb::UpdateFlags::None);
   }
 
-  SECTION("forceRefresh forces GC16 + FullRefresh") {
+  SECTION("forceRefresh forces GC16 + Sync") {
     Hideable<Text> shown{ Text("hi"), /*forceRefresh=*/true };
     hideableRO.update(shown);
     hideableRO.layout(constraints);
 
     auto result = hideableRO.draw(ctx.getFramebuffer().canvas, { 0, 0 });
     CHECK(result.waveform == fb::Waveform::GC16Fast);
-    CHECK(result.flags == fb::UpdateFlags::FullRefresh);
+    CHECK(result.flags == fb::UpdateFlags::Sync);
   }
 
   SECTION("forceRefresh is consumed after a single draw") {

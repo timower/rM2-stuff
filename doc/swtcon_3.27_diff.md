@@ -19,8 +19,10 @@ and `DAT_00066fe8` is typed/named as `g_pSwtconState`. Renamed:
 `advance_work_item_frames` (`0x3bf5c`), `display_thread_func` (`0x3e62c`),
 `dispatch_processed_regions` (`0x4d2e0`), `dispatch_plain_kernel`
 (`0x5229c`), `dispatch_overlap_kernel` (`0x521f8`), `playback_kernel_plain`
-(`0x55150`, manually created as a function first — see §5d), and
-`playback_kernel_overlap` (`0x55244`, same). Two functions were
+(`0x55150`, manually created as a function first — see §5d),
+`playback_kernel_overlap` (`0x55244`, same), and `render_zero_fill_kernel`
+(`0x48590`, §6 — the mode-5 tail-call target, decompiled and typed this
+pass). Two functions were
 deliberately **left unrenamed** with a plate comment instead —
 `0x48808`/`0x486bc`, the candidate `commit_kernel_incremental`/
 `commit_kernel_force` — because `0x48808`'s body size (10203 bytes) is
@@ -139,14 +141,23 @@ B =  px & 0xff;
 luma = (R*0x4d + G*0x96 + B*0x1d) >> 8;   // weights 77/150/29, standard luma scale
 ```
 
-The gated case (pen/marker, 3.23's case 7) also changed shape: 3.23 produces
-a multi-level output (`(sum+gamma)/125 * 30`, several discrete steps); 3.27's
-equivalent does a single threshold compare against gamma
-(`luma_partial + gamma < 0xff ? 0 : 0x1e`) — a binary (two-level) decision
-rather than the old multi-step quantization. **Case-number correspondence
-now resolved, see §6**: 3.27's gated formula is case **8**, not case 7 —
-the gated/unconditional roles are swapped relative to 3.23 (3.23: case 7
-gated, case 8 unconditional; 3.27: case 7 unconditional, case 8 gated).
+The gated case (pen/marker, 3.23's case 7) did **not** change shape as
+originally written here — **correction**: 3.23's `(sum+gamma)/125 * 30` was
+already binary, not multi-level. `gamma` is clamped to `[0,124]` at init
+time (`libs/swtcon/init.cpp:100-106`, `round(raw*124/65532)`), so
+`lo5+mid6+hi5+gamma` maxes at `125+124=249`, always `<250` — the floor
+division can only yield `0` or `1`, so output is always `0` or `30`
+(`swtcon_architecture.md` §5.2's case-8 note has the full derivation). It's
+algebraically just `sum >= 125 ? 30 : 0`, expressed via floor-division
+instead of a direct compare. 3.27's `luma_partial + gamma < 0xff ? 0 : 0x1e`
+is the exact same *kind* of single-threshold binary decision, just written
+as an explicit compare instead of a floor-division — not a shape change,
+a re-expression of an equivalent boolean test (layered on top of the
+already-documented 16→32bpp pixel-decode and RGB-sum→BT.601-luma changes).
+**Case-number correspondence now resolved, see §6**: 3.27's gated formula is
+case **8**, not case 7 — the gated/unconditional roles are swapped relative
+to 3.23 (3.23: case 7 gated, case 8 unconditional; 3.27: case 7
+unconditional, case 8 gated).
 
 **Open / not chased down — [guess]:** the gamma/dither table indexing in
 3.27 uses `& 0x3f` with a `0x48`-byte row stride, vs 3.23's `& 0x7f` /
@@ -338,20 +349,43 @@ statement itself was reshuffled:
   `((sum*15+gamma)/125)<<1`. 3.27 case `0xc`: same shape,
   `((luma*15+gamma)/255)<<1` — divisor rescaled `125→255` for the new
   8-bit-per-channel luma range (§4), not a behavior change.
-- **Mode 5 diverges.** In 3.23, modes 2–5 are all the *same* table entry
-  (`9`) and share case 9's formula uniformly. In 3.27, modes 2–4 map to
-  case `0xc` (case 9's rescaled equivalent) but **mode 5 maps to bare case
-  `9`, which is just `goto LAB_0004b0bc; FUN_00048590(rectY0, rectX0,
-  rectY1, chunkCount); return;`** — a tail call into a separate,
-  not-yet-reversed function, not an inline formula. Cases 2, 3, and 10 also
-  tail-call the same `FUN_00048590`. Whether `FUN_00048590` actually
-  produces the *same* output as case `0xc`'s inline formula (just factored
-  out, e.g. for register-pressure reasons in a heavily-NEON-unrolled
-  function) or a genuinely different one is **[open]** — not decompiled
-  yet. It sits immediately before the two commit-kernel candidates from §5b
+- **Mode 5 diverges — resolved, [confirmed].** In 3.23, modes 2–5 are all
+  the *same* table entry (`9`) and share case 9's formula uniformly. In
+  3.27, modes 2–4 map to case `0xc` (case 9's rescaled equivalent) but
+  **mode 5 maps to bare case `9`, which is just `goto LAB_0004b0bc;
+  render_zero_fill_kernel(rectX0, rectY0, rectX1, rectY1, destBuf,
+  rowStride); return;`** — a tail call, not an inline formula. Cases 2, 3,
+  and 10 also tail-call the same function (`0x48590`, formerly `FUN_`,
+  renamed and typed in Ghidra this pass).
+
+  Confirmed by decompiling `render_zero_fill_kernel` directly *and*
+  register-tracing the call site (`0004b0bc`–`0004b0d8`) in
+  `render_update_kernel`: the call passes **6** arguments, not the 4 the
+  caller-side decompile prints (4 in `r0`–`r3`, 2 more spilled to the
+  stack that Ghidra's decompiler silently drops from the printed call
+  expression) — `(rectX0, rectY0, rectX1, rectY1, destBuf, rowStride) =
+  (local_cc, local_78, local_9c, param_5, local_e8, local_e4)`, the same
+  rect bounds, output buffer pointer, and row stride every other
+  `pixelMode` case uses.
+
+  **`render_zero_fill_kernel` does *not* reproduce case `0xc`'s formula,
+  factored out or otherwise.** It rounds both axes down to an
+  8-pixel-aligned boundary, then writes `0` *unconditionally* to every
+  output byte in that aligned interior — no read of `dataBuffer`, no
+  gamma-table lookup, no `backBuffer` gate, no per-pixel computation of
+  any kind. For comparison, case 7/8's gated formula already reduces to a
+  two-level choice (`0` or `0x1e`) via a `luma+gamma < 0xff` compare;
+  `render_zero_fill_kernel` is the degenerate case of that — always the
+  low level, for every pixel, unconditionally. **Mode 5 in 3.27 is a
+  distinct, source-independent "always zero" kernel**, not a rescaled
+  variant of modes 2–4's dithered formula. It also never handles the
+  sub-8-pixel fringe outside the aligned interior (unlike cases 7/8/0xc,
+  which each have a trailing scalar loop for exactly that) — those
+  boundary rows/columns are left untouched entirely for mode 5.
+
+  It sits immediately before the two commit-kernel candidates from §5b
   (`0x48590`–`0x486bb`, immediately followed by `0x486bc`), which is
-  probably just linker layout, not a relationship — flagged in case it
-  turns out not to be.
+  probably just linker layout, not a relationship.
 - **Explicit (non-auto) `pixelMode` literal 6 changed formula identity —
   relevant to this repo's own code.** 3.23: literal `pixelMode=6` is the
   bare alias into case 8 (gamma-dithered, unconditional). 3.27: case 6 in
@@ -382,11 +416,12 @@ statement itself was reshuffled:
    see §6. Headline: sentinel changed `5→6`, table shrank `7→6` entries,
    case 7/8 swapped roles, but modes 1/6's formula and modes 2-4's formula
    (shape) both survived under the new numbering. Follow-up:
-   - Decompile `FUN_00048590` (§6, the mode-5/case-2/3/10 tail call) and
-     compare its output against case `0xc`'s inline formula — the one
-     open question left in the auto-dispatch table is whether mode 5
-     actually still behaves like modes 2-4 in 3.27, or has genuinely
-     diverged.
+   - ~~Decompile `FUN_00048590` (§6, the mode-5/case-2/3/10 tail call) and
+     compare its output against case `0xc`'s inline formula~~ — done, see
+     §6. Renamed to `render_zero_fill_kernel`. **Mode 5 has genuinely
+     diverged**: it's an unconditional zero-fill over the 8-aligned
+     interior, no source read, no gamma, no dithering — not a factored-out
+     copy of case `0xc`'s formula.
 3. Check `swtcon_init`'s new third parameter (`""` at the only call site
    seen) — grep other callers / xochitl itself for a non-empty value before
    assuming it's unused in practice.

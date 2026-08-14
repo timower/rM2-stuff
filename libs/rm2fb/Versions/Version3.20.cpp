@@ -224,34 +224,33 @@ struct AddressInfo : public AddressInfoBase {
     }
 
     res.waveform &= ~UpdateParams::ioctl_waveform_flag;
-    res.waveform = [&] {
+    res.waveform = static_cast<int>([&] {
       switch (res.waveform) {
         case WAVEFORM_MODE_INIT:
-          return 2;
+          return SwtconWaveformMode::GC16;
         case WAVEFORM_MODE_DU:
         default:
-          return 1;
+          return SwtconWaveformMode::DU;
         case WAVEFORM_MODE_GC16:
-          return 2;
+          return SwtconWaveformMode::GC16;
         case WAVEFORM_MODE_GL16:
-          return 3;
+          return SwtconWaveformMode::GL16;
         case WAVEFORM_MODE_A2:
-          return 6;
+          return SwtconWaveformMode::A2;
       }
-    }();
+    }());
 
-    // If the 'priority' bit is set.
-    if ((update.flags & 4) != 0) {
-      // Match the 'pen' modes in xochitl.
+    if ((update.flags & RM2_FLAG_FAST_DRAW) != 0) {
+      // Match the 'pen' modes in xochitl (swtcon.h's UpdateFlags::FastDraw).
       res.flags = 2;
       // Don't use 7, as that'd use the backBuffer, which is not set.
       res.extraMode = 6;
-    } else if ((update.flags & 0x1) == 0) {
+    } else if ((update.flags & RM2_FLAG_SYNC) == 0) {
       // Not full update, set the default 'extraMode' to 6.
       res.flags = 0;
       res.extraMode = 9;
     } else {
-      // Full update
+      // Full update (swtcon.h's UpdateFlags::Sync).
       res.flags = 1;
       res.extraMode = 9;
     }

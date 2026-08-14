@@ -77,16 +77,18 @@ handleUpdate(const mxcfb_update_data& data) {
   // 2: GL16: Faster grayscale
   // 3: A2?: Pan & Zoom mode, 3.3+ GC16 mode
 
-  // full = 1, partial = 0
-  int flags = data.update_mode == UPDATE_MODE_FULL ? 0x1 : 0x0;
+  // full = sync, partial = none
+  int flags =
+    data.update_mode == UPDATE_MODE_FULL ? RM2_FLAG_SYNC : RM2_FLAG_NONE;
 
   // TODO: Get sync from client (wait for second ioctl? or look at stack?)
   // There are only two occasions when the original rm1 library sets sync to
-  // true. Currently we detect them by the other data. Ideally we should
-  // correctly handle the corresponding ioctl (empty rect and flags == 2?).
+  // true. Currently we detect them by the other data - both already imply
+  // UPDATE_MODE_FULL, so RM2_FLAG_SYNC above is already set; this is just
+  // logging for now. Ideally we should correctly handle the corresponding
+  // ioctl (empty rect?).
   if (data.waveform_mode == WAVEFORM_MODE_INIT &&
       data.update_mode == UPDATE_MODE_FULL) {
-    flags |= 2;
     std::cerr << "SERVER: sync" << std::endl;
   } else if (rect.left == 0 && rect.top > 1800 &&
              (data.waveform_mode == WAVEFORM_MODE_GL16 ||
@@ -94,13 +96,11 @@ handleUpdate(const mxcfb_update_data& data) {
              data.update_mode == UPDATE_MODE_FULL) {
     std::cerr << "server sync, x2: " << rect.width << " y2: " << rect.height
               << std::endl;
-    flags |= 2;
   }
 
   if (data.waveform_mode == WAVEFORM_MODE_DU &&
       data.update_mode == UPDATE_MODE_PARTIAL) {
-    // fast draw
-    flags |= 4;
+    flags |= RM2_FLAG_FAST_DRAW;
   }
 
   UpdateParams params;

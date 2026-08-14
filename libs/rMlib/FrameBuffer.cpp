@@ -24,6 +24,11 @@
 #include "rm2.h"
 
 namespace rmlib::fb {
+
+static_assert(static_cast<int>(UpdateFlags::None) == RM2_FLAG_NONE);
+static_assert(static_cast<int>(UpdateFlags::Sync) == RM2_FLAG_SYNC);
+static_assert(static_cast<int>(UpdateFlags::FastDraw) == RM2_FLAG_FAST_DRAW);
+
 namespace {
 constexpr auto fb_path = "/dev/fb0";
 } // namespace
@@ -120,9 +125,8 @@ FrameBuffer::doUpdate(Rect region, Waveform waveform, UpdateFlags flags) const {
     update.update_mode = RM2_UPDATE_MODE;
     update.flags = static_cast<int>(flags);
   } else {
-    update.update_mode = (flags & UpdateFlags::FullRefresh) != 0
-                           ? UPDATE_MODE_FULL
-                           : UPDATE_MODE_PARTIAL;
+    update.update_mode =
+      (flags & UpdateFlags::Sync) != 0 ? UPDATE_MODE_FULL : UPDATE_MODE_PARTIAL;
 
     constexpr auto temp_use_remarkable_draw = 0x0018;
     constexpr auto epdc_flag_exp1 = 0x270ce20;

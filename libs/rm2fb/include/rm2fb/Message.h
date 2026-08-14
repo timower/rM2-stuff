@@ -26,6 +26,18 @@ struct UpdateParams {
   int extraMode;
 };
 
+// swtcon's internal waveform LUT index (update_data::update_mode /
+// WorkItem::mode, see libs/swtcon/update.h's select_waveform_lut) - distinct
+// from the Linux WAVEFORM_MODE_* ioctl constants (e.g. A2 is 6 here vs. 4
+// for WAVEFORM_MODE_A2). ServerSwtcon.cpp's mapUpdate and Version3.20.cpp's
+// identical legacy mapUpdate both translate WAVEFORM_MODE_* into this.
+enum class SwtconWaveformMode : int {
+  DU = 1,
+  GC16 = 2,
+  GL16 = 3,
+  A2 = 6,
+};
+
 constexpr auto update_message_size = 8 * 4;
 static_assert(sizeof(UpdateParams) == update_message_size,
               "Params has wrong size?");

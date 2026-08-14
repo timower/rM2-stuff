@@ -4,7 +4,34 @@
 
 #include "swtcon.h"
 
+#include <rm2.h>
+
 namespace {
+
+// rm2.h documents this equivalence; mapUpdate's flag remap below is just a
+// mask because of it.
+static_assert(RM2_FLAG_SYNC == UpdateFlags::Sync);
+static_assert(RM2_FLAG_FAST_DRAW == UpdateFlags::FastDraw);
+
+// Translates a WAVEFORM_MODE_* ioctl constant into swtcon's own waveform
+// LUT index.
+SwtconWaveformMode
+mapWaveformMode(int waveform) {
+  switch (waveform & ~UpdateParams::ioctl_waveform_flag) {
+    case WAVEFORM_MODE_INIT:
+      return SwtconWaveformMode::GC16;
+    case WAVEFORM_MODE_DU:
+      return SwtconWaveformMode::DU;
+    case WAVEFORM_MODE_GC16:
+      return SwtconWaveformMode::GC16;
+    case WAVEFORM_MODE_GL16:
+    default:
+      return SwtconWaveformMode::GL16;
+    case WAVEFORM_MODE_A2:
+      return SwtconWaveformMode::A2;
+  }
+}
+
 struct AddressInfo : public AddressInfoBase {
   static update_data mapUpdate(const UpdateParams& params) {
     update_data res = {
@@ -22,38 +49,16 @@ struct AddressInfo : public AddressInfoBase {
       return res;
     }
 
-    res.update_mode &= ~UpdateParams::ioctl_waveform_flag;
-    res.update_mode = [&] {
-      switch (res.update_mode) {
-        case WAVEFORM_MODE_INIT:
-          return 2;
-        case WAVEFORM_MODE_DU:
-        default:
-          return 1;
-        case WAVEFORM_MODE_GC16:
-          return 2;
-        case WAVEFORM_MODE_GL16:
-          return 3;
-        case WAVEFORM_MODE_A2:
-          return 6;
-      }
-    }();
+    res.update_mode = static_cast<int>(mapWaveformMode(params.waveform));
 
-    // If the 'priority' bit is set.
-    if ((params.flags & 4) != 0) {
-      // Match the 'pen' modes in xochitl.
-      res.flags = 2;
-      // Don't use 7, as that'd use the backBuffer, which is not set.
-      res.pixel_mode = 6;
-    } else if ((params.flags & 0x1) == 0) {
-      // Not full update, set the default 'extraMode' to 6.
-      res.flags = 0;
-      res.pixel_mode = 9;
-    } else {
-      // Full update
-      res.flags = 1;
-      res.pixel_mode = 9;
-    }
+    // RM2UpdateFlags matches swtcon's own UpdateFlags bit-for-bit, so the
+    // only remapping needed is masking down to the bits swtcon knows.
+    res.flags = params.flags & (RM2_FLAG_SYNC | RM2_FLAG_FAST_DRAW);
+
+    // Auto-select the pixel formula from the waveform mode (see
+    // render_kernel_case's dispatch table) instead of hand-picking one -
+    // never resolves to case 7, so this stays safe with no backBuffer set.
+    res.pixel_mode = 5;
 
     return res;
   }

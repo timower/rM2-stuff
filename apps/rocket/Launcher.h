@@ -213,7 +213,7 @@ public:
       return Rotated(rotation, launcher(context));
     }();
 
-    // AboutToSuspend must land as a genuine synced GC16 refresh - FullRefresh
+    // AboutToSuspend must land as a genuine synced GC16 refresh - Sync
     // blocks in swtcon until the draw completes, which is what lets us know
     // "Sleeping" actually hit the panel before suspend is allowed to proceed.
     const bool aboutToSuspend =

@@ -238,7 +238,7 @@ protected:
 
     UpdateRegion result;
     result.waveform = rmlib::fb::Waveform::DU;
-    result.flags = fb::UpdateFlags::Priority;
+    result.flags = fb::UpdateFlags::FastDraw;
 
     auto lastPoint = points.front();
     result.region |= Rect{ lastPoint, lastPoint };

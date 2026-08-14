@@ -10,7 +10,15 @@ namespace rmlib::fb {
 // Waveform ints that match rm2 'actual' updates
 enum class Waveform { DU = 0, GC16 = 1, GC16Fast = 2, A2 = 3 };
 
-enum UpdateFlags { None = 0, FullRefresh = 1, /*Sync = 2,*/ Priority = 4 };
+// Bit layout matches vendor/linux/rm2.h's RM2UpdateFlags, and in turn
+// swtcon.h's own UpdateFlags (checked by static_assert in FrameBuffer.cpp)
+// - kept as its own dependency-free type here since this header must build
+// under EMULATE, without linux::mxcfb.
+enum UpdateFlags {
+  None = 0,
+  Sync = 1,     // block until the update completes
+  FastDraw = 2, // skip the dependency wait against other FastDraw updates
+};
 
 struct FrameBuffer {
   enum Type { rM1, Shim, rM2Stuff }; // NOLINT

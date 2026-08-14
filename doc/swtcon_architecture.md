@@ -268,7 +268,23 @@ default (0xa/0xb/0xc): out = ((lo5+mid6+hi5) >> 3) << 1                         
 **`gamma`/`g_pGammaTable` is an ordered-dither threshold matrix, not a tone curve — `[derived]`, upgraded this pass.** Three independent facts converge:
 1. It's indexed purely by pixel *position* (`row&0x7f`, `col&0x7f`, a 128×128 tile), not by pixel *value* — a real gamma/tone-response curve would be indexed by intensity, not screen coordinate.
 2. Its source data (`libs/swtcon/statebuffer_table.h`, 17,407 `uint16` values) is a static blob copied byte-for-byte from the library's binary (`file offset 0x496da`, per the commit that generated it) — not computed at runtime — and the values themselves are non-monotonic/pseudo-random (range 0–65532, no smooth progression). A tone curve would be smooth; a dither threshold matrix looks exactly like this.
-3. Every formula that reads `gamma` *adds* it into the pre-quantization sum before an integer divide (e.g. case 8: `(lo5+mid6+hi5+gamma)/125`) — textbook ordered dithering, where a spatially-varying threshold shifts the rounding boundary per pixel to fake intermediate gray levels out of a small set of discrete output levels (`*30` → steps of 30). Case 0xa/0xb/0xc's dither-free formula (no gamma lookup, plain bit-shift quantization) is consistent with this too — those are presumably reached by pixel modes xochitl 3.20 doesn't use, and skip dithering entirely.
+3. Every formula that reads `gamma` *adds* it into the pre-quantization sum before an integer divide (e.g. case 8: `(lo5+mid6+hi5+gamma)/125`) — textbook ordered dithering, where a spatially-varying threshold shifts the rounding boundary per pixel to fake intermediate gray levels out of a small, fixed set of discrete output levels. Case 0xa/0xb/0xc's dither-free formula (no gamma lookup, plain bit-shift quantization) is consistent with this too — those are presumably reached by pixel modes xochitl 3.20 doesn't use, and skip dithering entirely.
+
+   **Case 8's level count — `[confirmed]` via `init_statebuffer`'s scaling
+   (`libs/swtcon/init.cpp:100-106`), not just the formula shape.** The gamma
+   byte actually read by the kernel isn't the raw 0–65532 table value — it's
+   `round(rawValue * 124.0 / 65532.0)`, clamped into `[0, 124]`, computed
+   once at init and baked into the byte table `g_pGammaTable` actually reads.
+   So `lo5+mid6+hi5+gamma` maxes out at `125 + 124 = 249`, always `< 250` —
+   meaning `(sum)/125` can only ever be `0` or `1`. **Case 8's `*30` output
+   is strictly binary: `0` or `30`, never anything in between.** This is a
+   plain single-threshold ordered dither (`sum >= 125 ? 30 : 0`, just
+   expressed via floor-division instead of a direct compare) — appropriate
+   for DU/A2, which are 1-bit waveforms and have no intermediate levels to
+   dither into. Case 9's formula, by contrast, genuinely is multi-level:
+   `(lo5+mid6+hi5)*15` maxes at `1875`, `+124` gamma `= 1999`, `/125` gives
+   quotients `0..15`, `<<1` → **16 distinct output levels** (`0,2,4,...,30`)
+   — correct for GC16/GL16, which are real grayscale waveforms.
 
 This also gives the `backBuffer` gate in case 7 a concrete role: `libs/rm2fb/Versions/Version3.20.cpp:38-39` independently calls this same buffer `getGrayBuffer()` with a comment guessing it's used "when extraMode == 7" — written before this reversing project and now confirmed exactly. For the pen/marker path, dithering is applied only where the caller's gray mask is set; elsewhere the kernel emits the `0x20` skip sentinel and leaves the pixel alone.
 

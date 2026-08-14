@@ -581,5 +581,5 @@ KeyboardRenderObject::drawKey(rmlib::Point pos,
   }
 
   state.dirty = false;
-  return { keyRect, fb::Waveform::DU, fb::UpdateFlags::Priority };
+  return { keyRect, fb::Waveform::DU, fb::UpdateFlags::FastDraw };
 }

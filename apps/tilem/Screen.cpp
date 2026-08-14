@@ -99,7 +99,7 @@ ScreenRenderObject::doDraw(Canvas& canvas) {
   }
   std::swap(lcd, oldLcd);
 
-  return { canvas.rect(), fb::Waveform::DU, fb::UpdateFlags::Priority };
+  return { canvas.rect(), fb::Waveform::DU, fb::UpdateFlags::FastDraw };
 }
 
 std::unique_ptr<RenderObject>
