@@ -188,7 +188,7 @@ TEST_CASE("Hideable: forceRefresh requests a genuine GC16 full refresh",
   auto ctx = TestContext::make();
   const auto constraints = Constraints{ { 0, 0 }, { 100, 100 } };
 
-  Hideable<Text> initial{ std::nullopt };
+  Hideable<Text> initial{ Text("hi"), false };
   auto ro = initial.createRenderObject();
   auto& hideableRO = static_cast<HideableRenderObject<Text>&>(*ro);
 
@@ -197,7 +197,7 @@ TEST_CASE("Hideable: forceRefresh requests a genuine GC16 full refresh",
                   { 0, 0 }); // consume initial draw.
 
   SECTION("becoming visible without forceRefresh only upgrades the waveform") {
-    Hideable<Text> shown{ Text("hi") };
+    Hideable<Text> shown{ Text("hi"), true };
     hideableRO.update(shown);
     hideableRO.layout(constraints);
 
@@ -207,7 +207,7 @@ TEST_CASE("Hideable: forceRefresh requests a genuine GC16 full refresh",
   }
 
   SECTION("forceRefresh forces GC16 + Sync") {
-    Hideable<Text> shown{ Text("hi"), /*forceRefresh=*/true };
+    Hideable<Text> shown{ Text("hi"), true, /*forceRefresh=*/true };
     hideableRO.update(shown);
     hideableRO.layout(constraints);
 
@@ -217,7 +217,7 @@ TEST_CASE("Hideable: forceRefresh requests a genuine GC16 full refresh",
   }
 
   SECTION("forceRefresh is consumed after a single draw") {
-    Hideable<Text> shown{ Text("hi"), /*forceRefresh=*/true };
+    Hideable<Text> shown{ Text("hi"), true, /*forceRefresh=*/true };
     hideableRO.update(shown);
     hideableRO.layout(constraints);
     hideableRO.draw(ctx.getFramebuffer().canvas, { 0, 0 });

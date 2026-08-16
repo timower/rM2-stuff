@@ -175,25 +175,15 @@ public:
 
   auto launcher(rmlib::AppContext& context) const {
     using namespace rmlib;
-
-    std::vector<DynamicWidget> layers;
-    layers.emplace_back(Positioned(statusBar(), Point{ 0, 0 }));
-    layers.emplace_back(Column(runningApps(), appList(context)));
-
-    // Both layers need input: the status bar handles taps to cancel the
-    // sleep countdown, on top of the app list below it.
-    return Cleared(Stack(std::move(layers), /*onlyTopInput=*/false));
+    return Cleared(
+      Column(statusBar(), Expanded(Column(runningApps(), appList(context)))));
   }
 
   auto build(rmlib::AppContext& context,
              const rmlib::BuildContext& /*unused*/) const {
     using namespace rmlib;
 
-    auto ui = [&]() -> std::optional<DynamicWidget> {
-      if (!std::holds_alternative<Visible>(visibility)) {
-        return {};
-      }
-
+    auto ui = [&]() -> DynamicWidget {
       if (const auto* splash = std::get_if<Splash>(&splashPhase)) {
         return Center(Rotated(
           rotation,
@@ -209,7 +199,8 @@ public:
     const bool aboutToSuspend =
       std::holds_alternative<AboutToSuspend>(sleepPhase);
 
-    return GestureDetector(Hideable(std::move(ui), aboutToSuspend),
+    const auto visible = std::holds_alternative<Visible>(visibility);
+    return GestureDetector(Hideable(std::move(ui), visible, aboutToSuspend),
                            Gestures{}
                              .onKeyUp([this, &context](auto keyCode) {
                                onKey(context, keyCode, false);
