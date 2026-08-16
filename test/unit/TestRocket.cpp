@@ -429,7 +429,8 @@ TEST_CASE("Launcher", "[rocket][launcher]") {
   REQUIRE_THAT(launcher, ctx.matchesGolden("rocket.png"));
 }
 
-TEST_CASE("Launcher FSM: toggle defers the sleep timer until visible",
+TEST_CASE("Launcher FSM: toggle shows the countdown immediately but only "
+          "starts ticking once visible",
           "[rocket][launcher]") {
   auto client = FakeClient{};
   client.clients = { ControlInterface::Client{
@@ -448,16 +449,20 @@ TEST_CASE("Launcher FSM: toggle defers the sleep timer until visible",
   // again behaves as if it were. See show()'s Hidden guard below.)
   raiseAndPump(ctx, SIGUSR1);
 
-  // User presses power: requests to become visible again, but the sleep
-  // countdown must not start until that's confirmed.
+  // User presses power: the countdown shows right away, but stays frozen -
+  // it must not actually tick down until the switch is confirmed.
   pressPower(ctx);
   CHECK(client.switchToCount == 1);
   CHECK(client.lastSwitchTo == getpid());
-  REQUIRE(ctx.findByText(about_to_sleep_text).empty());
-
-  // The multiplexer acks the switch: *now* the countdown starts.
-  raiseAndPump(ctx, SIGCONT);
   REQUIRE_FALSE(ctx.findByText(about_to_sleep_text).empty());
+
+  ctx.pump(std::chrono::milliseconds(1100));
+  REQUIRE_FALSE(ctx.findByText(about_to_sleep_text).empty());
+
+  // The multiplexer acks the switch: *now* it starts ticking down.
+  raiseAndPump(ctx, SIGCONT);
+  ctx.pump(std::chrono::milliseconds(1100));
+  REQUIRE(ctx.findByText(about_to_sleep_text).empty());
 }
 
 TEST_CASE("Launcher FSM: a pending show self-heals if the ack never arrives",
@@ -478,8 +483,10 @@ TEST_CASE("Launcher FSM: a pending show self-heals if the ack never arrives",
   CHECK(client.switchToCount == 1);
 
   // Once the pending request times out (no SIGCONT ever arrived), the
-  // launcher reverts to hidden, so a fresh press issues a new request.
+  // launcher reverts to hidden and the frozen countdown clears too, so a
+  // fresh press issues a new request instead of showing stale state.
   ctx.pump(std::chrono::milliseconds(10500));
+  REQUIRE(ctx.findByText(about_to_sleep_text).empty());
   pressPower(ctx);
   CHECK(client.switchToCount == 2);
 }
@@ -621,6 +628,60 @@ TEST_CASE("Launcher FSM: an externally-triggered suspend forces a redraw "
 
   CHECK(sleepLockReleased(power));
   REQUIRE_FALSE(ctx.findByText(LauncherWidget::sleep_text).empty());
+}
+
+TEST_CASE("Launcher FSM: an external suspend while hidden requests to "
+          "become visible before releasing the sleep lock",
+          "[rocket][launcher]") {
+  auto client = FakeClient{};
+  client.clients = { ControlInterface::Client{
+    .pid = 4242, .active = true, .format = {}, .name = "other" } };
+  auto power = FakePower{};
+
+  auto ctx = TestContext::make();
+  ctx.pumpWidget(Center(LauncherWidget(client, power, getFakeApps)));
+
+  // The multiplexer switches away: another app is on screen.
+  raiseAndPump(ctx, SIGUSR1);
+  REQUIRE(power.acquireSleepLockCalls == 1); // acquired on startup.
+
+  // logind wants to suspend while rocket isn't the visible client.
+  triggerSleepEvent(ctx, power, { .sleeping = true, .wokenByUser = false });
+
+  // The sleep screen can't reach the panel until rocket is visible again -
+  // it must request that instead of releasing the lock right away.
+  CHECK(client.switchToCount == 1);
+  CHECK(client.lastSwitchTo == getpid());
+  CHECK_FALSE(sleepLockReleased(power));
+
+  // Once the multiplexer acks the switch, the lock is finally released.
+  raiseAndPump(ctx, SIGCONT);
+  CHECK(sleepLockReleased(power));
+  REQUIRE_FALSE(ctx.findByText(LauncherWidget::sleep_text).empty());
+}
+
+TEST_CASE("Launcher FSM: a resume that beats the show() ack clears "
+          "sleepPhase instead of leaving it stuck on AboutToSuspend",
+          "[rocket][launcher]") {
+  auto client = FakeClient{};
+  client.clients = { ControlInterface::Client{
+    .pid = 4242, .active = true, .format = {}, .name = "other" } };
+  auto power = FakePower{};
+
+  auto ctx = TestContext::make();
+  ctx.pumpWidget(Center(LauncherWidget(client, power, getFakeApps)));
+
+  raiseAndPump(ctx, SIGUSR1);
+  triggerSleepEvent(ctx, power, { .sleeping = true, .wokenByUser = false });
+  CHECK(client.switchToCount == 1); // requested to become visible.
+
+  // logind forces the suspend through before the multiplexer ever acks the
+  // switch - resume arrives with no SIGCONT ever having landed.
+  simulateResume(ctx, power, /*wokenByUser=*/true);
+
+  // sleepPhase must not be left stuck on AboutToSuspend.
+  REQUIRE_FALSE(ctx.findByText(LauncherWidget::title_text).empty());
+  REQUIRE(ctx.findByText(LauncherWidget::sleep_text).empty());
 }
 
 TEST_CASE("Launcher FSM: the launch splash clears once the app becomes "

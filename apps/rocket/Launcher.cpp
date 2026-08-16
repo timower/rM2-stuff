@@ -177,22 +177,30 @@ LauncherState::onSleepFdReady(rmlib::AppContext& context) {
 
 void
 LauncherState::onPrepareSleep(rmlib::AppContext& context) {
+  // Set unconditionally so a resume that beats the SIGCONT ack (forced
+  // suspend, or this process frozen before drawing) still lets onResume()
+  // notice a suspend happened instead of finding stale Idle/CountingDown.
+  sleepTimer.disable();
+  sleepPhase = AboutToSuspend{};
+
   if (std::holds_alternative<Visible>(visibility)) {
     // build() turns this into a synced GC16 refresh, guaranteeing
-    // "Sleeping" is actually on the panel before we let suspend proceed -
-    // regardless of what triggered it.
-    sleepTimer.disable();
-    sleepPhase = AboutToSuspend{};
+    // "Sleeping" is actually on the panel before we let suspend proceed.
+    releaseSleepLock(context);
+    return;
   }
 
-  // Deferred so the release lands after the *next* draw (which now reflects
-  // the state above, if we just set it) rather than before it - see
-  // AppContext::step()'s doAllLaters() placement. Detaches sleepLock's raw
-  // fd rather than calling releaseSleepLock() later: a resume can arrive
-  // (and re-acquire a fresh lock into the member) before this runs, and
-  // closing by member reference would then release the wrong one. (Callback
-  // must stay copyable for std::function, hence the raw int instead of
-  // moving the FD itself.)
+  // Not on screen - request to become visible so the sleep screen still
+  // lands; onSignal() finishes the transition once SIGCONT arrives.
+  showForSuspend(context);
+}
+
+void
+LauncherState::releaseSleepLock(rmlib::AppContext& context) {
+  // Deferred to land after the next draw, not before - see
+  // AppContext::step()'s doAllLaters() placement. Detaches the raw fd
+  // instead of closing sleepLock later, since a resume can re-acquire a
+  // fresh lock into that member first.
   auto fd = std::exchange(sleepLock.fd, unistdpp::FD::invalid_fd);
   context.doLater([fd] { unistdpp::FD{ fd }.close(); });
 }
@@ -200,6 +208,12 @@ LauncherState::onPrepareSleep(rmlib::AppContext& context) {
 void
 LauncherState::onResume(rmlib::AppContext& context, bool wokenByUser) {
   takeSleepLock();
+
+  // logind can force a suspend through its inhibitor delay before we ever
+  // became visible - nothing left to wait for.
+  if (std::holds_alternative<PendingVisibleSuspend>(visibility)) {
+    visibility = Hidden{};
+  }
 
   if (!std::holds_alternative<AboutToSuspend>(sleepPhase)) {
     // Not a suspend we reacted to (rocket wasn't on screen) - nothing else
@@ -280,16 +294,12 @@ LauncherState::toggle(rmlib::AppContext& context) {
   } else if (std::holds_alternative<Hidden>(visibility)) {
     show(context);
   }
-  // Ignore repeated presses while a show request (PendingVisible) is in
+  // Ignore repeated presses while a show request (PendingVisible*) is in
   // flight.
 }
 
-void
-LauncherState::show(rmlib::AppContext& context) {
-  if (!std::holds_alternative<Hidden>(visibility)) {
-    return;
-  }
-
+pid_t
+LauncherState::requestSwitchToSelf() {
   pid_t returnTo = -1;
   const auto clientsOrErr = getWidget().ctlClient.getClients();
   if (clientsOrErr) {
@@ -305,22 +315,54 @@ LauncherState::show(rmlib::AppContext& context) {
   if (auto err = getWidget().ctlClient.switchTo(getpid()); !err) {
     std::cerr << "Error switching: " << to_string(err.error()) << "\n";
   }
+  return returnTo;
+}
+
+void
+LauncherState::show(rmlib::AppContext& context) {
+  if (!std::holds_alternative<Hidden>(visibility)) {
+    return;
+  }
+
+  // Set right away (without arming the tick timer yet) so the first draw
+  // once visible already shows the countdown instead of a stale Idle one.
+  sleepPhase = CountingDown{ default_sleep_timeout };
+
+  const pid_t returnTo = requestSwitchToSelf();
 
   // `timeout` self-heals if the expected SIGCONT ack never arrives, so a
-  // failed/dropped switch can't leave us stuck in PendingVisible forever.
-  visibility = PendingVisible{
+  // failed/dropped switch can't leave us stuck in PendingVisibleLauncher
+  // forever.
+  visibility = PendingVisibleLauncher{
     returnTo,
     context.addTimer(show_timeout,
                      [this] {
                        setState([](auto& self) {
-                         if (std::holds_alternative<PendingVisible>(
+                         if (std::holds_alternative<PendingVisibleLauncher>(
                                self.visibility)) {
                            std::cerr << "Timed out waiting to become visible\n";
                            self.visibility = Hidden{};
+                           self.sleepPhase = Idle{};
                          }
                        });
                      }),
   };
+}
+
+void
+LauncherState::showForSuspend(rmlib::AppContext& context) {
+  if (const auto* pending = std::get_if<PendingVisibleLauncher>(&visibility)) {
+    // Already switching for an unrelated reason - piggyback on it rather
+    // than issuing a second switchTo().
+    visibility = PendingVisibleSuspend{ pending->returnTo };
+    return;
+  }
+
+  if (!std::holds_alternative<Hidden>(visibility)) {
+    return; // Visible or already PendingVisibleSuspend.
+  }
+
+  visibility = PendingVisibleSuspend{ requestSwitchToSelf() };
 }
 
 void
@@ -405,7 +447,13 @@ LauncherState::onSignal(rmlib::AppContext& context) {
     visibility = Hidden{};
     clearSplash();
   } else if (*sigOrErr == SIGCONT) {
-    if (auto* pending = std::get_if<PendingVisible>(&visibility)) {
+    if (const auto* pending = std::get_if<PendingVisibleSuspend>(&visibility)) {
+      // sleepPhase is already AboutToSuspend (onPrepareSleep() set it) -
+      // just release the lock now that "Sleeping" can reach the panel.
+      visibility = Visible{ pending->returnTo };
+      releaseSleepLock(context);
+    } else if (const auto* pending =
+                 std::get_if<PendingVisibleLauncher>(&visibility)) {
       visibility = Visible{ pending->returnTo };
       startTimer(context);
     } else {

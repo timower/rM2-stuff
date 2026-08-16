@@ -218,11 +218,19 @@ private:
   struct Visible {
     pid_t returnTo = -1; // app to switch back to when hidden again.
   };
-  struct PendingVisible {
+  // A user/launcher-triggered show() request - self-heals back to Hidden if
+  // the SIGCONT ack never arrives.
+  struct PendingVisibleLauncher {
     pid_t returnTo = -1;
     rmlib::TimerHandle timeout;
   };
-  using Visibility = std::variant<Hidden, PendingVisible, Visible>;
+  // An onPrepareSleep()-triggered show() request - no timeout, since the
+  // sleep lock already blocks suspend indefinitely until acked or forced.
+  struct PendingVisibleSuspend {
+    pid_t returnTo = -1;
+  };
+  using Visibility = std::
+    variant<Hidden, PendingVisibleLauncher, PendingVisibleSuspend, Visible>;
 
   // Sleep countdown, independent of visibility.
   struct Idle {};
@@ -276,16 +284,25 @@ private:
 
   /// Handles a PrepareForSleep transition read from pollSleep().
   void onSleepFdReady(rmlib::AppContext& context);
-  /// Sets sleepPhase to AboutToSuspend if rocket is visible, which build()
-  /// turns into a synced "Sleeping" draw before the sleep lock is released.
+  /// Always sets sleepPhase to AboutToSuspend. If rocket is visible, also
+  /// releases the sleep lock; otherwise calls showForSuspend() and leaves
+  /// the release to onSignal() once that's acked.
   void onPrepareSleep(rmlib::AppContext& context);
   /// Re-acquires the sleep lock; resumes to the current app or retries.
   void onResume(rmlib::AppContext& context, bool wokenByUser);
+  /// Defers releasing the sleep lock until after the next draw, so a
+  /// just-set AboutToSuspend phase is confirmed on the panel first.
+  void releaseSleepLock(rmlib::AppContext& context);
 
-  /// If Hidden will request rm2fb to become visible.
-  /// Will store the current active client in 'returnTo'.
-  /// visibility is PendingVisible until rm2fb notifies us.
+  /// Sends switchTo(self) to rm2fb, returning the previously-active client
+  /// to return to (-1 if none/unknown).
+  pid_t requestSwitchToSelf();
+  /// If Hidden will request rm2fb to become visible, moving to
+  /// PendingVisibleLauncher until rm2fb notifies us.
   void show(rmlib::AppContext& context);
+  /// Like show(), but moves to PendingVisibleSuspend (no self-heal timeout
+  /// needed - the sleep lock bounds the wait instead).
+  void showForSuspend(rmlib::AppContext& context);
   /// If Visible will request rm2fb to switch to the 'returnTo' app.
   /// If no app to return to, will suspend (startTimer) if context is not null.
   void hide(rmlib::AppContext* context);
@@ -302,9 +319,9 @@ private:
   /// visible - treated as a crash, so the splash is cleared right away.
   void onSplashAppExited();
 
-  /// On USR1 will stop the timer and set state to Hidden.
-  /// On CONT will set state to Visible and start the sleep timer.
-  /// Also refreshes apps & clients.
+  /// On USR1 will stop the timer and set state to Hidden. On CONT will set
+  /// state to Visible, finishing a pending suspend or starting the sleep
+  /// timer depending on which kind of PendingVisible was acked.
   void onSignal(rmlib::AppContext& context);
 
   void readApps();
