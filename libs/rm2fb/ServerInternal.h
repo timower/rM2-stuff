@@ -797,104 +797,107 @@ struct Server : ControlInterface {
     return true;
   }
 
+  unistdpp::Result<void> handleInit(UnixClient& client, Init& m) {
+    std::cerr << "Got init check!\n";
+
+    client.ownSwtcon = m.ownSwtcon;
+    client.format = clampToSupported(m.format, m.ownSwtcon);
+
+    auto buf = allocBlankBuffer(client.format);
+    if (!buf) {
+      // No usable buffer for this client to ever become front with - drop
+      // it instead of replying, rather than let requestSwitch() below
+      // promote a client with no buffer.
+      std::cerr << "Error allocating client buffer: "
+                << unistdpp::to_string(buf.error()) << " - dropping client\n";
+      client.sock.close();
+      return {};
+    }
+    client.buffer = std::move(*buf);
+
+    // Reply with the granted format followed by this client's own
+    // dedicated buffer right away instead of waiting for it to actually
+    // become front (that used to happen in resume(), gated on
+    // hasBeenFront) - a client can mmap and even pre-render into it
+    // immediately; it just can't push real panel updates until
+    // requestSwitch() below actually promotes it (see the UpdateParams
+    // handling below, which drops updates from a non-front client).
+    client.sock.writeAll(client.format)
+      .and_then(
+        [&] { return unistdpp::sendFDTo(client.sock, client.buffer.fd); })
+      .or_else([&](auto err) {
+        std::cerr << "Error sending fb to client: " << unistdpp::to_string(err)
+                  << "\n";
+      });
+
+    // requestSwitch() handles everything else (pausing the old front if
+    // any, buffer handoff, suspendForXochitl if this client owns its own
+    // swtcon) - including deferring all of it if the current front is a
+    // busy client-driven one, instead of doing any of it here.
+    requestSwitch(client.pid);
+    return {};
+  }
+
+  unistdpp::Result<void> handleUpdate(UnixClient& client, UpdateParams& m) {
+    if (client.pid != focusPid(focus)) {
+      // Only the front client's updates should reach the shared swtcon
+      // instance. It may currently be suspended (a client-driven front
+      // owns the panel - see suspendForXochitl()), in which case
+      // swtcon_wait() would block forever and hang this server's single
+      // poll() thread for every client.
+      return client.sock.writeAll(false);
+    }
+    bool res = doUpdate(m);
+    return client.sock.writeAll(res);
+  }
+
+  unistdpp::Result<void> handleUpdateBatch(UnixClient& client,
+                                           UpdateBatchHeader& m) {
+    // Must drain the payload regardless of front-client status below, or
+    // the next recvMessage() on this socket desyncs.
+    std::vector<UpdateParams> updates(m.count);
+    if (m.count > 0) {
+      TRY(client.sock.readAll(updates.data(),
+                              updates.size() * sizeof(UpdateParams)));
+    }
+
+    if (client.pid != focusPid(focus)) {
+      // See handleUpdate() above for why non-front updates are dropped.
+      return client.sock.writeAll(false);
+    }
+    bool res = doUpdateBatch(updates);
+    return client.sock.writeAll(res);
+  }
+
+  unistdpp::Result<void> handleIdleUpdate(UnixClient& client, IdleUpdate& m) {
+    auto* front = std::get_if<ClientDrivenFront>(&focus);
+    if (!front || front->pid != client.pid) {
+      if (client.ownSwtcon != true) {
+        std::cerr << "Unexpected IdleUpdate on a regular client\n";
+      }
+      return {};
+    }
+
+    client.idle = m.val;
+
+    if (m.val && front->pendingSwitchTarget) {
+      pid_t target = *front->pendingSwitchTarget;
+      front->pendingSwitchTarget.reset();
+      requestSwitch(target);
+    }
+
+    return {};
+  }
+
   void readUnixSock(UnixClient& client) {
     recvMessage<UnixClientMsg>(client.sock)
       .and_then([&](auto msg) -> unistdpp::Result<void> {
         return std::visit(
           overloaded{
-            [&](Init& m) -> unistdpp::Result<void> {
-              std::cerr << "Got init check!\n";
-
-              client.ownSwtcon = m.ownSwtcon;
-              client.format = clampToSupported(m.format, m.ownSwtcon);
-
-              auto buf = allocBlankBuffer(client.format);
-              if (!buf) {
-                // No usable buffer for this client to ever become front
-                // with - drop it instead of replying, rather than let
-                // requestSwitch() below promote a client with no buffer.
-                std::cerr << "Error allocating client buffer: "
-                          << unistdpp::to_string(buf.error())
-                          << " - dropping client\n";
-                client.sock.close();
-                return {};
-              }
-              client.buffer = std::move(*buf);
-
-              // Reply with the granted format followed by this client's
-              // own dedicated buffer right away instead of waiting for
-              // it to actually become front (that used to happen in
-              // resume(), gated on hasBeenFront) - a client can mmap and
-              // even pre-render into it immediately; it just can't push
-              // real panel updates until requestSwitch() below actually
-              // promotes it (see the UpdateParams handling further down,
-              // which drops updates from a non-front client).
-              client.sock.writeAll(client.format)
-                .and_then([&] {
-                  return unistdpp::sendFDTo(client.sock, client.buffer.fd);
-                })
-                .or_else([&](auto err) {
-                  std::cerr << "Error sending fb to client: "
-                            << unistdpp::to_string(err) << "\n";
-                });
-
-              // requestSwitch() handles everything else (pausing the old
-              // front if any, buffer handoff, suspendForXochitl if this
-              // client owns its own swtcon) - including deferring all of
-              // it if the current front is a busy client-driven one,
-              // instead of doing any of it here.
-              requestSwitch(client.pid);
-              return {};
-            },
-            [&](UpdateParams& m) -> unistdpp::Result<void> {
-              if (client.pid != focusPid(focus)) {
-                // Only the front client's updates should reach the shared
-                // swtcon instance. It may currently be suspended (a
-                // client-driven front owns the panel - see
-                // suspendForXochitl()), in which case swtcon_wait() would
-                // block forever and hang this server's single poll()
-                // thread for every client.
-                return client.sock.writeAll(false);
-              }
-              bool res = doUpdate(m);
-              return client.sock.writeAll(res);
-            },
-            [&](UpdateBatchHeader& m) -> unistdpp::Result<void> {
-              // Must drain the payload regardless of front-client status
-              // below, or the next recvMessage() on this socket desyncs.
-              std::vector<UpdateParams> updates(m.count);
-              if (m.count > 0) {
-                TRY(client.sock.readAll(updates.data(),
-                                        updates.size() * sizeof(UpdateParams)));
-              }
-
-              if (client.pid != focusPid(focus)) {
-                // See the UpdateParams handler above for why non-front
-                // updates are dropped.
-                return client.sock.writeAll(false);
-              }
-              bool res = doUpdateBatch(updates);
-              return client.sock.writeAll(res);
-            },
-            [&](IdleUpdate& m) -> unistdpp::Result<void> {
-              auto* front = std::get_if<ClientDrivenFront>(&focus);
-              if (!front || front->pid != client.pid) {
-                if (client.ownSwtcon != true) {
-                  std::cerr << "Unexpected IdleUpdate on a regular client\n";
-                }
-                return {};
-              }
-
-              client.idle = m.val;
-
-              if (m.val && front->pendingSwitchTarget) {
-                pid_t target = *front->pendingSwitchTarget;
-                front->pendingSwitchTarget.reset();
-                requestSwitch(target);
-              }
-
-              return {};
-            },
+            [&](Init& m) { return handleInit(client, m); },
+            [&](UpdateParams& m) { return handleUpdate(client, m); },
+            [&](UpdateBatchHeader& m) { return handleUpdateBatch(client, m); },
+            [&](IdleUpdate& m) { return handleIdleUpdate(client, m); },
           },
           msg);
       })

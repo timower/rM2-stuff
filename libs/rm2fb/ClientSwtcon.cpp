@@ -3,6 +3,9 @@
 // internal update/init/shutdown calls by address per xochitl version (see
 // Client.cpp/Versions/*.cpp, kept unchanged for backwards compat - older
 // xochitl builds that still dlopen libqsgepaper.so need that path).
+// Shares getControlSocket()/sendUpdate()/sendUpdateBatch() with Client.cpp
+// via ClientSocket.cpp (see Client.h) - everything else below is specific
+// to this variant.
 //
 // Two independent pieces, both validated standalone in
 // tools/xochitl-preload before landing here:
@@ -35,6 +38,7 @@
 // live view of its content for when it needs to redraw it (see
 // Server.cpp's pause()/resume(), swtcon_suspend/resume in swtcon.h).
 
+#include "Client.h"
 #include "IOCTL.h"
 #include "PreloadHooks.h"
 #include "rm2fb/Message.h"
@@ -58,32 +62,6 @@
 bool inXochitl = false; // NOLINT
 
 namespace {
-
-// Shared by both the generic (non-xochitl) redirect path below and
-// xochitlFb()'s handshake - identical to Client.cpp's own
-// getControlSocket()/doInit(), duplicated rather than shared across the
-// two client libraries so this one has zero dependency on Client.cpp/
-// Versions.cpp/Frida.
-unistdpp::FD&
-getControlSocket() {
-  static unistdpp::FD res;
-  if (!res.isValid()) {
-    res = unistdpp::fatalOnError(
-      unistdpp::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0));
-
-    unistdpp::bind(res, unistdpp::Address::fromUnixPath(nullptr))
-      .and_then([] {
-        return unistdpp::connect(
-          res, unistdpp::Address::fromUnixPath(default_sock_addr.data()));
-      })
-      .or_else([](auto err) {
-        std::cerr << "Failed connecting to rm2fb: " << unistdpp::to_string(err)
-                  << "\n";
-        res.close();
-      });
-  }
-  return res;
-}
 
 // Sends Init to make sure the rm2fb server is listening and has started
 // the SWTCON, then receives the shared framebuffer.
@@ -222,48 +200,6 @@ handleBlankTransition(unsigned long request, void* arg) {
 }
 
 } // namespace
-
-bool
-sendUpdate(const UpdateParams& params) {
-  auto& clientSock = getControlSocket();
-  if (!clientSock.isValid()) {
-    return false;
-  }
-
-  return sendMessage(clientSock, UnixClientMsg{ params })
-    .and_then([&]() { return clientSock.readAll<bool>(); })
-    .or_else([&](auto err) {
-      std::cerr << "Error sending: " << unistdpp::to_string(err) << "\n";
-      clientSock.close();
-    })
-    .value_or(false);
-}
-
-bool
-sendUpdateBatch(const std::vector<UpdateParams>& updates) {
-  auto& clientSock = getControlSocket();
-  if (!clientSock.isValid()) {
-    return false;
-  }
-
-  const auto header =
-    UpdateBatchHeader{ .count = static_cast<int32_t>(updates.size()) };
-
-  return sendMessage(clientSock, UnixClientMsg{ header })
-    .and_then([&]() -> unistdpp::Result<void> {
-      if (updates.empty()) {
-        return {};
-      }
-      return clientSock.writeAll(updates.data(),
-                                 updates.size() * sizeof(UpdateParams));
-    })
-    .and_then([&]() { return clientSock.readAll<bool>(); })
-    .or_else([&](auto err) {
-      std::cerr << "Error sending: " << unistdpp::to_string(err) << "\n";
-      clientSock.close();
-    })
-    .value_or(false);
-}
 
 extern "C" {
 

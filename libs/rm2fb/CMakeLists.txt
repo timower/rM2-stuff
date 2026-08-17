@@ -54,14 +54,15 @@ if(TARGET swtcon)
                                                      Evdev::Static udev Systemd::Lib pthread)
 endif()
 
-add_library(rm2fb_client SHARED Client.cpp IOCTL.cpp ImageHook.cpp
-                                AddressHooking.cpp)
+add_library(rm2fb_client SHARED Client.cpp ClientSocket.cpp IOCTL.cpp
+                                ImageHook.cpp AddressHooking.cpp)
 
 target_link_libraries(rm2fb_client PRIVATE Frida::Gum rm2fb_lib)
 
 set_target_properties(rm2fb_client PROPERTIES VERSION "1.1.0" SOVERSION "1")
 
-add_library(rm2fb_client_no_hook SHARED Client.cpp IOCTL.cpp ImageHook.cpp)
+add_library(rm2fb_client_no_hook SHARED Client.cpp ClientSocket.cpp IOCTL.cpp
+                                        ImageHook.cpp)
 target_link_libraries(rm2fb_client_no_hook PRIVATE rm2fb_lib)
 target_compile_definitions(rm2fb_client_no_hook PRIVATE NO_HOOKING)
 
@@ -75,8 +76,9 @@ target_compile_definitions(rm2fb_client_no_hook PRIVATE NO_HOOKING)
 # (32-bit ARM target - see libs/swtcon/CMakeLists.txt), since it's meant to
 # pair with rm2fb_server_swtcon.
 if(TARGET swtcon)
-  add_library(rm2fb_client_swtcon SHARED ClientSwtcon.cpp IOCTL.cpp
-                                         ImageHook.cpp PreloadHooks.cpp)
+  add_library(rm2fb_client_swtcon SHARED ClientSwtcon.cpp ClientSocket.cpp
+                                         IOCTL.cpp ImageHook.cpp
+                                         PreloadHooks.cpp)
   target_link_libraries(rm2fb_client_swtcon PRIVATE rm2fb_headers linux::mxcfb)
   set_target_properties(rm2fb_client_swtcon PROPERTIES VERSION "1.0.0"
                                                         SOVERSION "1")
