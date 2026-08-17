@@ -9,6 +9,7 @@ add_subdirectory(utfcpp)
 
 add_subdirectory(libYaft)
 add_subdirectory(libTilEm)
+add_subdirectory(libghostty)
 
 add_subdirectory(thick)
 add_subdirectory(stb)

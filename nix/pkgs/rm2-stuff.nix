@@ -1,6 +1,7 @@
 {
   toolchain_root ? null,
   preset ? null,
+  ghostty-vt ? null,
 
   fetchzip,
   stdenv,
@@ -123,6 +124,9 @@ stdenv.mkDerivation {
     "-DFETCHCONTENT_SOURCE_DIR_FRIDA-GUM=${frida_gum}"
     "-DFETCHCONTENT_SOURCE_DIR_EXPECTED=${expected}"
     "-DFETCHCONTENT_SOURCE_DIR_UTFCPP=${utfcpp}"
+  ]
+  ++ lib.optionals (ghostty-vt != null) [
+    "-DGHOSTTY_VT_PREFIX=${ghostty-vt}"
   ]
   ++ lib.optionals isRMToolchain [
     "-DCMAKE_TOOLCHAIN_FILE=${./../../cmake/rm-toolchain.cmake}"
