@@ -32,13 +32,13 @@ public:
   }
 
 protected:
-  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
+  void doDraw(rmlib::Canvas& canvas, std::vector<UpdateRegion>& out) override {
     const auto size = this->getSize();
 
     const auto xOffset = (size.width - childSize.width) / 2;
     const auto yOffset = (size.height - childSize.height) / 2;
 
-    return this->child->draw(canvas, Point{ xOffset, yOffset });
+    this->child->draw(canvas, Point{ xOffset, yOffset }, out);
   }
 
 private:
@@ -82,9 +82,9 @@ protected:
     return constraints.expand(childSize, this->widget->insets);
   }
 
-  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
+  void doDraw(rmlib::Canvas& canvas, std::vector<UpdateRegion>& out) override {
     const auto insets = this->widget->insets;
-    return this->child->draw(canvas, { insets.left, insets.top });
+    this->child->draw(canvas, { insets.left, insets.top }, out);
   }
 };
 
@@ -139,9 +139,9 @@ protected:
     return newSize;
   }
 
-  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
+  void doDraw(rmlib::Canvas& canvas, std::vector<UpdateRegion>& out) override {
     const auto insets = this->widget->size;
-    auto result = this->child->draw(canvas, { insets.left, insets.top });
+    this->child->draw(canvas, { insets.left, insets.top }, out);
 
     /// Only redraw the border if we're marked for redrawing, ignore our child.
     if (RenderObject::getNeedsDraw()) {
@@ -165,10 +165,8 @@ protected:
                { 0, -1 },
                this->widget->size.bottom);
 
-      result |= UpdateRegion{ canvas.rect(), rmlib::fb::Waveform::DU };
+      out.push_back(UpdateRegion{ canvas.rect(), rmlib::fb::Waveform::DU });
     }
-
-    return result;
   }
 };
 
@@ -283,15 +281,13 @@ protected:
     return this->child->layout(constraints);
   }
 
-  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
-    auto region = UpdateRegion{};
-
+  void doDraw(rmlib::Canvas& canvas, std::vector<UpdateRegion>& out) override {
     if (this->isFullDraw()) {
       canvas.set(this->widget->color);
-      region = UpdateRegion{ canvas.rect() };
+      out.push_back(UpdateRegion{ canvas.rect() });
     }
 
-    return region | this->child->draw(canvas, { 0, 0 });
+    this->child->draw(canvas, { 0, 0 }, out);
   }
 };
 
@@ -351,8 +347,8 @@ protected:
     return result;
   }
 
-  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
-    return this->child->draw(canvas, this->widget->position);
+  void doDraw(rmlib::Canvas& canvas, std::vector<UpdateRegion>& out) override {
+    this->child->draw(canvas, this->widget->position, out);
   }
 
 private:

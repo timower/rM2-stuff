@@ -59,7 +59,8 @@ protected:
                  const rmlib::BuildContext& /*buildContext*/) final;
 
   rmlib::Size doLayout(const rmlib::Constraints& constraints) final;
-  rmlib::UpdateRegion doDraw(rmlib::Canvas& canvas) final;
+  void doDraw(rmlib::Canvas& canvas,
+              std::vector<rmlib::UpdateRegion>& out) final;
 
   void doHandleInput(const rmlib::input::Event& ev) final;
 

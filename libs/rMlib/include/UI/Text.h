@@ -64,7 +64,7 @@ protected:
     return result;
   }
 
-  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
+  void doDraw(rmlib::Canvas& canvas, std::vector<UpdateRegion>& out) override {
     const auto rect = canvas.rect();
     const auto textSize =
       rmlib::Canvas::getTextSize(widget->text, widget->fontSize);
@@ -84,7 +84,7 @@ protected:
                     black,
                     white,
                     /* clip */ rect);
-    return UpdateRegion{ drawRect };
+    out.push_back(UpdateRegion{ drawRect });
   }
 
 private:

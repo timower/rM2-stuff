@@ -3,6 +3,7 @@
 #include <FrameBuffer.h>
 #include <MathUtil.h>
 #include <functional>
+#include <vector>
 
 namespace rmlib {
 
@@ -110,31 +111,16 @@ struct UpdateRegion {
   Rect region = { { 0, 0 }, { 0, 0 } };
   fb::Waveform waveform = fb::Waveform::GC16Fast;
   fb::UpdateFlags flags = fb::UpdateFlags::None;
-
-  constexpr UpdateRegion& operator|=(const UpdateRegion& other) {
-    if (other.waveform == fb::Waveform::GC16) {
-      waveform = other.waveform;
-    } else if (other.waveform == fb::Waveform::GC16Fast &&
-               waveform == fb::Waveform::DU) {
-      waveform = other.waveform;
-    }
-
-    if (region.empty()) {
-      region = other.region;
-    } else if (!other.region.empty()) {
-      region |= other.region;
-    }
-
-    flags = static_cast<fb::UpdateFlags>(flags | other.flags);
-
-    return *this;
-  }
 };
 
-constexpr UpdateRegion
-operator|(UpdateRegion a, const UpdateRegion& b) {
-  a |= b;
-  return a;
+// Applies `fn` to every UpdateRegion appended to `out` since `start` - used
+// to rebase/transform/restamp only the regions a subtree just pushed.
+template<typename Fn>
+void
+forEachSince(std::vector<UpdateRegion>& out, std::size_t start, Fn&& fn) {
+  for (auto i = start; i < out.size(); i++) {
+    fn(out[i]);
+  }
 }
 
 class CachedBool {

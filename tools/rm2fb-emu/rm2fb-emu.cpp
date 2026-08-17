@@ -156,21 +156,18 @@ protected:
                    h, constraints.min.height, constraints.max.height) };
   }
 
-  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
-    auto result = UpdateRegion{ canvas.rect() };
-
+  void doDraw(rmlib::Canvas& canvas, std::vector<UpdateRegion>& out) override {
     canvas.copy(widget->canvas);
 
-    if (!isFullDraw()) {
-      result = std::accumulate(widget->updateRegions->begin(),
-                               widget->updateRegions->end(),
-                               UpdateRegion{},
-                               std::bit_or<UpdateRegion>{});
-      // result.region += rect.topLeft;
+    if (isFullDraw()) {
+      out.push_back(UpdateRegion{ canvas.rect() });
+    } else {
+      out.insert(out.end(),
+                 widget->updateRegions->begin(),
+                 widget->updateRegions->end());
     }
 
     widget->updateRegions->clear();
-    return result;
   }
 
   void doHandleInput(const Event& ev) final {

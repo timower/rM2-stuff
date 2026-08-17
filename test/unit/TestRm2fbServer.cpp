@@ -25,6 +25,14 @@ struct FakeAddressInfo : AddressInfoBase {
   mutable int resumeCount = 0;
   void suspendForXochitl() const override { suspendCount++; }
   void resumeForXochitl() const override { resumeCount++; }
+
+  // Records each doUpdateBatch() call as a whole (not per-item via the
+  // default) so tests can assert a whole batch arrived in one call.
+  mutable std::vector<std::vector<UpdateParams>> batches;
+  bool doUpdateBatch(const std::vector<UpdateParams>& updates) const override {
+    batches.push_back(updates);
+    return true;
+  }
 };
 
 // Records what pause()/resume() would have sent instead of sending a real
@@ -69,6 +77,27 @@ struct FakeClient {
   void sendIdleUpdate(bool idle) {
     auto res = sendMessage(sock, UnixClientMsg{ IdleUpdate{ idle } });
     REQUIRE(res.has_value());
+  }
+
+  // Mirrors sendUpdateBatch() in Client.cpp: header via sendMessage(),
+  // then the raw UpdateParams array in a second, separate write.
+  void sendUpdateBatch(const std::vector<UpdateParams>& updates) {
+    auto header =
+      UpdateBatchHeader{ .count = static_cast<int32_t>(updates.size()) };
+    auto res = sendMessage(sock, UnixClientMsg{ header });
+    REQUIRE(res.has_value());
+
+    if (!updates.empty()) {
+      auto writeRes =
+        sock.writeAll(updates.data(), updates.size() * sizeof(UpdateParams));
+      REQUIRE(writeRes.has_value());
+    }
+  }
+
+  bool recvAck() {
+    auto ack = sock.readAll<bool>();
+    REQUIRE(ack.has_value());
+    return *ack;
   }
 
   // Reads back the granted format followed by the buffer fd the server
@@ -291,4 +320,119 @@ TEST_CASE("Server replies to Init immediately, even when the switch itself "
   struct stat st{};
   REQUIRE(fstat(received.fd, &st) == 0);
   REQUIRE(st.st_size == total_size);
+}
+
+// The default doUpdateBatch() (Version.h) must apply every item
+// individually, in order, rather than dropping any of them.
+TEST_CASE("AddressInfoBase::doUpdateBatch default applies every item",
+          "[rm2fb][rm2fb-server]") {
+  struct RecordingAddressInfo : AddressInfoBase {
+    void initThreads() const override {}
+    void shutdownThreads() const override {}
+    bool installHooks(UpdateFn*) const override { return true; }
+
+    mutable std::vector<int> seen;
+    bool doUpdate(const UpdateParams& p) const override {
+      seen.push_back(p.x2);
+      return true;
+    }
+  } addrs;
+
+  std::vector<UpdateParams> updates{
+    UpdateParams{ .x2 = 1 },
+    UpdateParams{ .x2 = 2 },
+    UpdateParams{ .x2 = 3 },
+  };
+
+  REQUIRE(addrs.doUpdateBatch(updates));
+  REQUIRE(addrs.seen == std::vector<int>{ 1, 2, 3 });
+}
+
+// Server::inQemu is always true in dev/CI, so hookAddrs->doUpdateBatch()
+// never fires here - don't poll waiting on it; only wire parsing is checked.
+TEST_CASE("UpdateBatchHeader parses and drains its payload, gated on the "
+          "front client",
+          "[rm2fb][rm2fb-server]") {
+  const char* lockPath = "/tmp/rm2fb-test-server-batch.lock";
+  const char* sockPath = "/tmp/rm2fb-test-server-batch.sock";
+  unlink(sockPath);
+
+  FakeAddressInfo fakeAddrs;
+  FakeProcessControl fakeProcessControl;
+  Server server(&fakeAddrs, lockPath, sockPath, fakeProcessControl);
+
+  std::vector<UpdateParams> updates{
+    UpdateParams{ .y1 = 0, .x1 = 0, .y2 = 10, .x2 = 10 },
+    UpdateParams{ .y1 = 20, .x1 = 20, .y2 = 30, .x2 = 30 },
+  };
+
+  SECTION("front client's batch is parsed and mirrored to TCP clients") {
+    FakeClient client(sockPath);
+    pollUntil(server, [&] { return !server.unixClients.empty(); });
+    client.sendInit(/* ownSwtcon= */ false);
+    pollUntil(server,
+              [&] { return !std::holds_alternative<NoFront>(server.focus); });
+    client.recvBuffer();
+
+    // A TCP debug client - mirrored unconditionally, unlike hookAddrs
+    // which is gated on inQemu (see this TEST_CASE's comment above).
+    int tcpFds[2];
+    REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, tcpFds) == 0);
+    server.tcpClients.emplace_back(unistdpp::FD(tcpFds[0]));
+    unistdpp::FD tcpTestSide(tcpFds[1]);
+
+    client.sendUpdateBatch(updates);
+    server.readUnixSock(server.unixClients[0]);
+
+    // Not asserting a value: depends on inQemu, see the comment above.
+    client.recvAck();
+
+    for (const auto& expected : updates) {
+      auto received = tcpTestSide.readAll<UpdateParams>();
+      REQUIRE(received.has_value());
+      REQUIRE(received->x2 == expected.x2);
+
+      int width = expected.x2 - expected.x1 + 1;
+      int height = expected.y2 - expected.y1 + 1;
+      std::vector<uint16_t> pixels(width * height);
+      REQUIRE(
+        tcpTestSide.readAll(pixels.data(), pixels.size() * sizeof(uint16_t))
+          .has_value());
+    }
+  }
+
+  SECTION("non-front client's batch is dropped but the payload is still "
+          "drained, keeping the socket stream in sync") {
+    // Client A takes front; client B (injected directly, see the Init-reply
+    // test above for why) sends a batch while not front.
+    FakeClient clientA(sockPath);
+    pollUntil(server, [&] { return !server.unixClients.empty(); });
+    clientA.sendInit(/* ownSwtcon= */ false);
+    pollUntil(server,
+              [&] { return !std::holds_alternative<NoFront>(server.focus); });
+    clientA.recvBuffer();
+
+    int fds[2];
+    REQUIRE(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds) == 0);
+    unistdpp::FD clientBTestSide(fds[1]);
+    UnixClient clientBEntry;
+    clientBEntry.sock = unistdpp::FD(fds[0]);
+    clientBEntry.pid = getpid() + 1;
+    clientBEntry.dontPause = false;
+    server.unixClients.push_back(std::move(clientBEntry));
+    UnixClient& clientB = server.unixClients.back();
+
+    auto header =
+      UpdateBatchHeader{ .count = static_cast<int32_t>(updates.size()) };
+    REQUIRE(sendMessage(clientBTestSide, UnixClientMsg{ header }).has_value());
+    REQUIRE(clientBTestSide
+              .writeAll(updates.data(), updates.size() * sizeof(UpdateParams))
+              .has_value());
+    server.readUnixSock(clientB);
+
+    auto ack = clientBTestSide.readAll<bool>();
+    REQUIRE(ack.has_value());
+    REQUIRE(!*ack);
+    REQUIRE(fakeAddrs.batches.empty());
+  }
 }

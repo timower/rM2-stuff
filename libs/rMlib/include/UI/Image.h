@@ -46,9 +46,9 @@ protected:
     return result;
   }
 
-  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
+  void doDraw(rmlib::Canvas& canvas, std::vector<UpdateRegion>& out) override {
     canvas.set(widget->color);
-    return UpdateRegion{ canvas.rect() };
+    out.push_back(UpdateRegion{ canvas.rect() });
   }
 };
 
@@ -92,14 +92,15 @@ protected:
                    h, constraints.min.height, constraints.max.height) };
   }
 
-  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
+  void doDraw(rmlib::Canvas& canvas, std::vector<UpdateRegion>& out) override {
     const auto& rect = canvas.rect();
     const auto& image = widget->canvas;
 
     if (image.rect().size() == rect.size() &&
         image.rotation() == canvas.rotation()) {
       canvas.copy(image);
-      return UpdateRegion{ rect };
+      out.push_back(UpdateRegion{ rect });
+      return;
     }
 
     auto rectW = float(rect.width());
@@ -132,7 +133,7 @@ protected:
         return image.getPixel(subX, subY);
       },
       rect);
-    return UpdateRegion{ rect };
+    out.push_back(UpdateRegion{ rect });
   }
 };
 

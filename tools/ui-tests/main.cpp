@@ -231,9 +231,10 @@ protected:
     return constraints.max;
   }
 
-  rmlib::UpdateRegion doDraw(rmlib::Canvas& canvas) final {
+  void doDraw(rmlib::Canvas& canvas,
+              std::vector<rmlib::UpdateRegion>& out) final {
     if (points.size() < 2) {
-      return {};
+      return;
     }
 
     UpdateRegion result;
@@ -260,7 +261,7 @@ protected:
     }
 
     result.region = Insets::all(-thickness).shrink(result.region);
-    return result;
+    out.push_back(result);
   }
 
   void doHandleInput(const rmlib::input::Event& ev) final {

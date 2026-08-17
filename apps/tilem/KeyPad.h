@@ -32,7 +32,8 @@ public:
 protected:
   rmlib::Size doLayout(const rmlib::Constraints& constraints) final;
   void doHandleInput(const rmlib::input::Event& ev) final;
-  rmlib::UpdateRegion doDraw(rmlib::Canvas& canvas) final;
+  void doDraw(rmlib::Canvas& canvas,
+              std::vector<rmlib::UpdateRegion>& out) final;
 
   void drawKey(rmlib::Canvas& canvas,
                rmlib::Point pos,

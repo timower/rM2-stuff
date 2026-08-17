@@ -1,5 +1,6 @@
 #include "FrameBuffer.h"
 #include "Device.h"
+#include "UI/Util.h"
 
 #include <unistdpp/file.h>
 #include <unistdpp/ioctl.h>
@@ -8,6 +9,7 @@
 #include <cassert>
 #include <climits>
 #include <iostream>
+#include <vector>
 
 #include <sys/ioctl.h>
 #include <sys/ipc.h>
@@ -31,6 +33,76 @@ static_assert(static_cast<int>(UpdateFlags::FastDraw) == RM2_FLAG_FAST_DRAW);
 
 namespace {
 constexpr auto fb_path = "/dev/fb0";
+
+mxcfb_update_data
+makeUpdateData(FrameBuffer::Type type,
+               Rect region,
+               Waveform waveform,
+               UpdateFlags flags) {
+  auto update = mxcfb_update_data{};
+
+  update.update_region.left = region.topLeft.x;
+  update.update_region.top = region.topLeft.y;
+  update.update_region.width = region.width();
+  update.update_region.height = region.height();
+
+  update.waveform_mode = [&] {
+    switch (waveform) {
+      case Waveform::DU:
+        return WAVEFORM_MODE_DU;
+      case Waveform::A2:
+        return WAVEFORM_MODE_A2;
+      default:
+      case Waveform::GC16:
+        return WAVEFORM_MODE_GC16;
+      case Waveform::GC16Fast:
+        return WAVEFORM_MODE_GL16;
+    }
+  }();
+
+  if (type == FrameBuffer::rM2Stuff) {
+    update.update_mode = RM2_UPDATE_MODE;
+    update.flags = static_cast<int>(flags);
+  } else {
+    update.update_mode =
+      (flags & UpdateFlags::Sync) != 0 ? UPDATE_MODE_FULL : UPDATE_MODE_PARTIAL;
+
+    constexpr auto temp_use_remarkable_draw = 0x0018;
+    constexpr auto epdc_flag_exp1 = 0x270ce20;
+
+    update.update_marker = 0;
+    update.dither_mode = epdc_flag_exp1;
+    update.temp = temp_use_remarkable_draw;
+    update.flags = 0;
+  }
+
+  return update;
+}
+
+// Debug logging.
+void
+logUpdate(Waveform waveform, const mxcfb_update_data& update) {
+  assert([&] {
+    const auto waveformStr = [waveform] {
+      switch (waveform) {
+        case Waveform::DU:
+          return "DU";
+        case Waveform::GC16:
+          return "GC16";
+        case Waveform::GC16Fast:
+          return "GC16Fast";
+        default:
+          return "???";
+      }
+    }();
+    std::cerr << "UPDATE " << waveformStr << " region: {"
+              << update.update_region.left << " "
+              << " " << update.update_region.top << " "
+              << update.update_region.width << " "
+              << update.update_region.height << "}\n";
+    return true;
+  }());
+}
 } // namespace
 
 ErrorOr<FrameBuffer::Type>
@@ -100,66 +172,41 @@ FrameBuffer::close() {
 
 void
 FrameBuffer::doUpdate(Rect region, Waveform waveform, UpdateFlags flags) const {
-  auto update = mxcfb_update_data{};
+  auto update = makeUpdateData(type, region, waveform, flags);
+  (void)unistdpp::ioctl<mxcfb_update_data*>(fd, MXCFB_SEND_UPDATE, &update);
+  logUpdate(waveform, update);
+}
 
-  update.update_region.left = region.topLeft.x;
-  update.update_region.top = region.topLeft.y;
-  update.update_region.width = region.width();
-  update.update_region.height = region.height();
-
-  update.waveform_mode = [&] {
-    switch (waveform) {
-      case Waveform::DU:
-        return WAVEFORM_MODE_DU;
-      case Waveform::A2:
-        return WAVEFORM_MODE_A2;
-      default:
-      case Waveform::GC16:
-        return WAVEFORM_MODE_GC16;
-      case Waveform::GC16Fast:
-        return WAVEFORM_MODE_GL16;
+void
+FrameBuffer::doUpdates(const std::vector<UpdateRegion>& updates) const {
+  if (type != rM2Stuff) {
+    for (const auto& update : updates) {
+      if (!update.region.empty()) {
+        doUpdate(update.region, update.waveform, update.flags);
+      }
     }
-  }();
-
-  if (type == rM2Stuff) {
-    update.update_mode = RM2_UPDATE_MODE;
-    update.flags = static_cast<int>(flags);
-  } else {
-    update.update_mode =
-      (flags & UpdateFlags::Sync) != 0 ? UPDATE_MODE_FULL : UPDATE_MODE_PARTIAL;
-
-    constexpr auto temp_use_remarkable_draw = 0x0018;
-    constexpr auto epdc_flag_exp1 = 0x270ce20;
-
-    update.update_marker = 0;
-    update.dither_mode = epdc_flag_exp1;
-    update.temp = temp_use_remarkable_draw;
-    update.flags = 0;
+    return;
   }
 
-  (void)unistdpp::ioctl<mxcfb_update_data*>(fd, MXCFB_SEND_UPDATE, &update);
+  std::vector<mxcfb_update_data> batch;
+  batch.reserve(updates.size());
+  for (const auto& update : updates) {
+    if (update.region.empty()) {
+      continue;
+    }
+    auto data =
+      makeUpdateData(type, update.region, update.waveform, update.flags);
+    logUpdate(update.waveform, data);
+    batch.push_back(data);
+  }
 
-  // Debug logging.
-  assert([&] {
-    const auto waveformStr = [waveform] {
-      switch (waveform) {
-        case Waveform::DU:
-          return "DU";
-        case Waveform::GC16:
-          return "GC16";
-        case Waveform::GC16Fast:
-          return "GC16Fast";
-        default:
-          return "???";
-      }
-    }();
-    std::cerr << "UPDATE " << waveformStr << " region: {"
-              << update.update_region.left << " "
-              << " " << update.update_region.top << " "
-              << update.update_region.width << " "
-              << update.update_region.height << "}\n";
-    return true;
-  }());
+  if (batch.empty()) {
+    return;
+  }
+
+  rm2_update_batch req{ .updates = batch.data(),
+                        .count = static_cast<int>(batch.size()) };
+  (void)unistdpp::ioctl<rm2_update_batch*>(fd, RM2FB_SEND_UPDATES, &req);
 }
 
 } // namespace rmlib::fb

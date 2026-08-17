@@ -33,7 +33,8 @@ public:
 protected:
   rmlib::Size doLayout(const rmlib::Constraints& constraints) final;
 
-  rmlib::UpdateRegion doDraw(rmlib::Canvas& canvas) final;
+  void doDraw(rmlib::Canvas& canvas,
+              std::vector<rmlib::UpdateRegion>& out) final;
 
   void doRebuild(rmlib::AppContext& ctx,
                  const rmlib::BuildContext& /*buildContext*/) final;

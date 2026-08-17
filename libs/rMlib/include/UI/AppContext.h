@@ -187,12 +187,12 @@ public:
     rootRO->rebuild(*this, nullptr);
     rootRO->layout(rootConstraints);
 
-    auto updateRegion = rootRO->cleanup(framebuffer.canvas);
-    updateRegion |= rootRO->draw(framebuffer.canvas, { 0, 0 });
+    pendingUpdates.clear();
+    rootRO->cleanup(framebuffer.canvas, pendingUpdates);
+    rootRO->draw(framebuffer.canvas, { 0, 0 }, pendingUpdates);
 
-    if (!updateRegion.region.empty()) {
-      framebuffer.doUpdate(
-        updateRegion.region, updateRegion.waveform, updateRegion.flags);
+    if (!pendingUpdates.empty()) {
+      framebuffer.doUpdates(pendingUpdates);
     }
 
     // Run before waitForInput/checkTimers so a doLater() queued from a
@@ -240,6 +240,9 @@ private:
 
   std::unique_ptr<RenderObject> rootRO;
   Constraints rootConstraints{};
+
+  // Reused across steps to avoid a fresh heap allocation every frame.
+  std::vector<UpdateRegion> pendingUpdates;
 };
 
 } // namespace rmlib

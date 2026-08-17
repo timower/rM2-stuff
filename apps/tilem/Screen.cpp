@@ -60,10 +60,10 @@ ScreenRenderObject::doLayout(const Constraints& constraints) {
   return constraints.max;
 }
 
-UpdateRegion
-ScreenRenderObject::doDraw(Canvas& canvas) {
+void
+ScreenRenderObject::doDraw(Canvas& canvas, std::vector<UpdateRegion>& out) {
   if (widget->calc == nullptr) {
-    return {};
+    return;
   }
 
   tilem_lcd_get_frame(widget->calc, lcd);
@@ -72,7 +72,7 @@ ScreenRenderObject::doDraw(Canvas& canvas) {
        (oldLcd->data != nullptr &&
         std::memcmp(lcd->data, oldLcd->data, lcd->rowstride * lcd->height) ==
           0))) {
-    return {};
+    return;
   }
 
   if (lcd->contrast == 0) {
@@ -99,7 +99,7 @@ ScreenRenderObject::doDraw(Canvas& canvas) {
   }
   std::swap(lcd, oldLcd);
 
-  return { canvas.rect(), fb::Waveform::DU, fb::UpdateFlags::FastDraw };
+  out.push_back({ canvas.rect(), fb::Waveform::DU, fb::UpdateFlags::FastDraw });
 }
 
 std::unique_ptr<RenderObject>

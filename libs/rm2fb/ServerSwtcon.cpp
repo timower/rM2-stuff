@@ -91,6 +91,22 @@ struct AddressInfo : public AddressInfoBase {
     return true;
   }
 
+  bool doUpdateBatch(const std::vector<UpdateParams>& updates) const final {
+    swtcon_lock();
+    bool sync = false;
+    for (auto& params : updates) {
+      update_data req = mapUpdate(params);
+      swtcon_update(&req);
+      sync = sync || (req.flags & Sync) != 0;
+    }
+    swtcon_unlock_post();
+    if (sync) {
+      swtcon_wait();
+    }
+
+    return true;
+  }
+
   void shutdownThreads() const final { swtcon_shutdown(0); }
 
   void suspendForXochitl() const final { swtcon_suspend(); }

@@ -1,5 +1,6 @@
 #include "Canvas.h"
 #include "FrameBuffer.h"
+#include "UI/Util.h"
 
 #include <SDL.h>
 
@@ -296,6 +297,15 @@ FrameBuffer::close() {
 void
 FrameBuffer::doUpdate(Rect region, Waveform waveform, UpdateFlags flags) const {
   updateEmulatedCanvas(canvas, region);
+}
+
+void
+FrameBuffer::doUpdates(const std::vector<UpdateRegion>& updates) const {
+  for (const auto& update : updates) {
+    if (!update.region.empty()) {
+      doUpdate(update.region, update.waveform, update.flags);
+    }
+  }
 }
 
 } // namespace rmlib::fb
