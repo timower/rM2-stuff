@@ -1,12 +1,13 @@
 project(yaft)
 
 add_library(yaft_app_lib OBJECT YaftWidget.cpp keyboard.cpp screen.cpp
-                                layout.cpp keymap.cpp config.cpp)
+                                layout.cpp keymap.cpp config.cpp
+                                terminal_adapter.cpp)
 add_library(Yaft::app_lib ALIAS yaft_app_lib)
 
 target_include_directories(yaft_app_lib PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 
-target_link_libraries(yaft_app_lib PUBLIC rMlib libYaft util
+target_link_libraries(yaft_app_lib PUBLIC rMlib ghostty-vt util
                                           tomlplusplus::tomlplusplus)
 
 if(APPLE)
@@ -28,11 +29,6 @@ install(
   TARGETS yaft_reader
   COMPONENT ${PROJECT_NAME}
   DESTINATION ${OPT_PREFIX}bin)
-
-install(
-  DIRECTORY ${CMAKE_BINARY_DIR}/terminfo
-  COMPONENT ${PROJECT_NAME}
-  DESTINATION ${OPT_PREFIX}share)
 
 install(
   FILES draft/yaft.draft

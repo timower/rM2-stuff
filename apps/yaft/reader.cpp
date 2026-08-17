@@ -1,6 +1,5 @@
-#include "parse.h"
 #include "screen.h"
-#include "yaft.h"
+#include "terminal_adapter.h"
 
 // rmLib
 #include <UI.h>
@@ -36,7 +35,7 @@ private:
 class ReaderState : public rmlib::StateBase<Reader> {
 public:
   void logTerm(std::string_view str) {
-    parse(term.get(), reinterpret_cast<const uint8_t*>(str.data()), str.size());
+    term->parse(reinterpret_cast<const uint8_t*>(str.data()), str.size());
   }
 
   void putTerm(const char* data, std::size_t size) {
@@ -54,19 +53,13 @@ public:
       res.push_back(c);
     }
 
-    parse(term.get(), res.data(), res.size());
+    term->parse(res.data(), res.size());
   }
 
   void init(rmlib::AppContext& ctx, const rmlib::BuildContext& buildCtx) {
-    term = std::make_unique<terminal_t>();
-
     int maxSize =
       std::max(ctx.getFbCanvas().width(), ctx.getFbCanvas().height());
-    if (!term_init(term.get(), maxSize, maxSize)) {
-      std::cerr << "Error init term\n";
-      ctx.stop();
-      return;
-    }
+    term = std::make_unique<Terminal>(maxSize, maxSize);
 
     fileFd =
       unistdpp::fatalOnError(unistdpp::open(getWidget().filePath, O_RDONLY));
@@ -99,7 +92,7 @@ public:
   }
 
 private:
-  std::unique_ptr<terminal_t> term;
+  std::unique_ptr<Terminal> term;
   unistdpp::FD fileFd;
   rmlib::FdHandle fileFdHandle;
 };

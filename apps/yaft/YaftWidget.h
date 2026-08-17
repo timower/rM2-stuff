@@ -4,8 +4,7 @@
 #include "keyboard.h"
 #include "layout.h"
 #include "screen.h"
-
-#include <yaft.h>
+#include "terminal_adapter.h"
 
 #include <UI/Rotate.h>
 #include <UI/StatefulWidget.h>
@@ -84,7 +83,7 @@ private:
   void checkLandscape(rmlib::AppContext& ctx);
   void readInotify(rmlib::AppContext& ctx) const;
 
-  std::unique_ptr<terminal_t> term;
+  std::unique_ptr<Terminal> term;
   rmlib::TimerHandle pogoTimer;
 
   std::filesystem::path watchPath;

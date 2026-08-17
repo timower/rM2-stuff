@@ -2,7 +2,7 @@
 
 #include "layout.h"
 
-#include "yaft.h"
+#include "terminal_adapter.h"
 
 using namespace rmlib;
 
@@ -322,10 +322,10 @@ KeyboardRenderObject::sendKeyDown(int scancode,
     return;
   }
 
-  bool appCursor = (widget->term->mode & MODE_APP_CURSOR) != 0;
+  bool appCursor = widget->term->isAppCursorMode();
   const auto* code = getKeyCodeStr(scancode, shift, alt, ctrl, appCursor);
   if (code != nullptr) {
-    write(widget->term->fd, code, strlen(code));
+    widget->term->write(reinterpret_cast<const uint8_t*>(code), strlen(code));
   } else {
     std::cerr << "unknown key combo: " << scancode << " shift " << shift
               << " ctrl " << ctrl << " alt " << alt << std::endl;

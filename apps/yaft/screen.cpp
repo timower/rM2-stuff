@@ -1,9 +1,12 @@
 #include "screen.h"
+#include "color.h"
 #include "conf.h"
 
 using namespace rmlib;
 
 namespace {
+constexpr int BITS_PER_BYTE = 8;
+
 // TODO: move
 // \{
 inline int
@@ -62,10 +65,10 @@ Screen::createRenderObject() const {
 void
 ScreenRenderObject::update(const Screen& newWidget) {
   // TODO: correct location?
-  for (int i = 0; i < newWidget.term->lines; i++) {
-    if (newWidget.term->line_dirty[i]) {
-      markNeedsDraw(/* full */ false);
-    }
+  auto& term = *newWidget.term;
+  const int cursorRow = term.cursorVisible ? term.cursorY : -1;
+  if (term.hasPendingDirty() || cursorRow != lastCursorRow) {
+    markNeedsDraw(/* full */ false);
   }
 
   if (newWidget.isLandscape != widget->isLandscape) {
@@ -82,9 +85,9 @@ ScreenRenderObject::doLayout(const rmlib::Constraints& constraints) {
   assert(size.width != 0 && size.height != 0);
 
   if (widget->isLandscape) {
-    term_resize(widget->term, size.height, size.width, /* report */ true);
+    widget->term->resize(size.height, size.width, /* report */ true);
   } else {
-    term_resize(widget->term, size.width, size.height, /* report */ true);
+    widget->term->resize(size.width, size.height, /* report */ true);
   }
   return size;
 }
@@ -98,10 +101,8 @@ ScreenRenderObject::shouldRefresh() const {
 rmlib::UpdateRegion
 ScreenRenderObject::doDraw(rmlib::Canvas& canvas) {
   auto& term = *widget->term;
-
-  if ((term.mode & MODE_CURSOR) != 0U) {
-    term.line_dirty[term.cursor.y] = true;
-  }
+  term.beginDraw();
+  const int cursorRow = term.cursorVisible ? term.cursorY : -1;
 
   Rect currentRect;
 
@@ -122,16 +123,22 @@ ScreenRenderObject::doDraw(rmlib::Canvas& canvas) {
   };
 
   for (int line = 0; line < term.lines; line++) {
-    if (isFullDraw() || term.line_dirty[line]) {
+    term.nextRow();
+    // Redraw both the cursor's current row and the row it just left --
+    // ghostty never marks either dirty on its own, since it has no concept
+    // of our drawn cursor overlay.
+    const bool cursorHere = line == cursorRow || line == lastCursorRow;
+    if (isFullDraw() || term.isRowDirty() || cursorHere) {
       currentRect |= drawLine(canvas, term, line);
     } else {
       maybeDraw();
     }
   }
   maybeDraw(/* last */ true);
+  lastCursorRow = cursorRow;
 
   if (shouldRefresh()) {
-    term.shouldClear = false;
+    term.consumeShouldClear();
     numUpdates = 0;
     return { canvas.rect(), fb::Waveform::GC16, fb::UpdateFlags::Sync };
   }
@@ -141,7 +148,7 @@ ScreenRenderObject::doDraw(rmlib::Canvas& canvas) {
 
 rmlib::Rect
 ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
-                             terminal_t& term,
+                             Terminal& term,
                              int line) const {
 
   const bool isLandscape = widget->isLandscape;
@@ -153,37 +160,39 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
   for (int col = 0; col < term.cols; col++) {
     int marginLeft = term.marginLeft + col * CELL_WIDTH;
 
-    auto& cell = term.cells[line][col];
+    auto cell = term.cellAt(col);
 
-    if (cell.has_pixmap) {
+    if (cell.hasPixmap) {
       // TODO
       continue;
     }
 
-    auto colorPair = cell.color_pair; // copy
+    uint32_t fg = cell.fg;
+    uint32_t bg = cell.bg;
 
     /* check wide character or not */
-    int glyphWidth = (cell.width == HALF) ? CELL_WIDTH : CELL_WIDTH * 2;
+    int glyphWidth =
+      (cell.width == CellWidth::Half) ? CELL_WIDTH : CELL_WIDTH * 2;
     int bdfPadding =
       myCeil(glyphWidth, BITS_PER_BYTE) * BITS_PER_BYTE - glyphWidth;
-    if (cell.width == WIDE) {
+    if (cell.width == CellWidth::Wide) {
       bdfPadding += CELL_WIDTH;
     }
 
     /* check cursor position */
-    if ((((term.mode & MODE_CURSOR) != 0U) && line == term.cursor.y) &&
-        (col == term.cursor.x ||
-         (cell.width == WIDE && (col + 1) == term.cursor.x) ||
-         (cell.width == NEXT_TO_WIDE && (col - 1) == term.cursor.x))) {
-      colorPair.fg = DEFAULT_BG;
-      colorPair.bg = (/*!vt_active &&*/ BACKGROUND_DRAW) != 0U
-                       ? PASSIVE_CURSOR_COLOR
-                       : ACTIVE_CURSOR_COLOR;
+    if ((term.cursorVisible && line == term.cursorY) &&
+        (col == term.cursorX ||
+         (cell.width == CellWidth::Wide && (col + 1) == term.cursorX) ||
+         (cell.width == CellWidth::NextToWide && (col - 1) == term.cursorX))) {
+      fg = color_list[DEFAULT_BG];
+      bg = (/*!vt_active &&*/ BACKGROUND_DRAW) != 0U
+             ? color_list[PASSIVE_CURSOR_COLOR]
+             : color_list[ACTIVE_CURSOR_COLOR];
     }
 
     // lookup pixels
-    const auto bgBright = color2brightness(color_list[colorPair.bg]);
-    const auto fgBright = color2brightness(color_list[colorPair.fg]);
+    const auto bgBright = color2brightness(bg);
+    const auto fgBright = color2brightness(fg);
 
     auto bgGray = brightness2gray(bgBright);
     auto fgGray = brightness2gray(fgBright);
@@ -207,8 +216,7 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
 
     for (int h = 0; h < CELL_HEIGHT; h++) {
       /* if UNDERLINE attribute on, swap bg/fg */
-      if ((h == (CELL_HEIGHT - 1)) &&
-          ((cell.attribute & attr_mask[ATTR_UNDERLINE]) != 0)) {
+      if ((h == (CELL_HEIGHT - 1)) && cell.underline) {
         std::swap(bgGray, fgGray);
       }
 
@@ -217,9 +225,7 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
                                      : Point{ marginLeft + w, zStart + h };
 
         /* set fg or bg */
-        const auto* glyph = (cell.attribute & ATTR_BOLD) != 0
-                              ? cell.glyph.boldp
-                              : cell.glyph.regularp;
+        const auto* glyph = cell.bold ? cell.boldGlyph : cell.glyph;
 
         const auto grayMode =
           (glyph->bitmap[h] & (0x01 << (bdfPadding + CELL_WIDTH - 1 - w))) != 0U
@@ -246,8 +252,7 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
     }
   }
 
-  term.line_dirty[line] =
-    ((term.mode & MODE_CURSOR) != 0u) && term.cursor.y == line;
+  term.clearRowDirty();
 
   const auto size = this->getSize();
   return isLandscape
@@ -259,7 +264,7 @@ ScreenRenderObject::drawLine(rmlib::Canvas& canvas,
 template<typename Ev>
 void
 ScreenRenderObject::handleTouchEvent(const Ev& ev) {
-  if ((widget->term->mode & ALL_MOUSE_MODES) == 0) {
+  if (!widget->term->mouseTrackingEnabled()) {
     return;
   }
 
@@ -297,7 +302,8 @@ ScreenRenderObject::handleTouchEvent(const Ev& ev) {
 
     // Send mouse down code
     buf[3] += 0; // mouse button 1
-    write(widget->term->fd, buf.data(), buf.size());
+    widget->term->write(reinterpret_cast<const uint8_t*>(buf.data()),
+                        buf.size());
 
   } else if ((ev.isUp() && slot == mouseSlot) /*||
              (kb.mouseSlot != -1 && kb.gestureCtrlr.getCurrentFingers() > 1)*/) {
@@ -307,11 +313,13 @@ ScreenRenderObject::handleTouchEvent(const Ev& ev) {
 
     // Send mouse up code
     buf[3] += 3; // mouse release
-    write(widget->term->fd, buf.data(), buf.size());
+    widget->term->write(reinterpret_cast<const uint8_t*>(buf.data()),
+                        buf.size());
   } else if (mouseSlot == slot && lastMousePos != rotatedLoc &&
-             (widget->term->mode & MODE_MOUSE_MOVE) != 0) {
+             widget->term->mouseMoveMode()) {
     buf[3] += 32; // mouse move
-    write(widget->term->fd, buf.data(), buf.size());
+    widget->term->write(reinterpret_cast<const uint8_t*>(buf.data()),
+                        buf.size());
   }
   lastMousePos = rotatedLoc;
 }

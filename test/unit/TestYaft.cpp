@@ -4,6 +4,7 @@
 #include "rMLibTestHelper.h"
 
 #include "YaftWidget.h"
+#include "terminal_adapter.h"
 
 #include <fstream>
 
@@ -205,6 +206,18 @@ TEST_CASE("Yaft", "[yaft][ui]") {
       REQUIRE_THAT(yaft, ctx.matchesGolden("yaft-hidden.png"));
     }
 
+    // Regression test: moving the cursor onto blank rows with no other
+    // content change must still erase its highlight from the row it left.
+    // Ghostty's own dirty tracking never covers cursor position (only cell
+    // content/palette/selection etc.), so this only passes if
+    // ScreenRenderObject independently tracks the cursor's previous row.
+    SECTION("Cursor redraw") {
+      tap(":enter");
+      tap(":enter");
+      ctx.pump();
+      REQUIRE_THAT(yaft, ctx.matchesGolden("yaft-cursor-moved.png"));
+    }
+
     SECTION("Exit") {
       tap(":enter");
       tap("ctrl");
@@ -212,6 +225,54 @@ TEST_CASE("Yaft", "[yaft][ui]") {
       REQUIRE(ctx.shouldStop());
     }
   }
+}
+
+// Regression test for the Terminal adapter's per-row dirty tracking (backed
+// by libghostty-vt's native render-state dirty state): only rows that
+// actually changed should come back dirty, not the whole screen.
+TEST_CASE("Terminal dirty tracking", "[yaft]") {
+  Terminal term(400, 800);
+
+  auto feed = [&](const char* s) {
+    term.parse(reinterpret_cast<const uint8_t*>(s), strlen(s));
+  };
+  auto dirtyRows = [&] {
+    term.beginDraw();
+    std::vector<int> rows;
+    for (int i = 0; term.nextRow(); i++) {
+      if (term.isRowDirty()) {
+        rows.push_back(i);
+      }
+    }
+    return rows;
+  };
+  auto clearAll = [&] {
+    term.beginDraw();
+    while (term.nextRow()) {
+      term.clearRowDirty();
+    }
+  };
+
+  INFO("cols=" << term.cols << " lines=" << term.lines);
+
+  feed("hello\r\n");
+  auto dirty1 = dirtyRows();
+  CHECK_FALSE(dirty1.empty());
+  clearAll();
+
+  // Write far from row 0; row 0 must not show up dirty again, and the
+  // number of dirty rows must be much smaller than the total row count.
+  feed("\x1b[10;1Hworld");
+  auto dirty2 = dirtyRows();
+  CHECK_FALSE(dirty2.empty());
+  CHECK(dirty2.size() < size_t(term.lines) / 2);
+  CHECK(std::find(dirty2.begin(), dirty2.end(), 0) == dirty2.end());
+  CHECK(std::find(dirty2.begin(), dirty2.end(), 9) != dirty2.end());
+  clearAll();
+
+  // No new writes: nothing should be dirty.
+  auto dirty3 = dirtyRows();
+  CHECK(dirty3.empty());
 }
 
 TEST_CASE("inotify", "[yaft][ui]") {

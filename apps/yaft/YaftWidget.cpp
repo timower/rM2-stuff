@@ -1,23 +1,23 @@
 #include "YaftWidget.h"
 
-// libYaft
 #include "conf.h"
-#include "parse.h"
-#include "terminal.h"
-#include "yaft.h"
-
+#include "terminal_adapter.h"
 #include "util.h"
 
 #include <Device.h>
 
+#include <csignal>
+#include <cstring>
+
 #include <sys/inotify.h>
+#include <sys/wait.h>
 
 #include <unistdpp/file.h>
 
 using namespace rmlib;
 
 namespace {
-const char* termName = "yaft-256color";
+const char* termName = "xterm-256color";
 
 AppContext* globalCtx = nullptr;
 
@@ -57,7 +57,7 @@ forkAndExec(int* master,
   ws.ws_ypixel = CELL_HEIGHT * lines;
   ws.ws_xpixel = CELL_WIDTH * cols;
 
-  pid = eforkpty(master, nullptr, nullptr, &ws);
+  pid = eforkpty(master, nullptr, &ws);
   if (pid < 0) {
     return false;
   }
@@ -81,28 +81,20 @@ Yaft::getConfigAndError() const {
 }
 
 YaftState::~YaftState() {
-  if (term) {
-    term_die(term.get());
-  }
   signal(SIGCHLD, SIG_DFL);
 }
 
 void
 YaftState::logTerm(std::string_view str) {
-  parse(term.get(), reinterpret_cast<const uint8_t*>(str.data()), str.size());
+  term->parse(reinterpret_cast<const uint8_t*>(str.data()), str.size());
 }
 
 void
 YaftState::init(rmlib::AppContext& ctx, const rmlib::BuildContext& /*unused*/) {
-  term = std::make_unique<terminal_t>();
-
-  // term_init needs the maximum size of the terminal.
+  // Terminal needs the maximum size to seed the initial pty size; doLayout()
+  // resizes it to the real size once known.
   int maxSize = std::max(ctx.getFbCanvas().width(), ctx.getFbCanvas().height());
-  if (!term_init(term.get(), maxSize, maxSize)) {
-    std::cerr << "Error init term\n";
-    ctx.stop();
-    return;
-  }
+  term = std::make_unique<Terminal>(maxSize, maxSize);
 
   auto cfgAndError = getWidget().getConfigAndError();
   config = std::move(cfgAndError.config);
@@ -143,10 +135,10 @@ YaftState::init(rmlib::AppContext& ctx, const rmlib::BuildContext& /*unused*/) {
     // probably.
     if (size != int(buf.size())) {
       setState([&](auto& self) {
-        parse(self.term.get(), reinterpret_cast<uint8_t*>(buf.data()), size);
+        self.term->parse(reinterpret_cast<uint8_t*>(buf.data()), size);
       });
     } else {
-      parse(term.get(), reinterpret_cast<uint8_t*>(buf.data()), size);
+      term->parse(reinterpret_cast<uint8_t*>(buf.data()), size);
     }
   });
 
@@ -156,7 +148,7 @@ YaftState::init(rmlib::AppContext& ctx, const rmlib::BuildContext& /*unused*/) {
       std::array<char, 512> buf{};
       auto size = read(STDIN_FILENO, buf.data(), buf.size());
       if (size > 0) {
-        write(term->fd, buf.data(), size);
+        term->write(reinterpret_cast<const uint8_t*>(buf.data()), size);
       }
     });
   }

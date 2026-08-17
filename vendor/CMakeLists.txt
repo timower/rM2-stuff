@@ -7,7 +7,6 @@ add_subdirectory(noto)
 add_subdirectory(expected)
 add_subdirectory(utfcpp)
 
-add_subdirectory(libYaft)
 add_subdirectory(libTilEm)
 add_subdirectory(libghostty)
 

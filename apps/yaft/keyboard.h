@@ -6,7 +6,7 @@
 
 struct KeyInfo;
 struct EvKeyInfo;
-struct terminal_t;
+class Terminal;
 
 struct Layout;
 
@@ -30,7 +30,7 @@ public:
   constexpr static int key_height = 64;
   constexpr static int key_width = 128;
 
-  Keyboard(struct terminal_t* term, KeyboardParams params, KeyboardCallback cb)
+  Keyboard(Terminal* term, KeyboardParams params, KeyboardCallback cb)
     : term(term), params(params), callback(std::move(cb)) {}
 
   std::unique_ptr<rmlib::RenderObject> createRenderObject() const;
@@ -38,7 +38,7 @@ public:
 private:
   friend class KeyboardRenderObject;
 
-  struct terminal_t* term;
+  Terminal* term;
   KeyboardParams params;
   KeyboardCallback callback;
 };

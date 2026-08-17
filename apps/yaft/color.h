@@ -1,3 +1,5 @@
+#pragma once
+
 /* See LICENSE for licence details. */
 /*
         Standard VGA colors
@@ -9,6 +11,9 @@
 
         byte order: (MSB) RR GG BB (LSB)
 */
+
+#include <cstdint>
+
 enum {
   COLORS = 256, /* number of color palette */
   BITS_PER_RGB = 8,

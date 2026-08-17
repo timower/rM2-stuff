@@ -1,7 +1,6 @@
 #pragma once
 
-#include "terminal.h"
-#include "yaft.h"
+#include "terminal_adapter.h"
 
 #include <UI.h>
 
@@ -9,14 +8,14 @@ class ScreenRenderObject;
 
 class Screen : public rmlib::Widget<ScreenRenderObject> {
 public:
-  Screen(struct terminal_t* term, bool isLandscape, int autoRefresh)
+  Screen(Terminal* term, bool isLandscape, int autoRefresh)
     : term(term), isLandscape(isLandscape) {}
 
   std::unique_ptr<rmlib::RenderObject> createRenderObject() const;
 
 private:
   friend class ScreenRenderObject;
-  struct terminal_t* term;
+  Terminal* term;
 
   bool isLandscape = false;
   int autoRefresh = 0;
@@ -42,11 +41,17 @@ protected:
   void doHandleInput(const rmlib::input::Event& ev) final;
 
 private:
-  rmlib::Rect drawLine(rmlib::Canvas& canvas, terminal_t& term, int line) const;
+  rmlib::Rect drawLine(rmlib::Canvas& canvas, Terminal& term, int line) const;
   template<typename Ev>
   void handleTouchEvent(const Ev& ev);
 
   bool shouldRefresh() const;
+
+  // Row the cursor was in as of the last completed draw (-1 if none/hidden).
+  // Ghostty's dirty tracking only covers cell content, never cursor
+  // position, so this is what makes cursor-only movement (no other write)
+  // both trigger a redraw and erase the cursor highlight from its old row.
+  int lastCursorRow = -1;
 
   int numUpdates = 0;
 

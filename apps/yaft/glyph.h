@@ -1,3 +1,10 @@
+#pragma once
+
+// Extracted from vendor/libYaft/glyph.h: the fixed 16x32 1bpp bitmap font
+// used to rasterize terminal cells. Unrelated to the VT engine.
+
+#include <cstdint>
+
 struct glyph_t {
   uint32_t code;
   uint8_t width;
