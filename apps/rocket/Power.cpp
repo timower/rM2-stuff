@@ -30,11 +30,45 @@ SystemPowerInterface::getBattery() {
 
 void
 SystemPowerInterface::powerOff() {
+#ifdef EMULATE
+  return;
+#endif
   bus
     .callMethod(
       login1::destination, login1::path, login1::interface, "PowerOff", "b", 0)
     .or_else([](auto errc) {
       std::cerr << "Error powering off: " << unistdpp::to_string(errc) << "\n";
+    });
+}
+
+void
+SystemPowerInterface::reboot() {
+#ifdef EMULATE
+  return;
+#endif
+  bus
+    .callMethod(
+      login1::destination, login1::path, login1::interface, "Reboot", "b", 0)
+    .or_else([](auto errc) {
+      std::cerr << "Error rebooting: " << unistdpp::to_string(errc) << "\n";
+    });
+}
+
+void
+SystemPowerInterface::softReboot() {
+#ifdef EMULATE
+  return;
+#endif
+  bus
+    .callMethod(systemd1::destination,
+                systemd1::path,
+                systemd1::interface,
+                "SoftReboot",
+                "s",
+                "")
+    .or_else([](auto errc) {
+      std::cerr << "Error soft-rebooting: " << unistdpp::to_string(errc)
+                << "\n";
     });
 }
 

@@ -12,11 +12,25 @@ constexpr auto path = "/org/freedesktop/login1";
 constexpr auto interface = "org.freedesktop.login1.Manager";
 } // namespace login1
 
+namespace systemd1 {
+constexpr auto destination = "org.freedesktop.systemd1";
+constexpr auto path = "/org/freedesktop/systemd1";
+constexpr auto interface = "org.freedesktop.systemd1.Manager";
+} // namespace systemd1
+
 struct PowerInterface {
   virtual ~PowerInterface() = default;
 
   virtual std::optional<rmlib::device::BatteryInfo> getBattery() = 0;
   virtual void powerOff() = 0;
+
+  // Hardware reboot - the device boots back into xochitl, nixos has no
+  // bootloader entry of its own.
+  virtual void reboot() = 0;
+
+  // systemd soft-reboot - re-execs into nixos' own root again without a
+  // real hardware reboot, staying in nixos.
+  virtual void softReboot() = 0;
 
   struct SleepUpdate {
     bool sleeping;    // true right before sleep, false right after resume.
@@ -51,6 +65,8 @@ struct SystemPowerInterface : PowerInterface {
 
   std::optional<rmlib::device::BatteryInfo> getBattery() override;
   void powerOff() override;
+  void reboot() override;
+  void softReboot() override;
 
   int sleepFd() override;
   std::optional<SleepUpdate> pollSleep() override;

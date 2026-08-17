@@ -53,10 +53,11 @@ public:
 
 class LauncherState : public rmlib::StateBase<LauncherWidget> {
   constexpr static auto default_sleep_timeout = 10;
-  constexpr static auto retry_sleep_timeout = 8;
+  constexpr static auto retry_sleep_timeout = 5;
   constexpr static auto default_inactivity_timeout = 20;
 
-  constexpr static auto battery_poll_interval = std::chrono::minutes(15);
+  // Also drives the hourly clock icon redraw, piggybacking on the same wake.
+  constexpr static auto wakeup_interval = std::chrono::hours(1);
   constexpr static auto battery_warning_percentage = 10;
   constexpr static auto battery_shutdown_percentage = 9;
 
@@ -77,6 +78,9 @@ public:
           return LauncherWidget::sleep_text;
         },
         [](const CountingDown& cd) -> std::string {
+          if (cd.isRetry) {
+            return "󰒳";
+          }
           const auto progress = std::string(cd.secondsLeft, ' ');
           return "[" + progress + "󰒲" + progress + "]";
         },
@@ -93,7 +97,18 @@ public:
                                Expanded(Text(sleepText())),
                                Padding(Text(batteryText()), Insets::all(10))),
                            Gestures{}.onTap([this] {
-                             setState([&](auto& self) { self.stopTimer(); });
+                             if (std::holds_alternative<Idle>(sleepPhase)) {
+                               setState([&](auto& self) {
+                                 auto* vis =
+                                   std::get_if<Visible>(&self.visibility);
+                                 if (vis == nullptr) {
+                                   return;
+                                 }
+                                 vis->showMenu = !vis->showMenu;
+                               });
+                             } else {
+                               setState([&](auto& self) { self.stopTimer(); });
+                             }
                            }));
   }
 
@@ -104,25 +119,53 @@ public:
 
     char buf[6];
     std::strftime(buf, sizeof(buf), "%H:%M", &tm);
+
+    constexpr std::array values = {
+      "󱑊", "󱐿", "󱑀", "󱑁", "󱑂", "󱑃",
+      "󱑄", "󱑅", "󱑆", "󱑇", "󱑈", "󱑉",
+    };
+
+    const auto prefix = std::string(values[tm.tm_hour % 12]) + " ";
+
     if (getWidget().timeOverride != "") {
       return getWidget().timeOverride;
     }
-    return buf;
+
+    if (!isMenuOpen()) {
+      return prefix;
+    }
+
+    return prefix + buf;
   }
 
   std::string batteryText() const {
     auto battery = getWidget().power.getBattery();
     if (!battery.has_value()) {
-      return "󱉝 ";
+      return isMenuOpen() ? "unk% 󱉝 " : "󱉝 ";
     }
 
-    std::string prefix = "󰁹 ";
+    constexpr std::array values = {
+      "󰂎", "󰁺", "󰁻", "󰁼", "󰁽", "󰁾",
+      "󰁿", "󰂀", "󰂁", "󰂂", "󰁹",
+    };
+
+    std::string prefix;
     if (battery->isCharging) {
       prefix = "󰂄 ";
     } else if (battery->percentage < battery_warning_percentage) {
       prefix = "󰂃 ";
+    } else {
+      const auto scaledPercentage = (battery->percentage - 10) * 100 / 90;
+      prefix = std::string(values[scaledPercentage / 10]) + " ";
     }
-    return prefix + std::to_string(battery->percentage) + "%";
+
+    if (!isMenuOpen()) {
+      return prefix;
+    }
+
+    const auto percentageText = std::to_string(battery->percentage);
+    const auto pad = std::string(3 - percentageText.size(), ' ');
+    return pad + percentageText + "% " + prefix;
   }
 
   auto runningApps() const {
@@ -173,6 +216,37 @@ public:
     return Wrap(widgets);
   }
 
+  auto menu(rmlib::AppContext& ctx) const {
+    using namespace rmlib;
+    return Column(
+      statusBar(),
+      Row(
+        // TODO: uptime, date, ...
+        Expanded(Text("")),
+        Sized(
+          Column(
+            Button("Sleep",
+                   [this, &ctx] {
+                     setState([&ctx](auto& self) {
+                       if (auto* vis = std::get_if<Visible>(&self.visibility);
+                           vis != nullptr) {
+                         vis->showMenu = false;
+                       }
+                       self.stopTimer();
+                       self.sleepNow(ctx);
+                     });
+                   }),
+            Button("Power Off", [this] { getWidget().power.powerOff(); }),
+            Button("Reboot NixOS", [this] { getWidget().power.softReboot(); }),
+            Button("Reboot Xochitl", [this] { getWidget().power.reboot(); })),
+          500,
+          {}),
+        // TODO: cpu load, battery consumption insight.
+        Expanded(Text(""))),
+      // TODO: better 'spacer'
+      Expanded(Text("")));
+  }
+
   auto launcher(rmlib::AppContext& context) const {
     using namespace rmlib;
     return Cleared(
@@ -183,15 +257,19 @@ public:
              const rmlib::BuildContext& /*unused*/) const {
     using namespace rmlib;
 
-    auto ui = [&]() -> DynamicWidget {
-      if (const auto* splash = std::get_if<Splash>(&splashPhase)) {
-        return Center(Rotated(
-          rotation,
-          Sized(Image(splash->icon), splash_size.width, splash_size.height)));
-      }
+    std::vector<DynamicWidget> widgets;
+    widgets.emplace_back(launcher(context));
 
-      return Rotated(rotation, launcher(context));
-    }();
+    if (isMenuOpen()) {
+      widgets.emplace_back(menu(context));
+    }
+
+    if (const auto* splash = std::get_if<Splash>(&splashPhase)) {
+      widgets.emplace_back(Center(
+        Sized(Image(splash->icon), splash_size.width, splash_size.height)));
+    }
+
+    auto ui = Rotated(rotation, Stack(std::move(widgets)));
 
     // AboutToSuspend must land as a genuine synced GC16 refresh - Sync
     // blocks in swtcon until the draw completes, which is what lets us know
@@ -217,6 +295,7 @@ private:
   struct Hidden {};
   struct Visible {
     pid_t returnTo = -1; // app to switch back to when hidden again.
+    bool showMenu = false;
   };
   // A user/launcher-triggered show() request - self-heals back to Hidden if
   // the SIGCONT ack never arrives.
@@ -236,6 +315,7 @@ private:
   struct Idle {};
   struct CountingDown {
     int secondsLeft;
+    bool isRetry = false;
   };
   struct AboutToSuspend {};
   using SleepPhase = std::variant<Idle, CountingDown, AboutToSuspend>;
@@ -253,12 +333,18 @@ private:
   };
   using SplashPhase = std::variant<NoSplash, Splash>;
 
-  /// Power off if battery < battery_shutdown_percentage
+  bool isMenuOpen() const {
+    auto* vis = std::get_if<Visible>(&visibility);
+    return vis == nullptr ? false : vis->showMenu;
+  }
+
+  /// Power off if battery < battery_shutdown_percentage. Also the periodic
+  /// redraw that keeps the hourly clock icon current.
   void refreshBattery(bool clearTimer) const;
 
   /// Sets sleepPhase to CountingDown{time} and starts calling tick every
   /// second.
-  void startTimer(rmlib::AppContext& context, int time = default_sleep_timeout);
+  void startTimer(rmlib::AppContext& context, bool isRetry = false);
   /// Cancels an in-progress timer and sets the sleepPhase to Idle.
   void stopTimer();
   /// Decrements the CountingDown timer. Once it reaches zero, requests a
@@ -337,15 +423,14 @@ private:
   std::unordered_map<pid_t, Buffer> fbBuffers;
 
   unistdpp::FD signalPipe;
-  unistdpp::FD batteryTimerFd;
+  unistdpp::FD wakeupTimerFd;
 
   rmlib::FdHandle signalFdHandle;
-  rmlib::FdHandle batteryFdHandle;
+  rmlib::FdHandle wakeupFdHandle;
   rmlib::FdHandle sleepFdHandle;
 
   rmlib::TimerHandle sleepTimer;
   rmlib::TimerHandle inactivityTimer;
-  rmlib::TimerHandle clockTimer;
 
   rmlib::Rotation rotation = rmlib::Rotation::None;
 

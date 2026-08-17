@@ -29,7 +29,7 @@ signalHandler(int sig) {
 // wall-clock jump (NTP sync, manual date change, ...) would otherwise leave
 // the schedule drifting away from the wall-clock boundaries forever.
 unistdpp::Result<void>
-armBatteryTimerFd(int fd, std::chrono::seconds interval) {
+armWakeupTimerFd(int fd, std::chrono::seconds interval) {
   const auto nowSecs = std::chrono::duration_cast<std::chrono::seconds>(
     std::chrono::system_clock::now().time_since_epoch());
   const auto firstFire =
@@ -48,15 +48,16 @@ armBatteryTimerFd(int fd, std::chrono::seconds interval) {
 
 // CLOCK_BOOTTIME_ALARM (needs CAP_WAKE_ALARM, held by root) wakes the device
 // from suspend too, unlike a regular timerfd, so the cached battery
-// percentage doesn't go stale for hours while sleeping.
+// percentage doesn't go stale for hours while sleeping. The clock icon
+// redraw piggybacks on the same wake instead of getting its own timer.
 unistdpp::Result<unistdpp::FD>
-makeBatteryTimerFd(std::chrono::seconds interval) {
+makeWakeupTimerFd(std::chrono::seconds interval) {
   auto fd = unistdpp::FD(timerfd_create(CLOCK_BOOTTIME_ALARM, TFD_CLOEXEC));
   if (!fd.isValid()) {
     return tl::unexpected(unistdpp::getErrno());
   }
 
-  if (auto res = armBatteryTimerFd(fd.fd, interval); !res) {
+  if (auto res = armWakeupTimerFd(fd.fd, interval); !res) {
     return tl::unexpected(res.error());
   }
 
@@ -98,24 +99,19 @@ LauncherState::init(rmlib::AppContext& context,
 
   readApps();
 
-  makeBatteryTimerFd(battery_poll_interval)
+  makeWakeupTimerFd(wakeup_interval)
     .transform([this, &context](auto fd) {
-      batteryTimerFd = std::move(fd);
-      batteryFdHandle =
-        context.listenFd(batteryTimerFd.fd, [this] { refreshBattery(true); });
+      wakeupTimerFd = std::move(fd);
+      wakeupFdHandle =
+        context.listenFd(wakeupTimerFd.fd, [this] { refreshBattery(true); });
     })
     .or_else([](auto err) {
-      std::cerr << "Failed to create battery timer: "
-                << unistdpp::to_string(err) << "\n";
+      std::cerr << "Failed to create wakeup timer: " << unistdpp::to_string(err)
+                << "\n";
     });
 
   // Make sure drawing finishes before shutdown on startup.
   context.doLater([this] { refreshBattery(false); });
-
-  clockTimer = context.addTimer(
-    std::chrono::minutes(1),
-    [this] { setState([](auto& /*unused*/) {}); },
-    std::chrono::minutes(1));
 
   takeInhibitorLock();
 
@@ -138,12 +134,11 @@ LauncherState::init(rmlib::AppContext& context,
 void
 LauncherState::refreshBattery(bool clearTimer) const {
   if (clearTimer) {
-    batteryTimerFd.readAll<uint64_t>().or_else([](auto /*unused*/) {});
-    armBatteryTimerFd(batteryTimerFd.fd, battery_poll_interval)
-      .or_else([](auto err) {
-        std::cerr << "Failed to re-arm battery timer: "
-                  << unistdpp::to_string(err) << "\n";
-      });
+    wakeupTimerFd.readAll<uint64_t>().or_else([](auto /*unused*/) {});
+    armWakeupTimerFd(wakeupTimerFd.fd, wakeup_interval).or_else([](auto err) {
+      std::cerr << "Failed to re-arm wakeup timer: " << unistdpp::to_string(err)
+                << "\n";
+    });
     setState([](auto& /*unused*/) {});
   }
 
@@ -227,7 +222,7 @@ LauncherState::onResume(rmlib::AppContext& context, bool wokenByUser) {
     sleepPhase = Idle{};
   } else {
     // Retry sleeping if something else woke us.
-    startTimer(context, retry_sleep_timeout);
+    startTimer(context, /*isRetry=*/true);
   }
 }
 
@@ -238,8 +233,11 @@ LauncherState::stopTimer() {
 }
 
 void
-LauncherState::startTimer(rmlib::AppContext& context, int time) {
-  sleepPhase = CountingDown{ time };
+LauncherState::startTimer(rmlib::AppContext& context, bool isRetry) {
+  sleepPhase = CountingDown{
+    .secondsLeft = isRetry ? retry_sleep_timeout : default_sleep_timeout,
+    .isRetry = isRetry,
+  };
   sleepTimer.disable();
   sleepTimer = context.addTimer(
     std::chrono::seconds(1),
@@ -254,7 +252,7 @@ LauncherState::tick(rmlib::AppContext& context) const {
       overloaded{
         [&self, &context](const CountingDown& cd) -> std::optional<SleepPhase> {
           if (cd.secondsLeft > 1) {
-            return SleepPhase{ CountingDown{ cd.secondsLeft - 1 } };
+            return SleepPhase{ CountingDown{ cd.secondsLeft - 1, cd.isRetry } };
           }
 
           self.sleepNow(context);
@@ -278,7 +276,7 @@ LauncherState::sleepNow(rmlib::AppContext& context) {
   if (!getWidget().power.requestSuspend()) {
     // The request itself failed - retry, since no PrepareForSleep will
     // ever arrive to drive things otherwise.
-    startTimer(context, retry_sleep_timeout);
+    startTimer(context, /*isRetry=*/true);
   }
 }
 

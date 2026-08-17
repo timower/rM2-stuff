@@ -172,6 +172,13 @@ Bus::callMethod(const char*,
                 const char*,
                 const char*,
                 const char*,
+                const char*) const;
+template unistdpp::Result<Message>
+Bus::callMethod(const char*,
+                const char*,
+                const char*,
+                const char*,
+                const char*,
                 const char*,
                 const char*,
                 const char*,
