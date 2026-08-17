@@ -41,18 +41,9 @@
             inherit pkgs pkgsLinux;
           };
 
-          # ghostty (hence ghostty-vt) requires Zig 0.16.0; the repo's pinned
-          # nixpkgs (nixos-25.11) only has 0.15.2. Override in place -- values
-          # match what nixpkgs' own zig package set uses for 0.16.0 (see
-          # pkgs/development/compilers/zig/default.nix upstream) -- rather
-          # than pulling in a second nixpkgs checkout just for this. Nothing
-          # else reads pkgs.zig, so a plain override (not a whole-pkgs-set
-          # overlay) is enough.
-          zig_0_16 = pkgs.zig.override {
-            version = "0.16.0";
-            hash = "sha256-2sTMhaasyrKoBnyH/hQrNCbi0Vh6HekIrpE4XkyQulQ=";
-            llvmPackages = pkgs.llvmPackages_21;
-          };
+          # Nothing else reads pkgs.zig, so a plain override (not a
+          # whole-pkgs-set overlay) is enough -- see nix/pkgs/zig_0_16.nix.
+          zig_0_16 = pkgs.callPackage ./nix/pkgs/zig_0_16.nix { };
           ghostty-vt = pkgs.callPackage ./nix/pkgs/ghostty-vt.nix { zig = zig_0_16; };
           ghostty-vt-cross = pkgsArmv7.callPackage ./nix/pkgs/ghostty-vt.nix {
             zig = zig_0_16;
@@ -82,6 +73,20 @@
           rm2-toolchain = pkgsLinux.callPackage ./nix/pkgs/rm2-toolchain.nix { };
           dev-rm2-toolchain = pkgsLinux.callPackage ./nix/pkgs/rm2-stuff.nix {
             toolchain_root = "${rm2-toolchain}";
+            # Legacy Yocto SDK toolchain, not pkgsCross -- but its sysroot's
+            # glibc (2.39) is well above what the armv7 zig build needs
+            # (verified: max required GLIBC_2.34), so the same target/cpu
+            # flags as ghostty-vt-cross work here too. zig itself still
+            # comes from the native pkgsLinux (== pkgs here, !isDarwin), not
+            # this toolchain -- it's a build-machine tool, unrelated to
+            # which sysroot the final C++ link step uses.
+            ghostty-vt = pkgsLinux.callPackage ./nix/pkgs/ghostty-vt.nix {
+              zig = zig_0_16;
+              zigTargetFlags = [
+                "-Dtarget=arm-linux-gnueabihf"
+                "-Dcpu=cortex_a7"
+              ];
+            };
           };
         }
         // rm-emu-packages

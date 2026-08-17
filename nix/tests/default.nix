@@ -287,7 +287,19 @@ in
         # nixpkgs' own glibc, whose dynamic linker path only exists under a
         # NixOS-managed /nix/store, not on the stock rootfs booted here.
         rm2-toolchain = pkgs.callPackage ../pkgs/rm2-toolchain.nix { };
-        rm2-stuff-cross = pkgs.callPackage ../pkgs/rm2-stuff.nix { toolchain_root = "${rm2-toolchain}"; };
+        # apps/yaft needs ghostty-vt to build at all -- see flake.nix's
+        # "dev-rm2-toolchain" for why the same armv7 target flags work
+        # against this toolchain's sysroot despite it not being pkgsCross.
+        rm2-stuff-cross = pkgs.callPackage ../pkgs/rm2-stuff.nix {
+          toolchain_root = "${rm2-toolchain}";
+          ghostty-vt = pkgs.callPackage ../pkgs/ghostty-vt.nix {
+            zig = pkgs.callPackage ../pkgs/zig_0_16.nix { };
+            zigTargetFlags = [
+              "-Dtarget=arm-linux-gnueabihf"
+              "-Dcpu=cortex_a7"
+            ];
+          };
+        };
         sshOpts = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null";
       in
       ''
