@@ -121,9 +121,7 @@ protected:
     return result;
   }
 
-  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
-    UpdateRegion result;
-
+  void doDraw(rmlib::Canvas& canvas, std::vector<UpdateRegion>& out) override {
     const auto mySize = this->getSize();
     const auto maxSize = isVertical() ? mySize.height : mySize.width;
     auto offset = (maxSize - totalSize) / 2;
@@ -138,15 +136,9 @@ protected:
                                  ? rmlib::Point{ otherOffset, offset }
                                  : rmlib::Point{ offset, otherOffset };
 
-      if (i == 0) {
-        result = child->draw(canvas, offsetPoint);
-      } else {
-        result |= child->draw(canvas, offsetPoint);
-      }
+      child->draw(canvas, offsetPoint, out);
       offset += isVertical() ? size.height : size.width;
     }
-
-    return result;
   }
 
 private:

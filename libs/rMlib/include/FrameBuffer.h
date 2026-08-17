@@ -5,6 +5,12 @@
 
 #include <unistdpp/unistdpp.h>
 
+#include <vector>
+
+namespace rmlib {
+struct UpdateRegion;
+} // namespace rmlib
+
 namespace rmlib::fb {
 
 // Waveform ints that match rm2 'actual' updates
@@ -37,6 +43,10 @@ struct FrameBuffer {
   ~FrameBuffer() { close(); }
 
   void doUpdate(Rect region, Waveform waveform, UpdateFlags flags) const;
+
+  // Submits every region as one batch (single ioctl on rM2Stuff) instead
+  // of one doUpdate() call each, so swtcon posts them all together.
+  void doUpdates(const std::vector<UpdateRegion>& updates) const;
 
   void doUpdate(const Canvas& subCanvas,
                 Waveform waveform,

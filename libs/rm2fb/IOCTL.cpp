@@ -8,6 +8,7 @@
 #include <cstring>
 #include <iostream>
 #include <linux/ioctl.h>
+#include <vector>
 
 // 'linux'
 #include <mxcfb.h>
@@ -47,6 +48,28 @@ struct swtfb_update {
 
 // NOLINTEND
 
+// Shared by the single-update path below and the RM2FB_SEND_UPDATES batch
+// path in handleIOCTL(), so both convert one rect the same way.
+UpdateParams
+mapRm2Update(const mxcfb_update_data& data) {
+  const auto& rect = data.update_region;
+  const int waveform = data.waveform_mode | UpdateParams::ioctl_waveform_flag;
+
+  UpdateParams params;
+  params.x1 = rect.left;
+  params.y1 = rect.top;
+  params.x2 = rect.left + rect.width - 1;
+  params.y2 = rect.top + rect.height - 1;
+
+  params.waveform = waveform;
+  params.flags = data.flags;
+
+  params.temperatureOverride = 0;
+  params.extraMode = 0;
+
+  return params;
+}
+
 int
 handleUpdate(const mxcfb_update_data& data) {
   const auto& rect = data.update_region;
@@ -54,19 +77,7 @@ handleUpdate(const mxcfb_update_data& data) {
   const int waveform = data.waveform_mode | UpdateParams::ioctl_waveform_flag;
 
   if (data.update_mode == RM2_UPDATE_MODE) {
-    UpdateParams params;
-    params.x1 = rect.left;
-    params.y1 = rect.top;
-    params.x2 = rect.left + rect.width - 1;
-    params.y2 = rect.top + rect.height - 1;
-
-    params.waveform = waveform;
-    params.flags = data.flags;
-
-    params.temperatureOverride = 0;
-    params.extraMode = 0;
-
-    return static_cast<int>(sendUpdate(params));
+    return static_cast<int>(sendUpdate(mapRm2Update(data)));
   }
 
   // There are three update modes on the rm2. But they are mapped to the five
@@ -127,6 +138,16 @@ handleIOCTL(unsigned long request, char* ptr) {
   if (request == MXCFB_SEND_UPDATE) {
     auto* update = (mxcfb_update_data*)ptr;
     return handleUpdate(*update);
+  }
+
+  if (request == RM2FB_SEND_UPDATES) {
+    auto* batch = (rm2_update_batch*)ptr;
+    std::vector<UpdateParams> updates;
+    updates.reserve(batch->count);
+    for (int i = 0; i < batch->count; i++) {
+      updates.push_back(mapRm2Update(batch->updates[i]));
+    }
+    return static_cast<int>(sendUpdateBatch(updates));
   }
 
   if (request == MXCFB_SET_AUTO_UPDATE_MODE) {

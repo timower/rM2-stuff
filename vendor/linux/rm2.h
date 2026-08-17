@@ -1,5 +1,9 @@
 #pragma once
 
+#include <linux/ioctl.h>
+
+#include "mxcfb.h"
+
 // Custom flag for ioctl to mark the update as a raw rm2-only update.
 constexpr int RM2_UPDATE_MODE = 0x42;
 
@@ -25,3 +29,12 @@ enum RM2UpdateFlags {
   // FastDraw updates (was "Priority")
   RM2_FLAG_FAST_DRAW = 1 << 1,
 };
+
+// Custom ioctl (RM2_UPDATE_MODE only) carrying a whole list of updates in
+// one call - `updates`/`count` point at the caller's memory (in-process hook).
+struct rm2_update_batch {
+  const mxcfb_update_data* updates;
+  int count;
+};
+
+#define RM2FB_SEND_UPDATES _IOW('R', 0x01, struct rm2_update_batch)

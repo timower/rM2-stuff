@@ -95,8 +95,9 @@ ScreenRenderObject::shouldRefresh() const {
          (widget->autoRefresh > 0 && numUpdates > widget->autoRefresh);
 }
 
-rmlib::UpdateRegion
-ScreenRenderObject::doDraw(rmlib::Canvas& canvas) {
+void
+ScreenRenderObject::doDraw(rmlib::Canvas& canvas,
+                           std::vector<rmlib::UpdateRegion>& out) {
   auto& term = *widget->term;
 
   if ((term.mode & MODE_CURSOR) != 0U) {
@@ -133,10 +134,8 @@ ScreenRenderObject::doDraw(rmlib::Canvas& canvas) {
   if (shouldRefresh()) {
     term.shouldClear = false;
     numUpdates = 0;
-    return { canvas.rect(), fb::Waveform::GC16, fb::UpdateFlags::Sync };
+    out.push_back({ canvas.rect(), fb::Waveform::GC16, fb::UpdateFlags::Sync });
   }
-
-  return {};
 }
 
 rmlib::Rect

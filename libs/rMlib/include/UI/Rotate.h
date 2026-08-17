@@ -27,12 +27,15 @@ public:
     return rotate(rot, res);
   }
 
-  UpdateRegion doDraw(Canvas& canvas) override {
+  void doDraw(Canvas& canvas, std::vector<UpdateRegion>& out) override {
     const auto rot = this->getWidget().rot;
     auto subCanvas = canvas.subCanvas(canvas.rect(), invert(rot));
-    auto res = this->child->draw(subCanvas, { 0, 0 });
-    res.region = rotate(subCanvas.rect().size(), invert(rot), res.region);
-    return res;
+    const auto start = out.size();
+    this->child->draw(subCanvas, { 0, 0 }, out);
+    forEachSince(out, start, [&](UpdateRegion& region) {
+      region.region =
+        rotate(subCanvas.rect().size(), invert(rot), region.region);
+    });
   }
 
   void doHandleInput(const input::Event& inEv) override {
@@ -48,17 +51,22 @@ public:
     this->child->handleInput(ev);
   }
 
-  UpdateRegion cleanup(rmlib::Canvas& canvas) override {
+  void cleanup(rmlib::Canvas& canvas, std::vector<UpdateRegion>& out) override {
     if (this->isFullDraw()) {
-      return RenderObject::cleanup(canvas);
+      RenderObject::cleanup(canvas, out);
+      return;
     }
 
     const auto rot = this->getWidget().rot;
     auto subCanvas = canvas.subCanvas(this->getCleanupRect(), invert(rot));
-    auto subRes = this->child->cleanup(subCanvas);
-    subRes.region = rotate(subCanvas.rect().size(), invert(rot), subRes.region);
-    subRes.region += this->getCleanupRect().topLeft;
-    return subRes;
+    const auto start = out.size();
+    this->child->cleanup(subCanvas, out);
+    const auto offset = this->getCleanupRect().topLeft;
+    forEachSince(out, start, [&](UpdateRegion& region) {
+      region.region =
+        rotate(subCanvas.rect().size(), invert(rot), region.region);
+      region.region += offset;
+    });
   }
 };
 

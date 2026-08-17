@@ -193,17 +193,22 @@ TEST_CASE("Hideable: forceRefresh requests a genuine GC16 full refresh",
   auto& hideableRO = static_cast<HideableRenderObject<Text>&>(*ro);
 
   hideableRO.layout(constraints);
-  hideableRO.draw(ctx.getFramebuffer().canvas,
-                  { 0, 0 }); // consume initial draw.
+  {
+    std::vector<UpdateRegion> initial;
+    hideableRO.draw(
+      ctx.getFramebuffer().canvas, { 0, 0 }, initial); // consume initial draw.
+  }
 
   SECTION("becoming visible without forceRefresh only upgrades the waveform") {
     Hideable<Text> shown{ Text("hi"), true };
     hideableRO.update(shown);
     hideableRO.layout(constraints);
 
-    auto result = hideableRO.draw(ctx.getFramebuffer().canvas, { 0, 0 });
-    CHECK(result.waveform == fb::Waveform::GC16Fast);
-    CHECK(result.flags == fb::UpdateFlags::None);
+    std::vector<UpdateRegion> updates;
+    hideableRO.draw(ctx.getFramebuffer().canvas, { 0, 0 }, updates);
+    REQUIRE(updates.size() == 1);
+    CHECK(updates[0].waveform == fb::Waveform::GC16Fast);
+    CHECK(updates[0].flags == fb::UpdateFlags::None);
   }
 
   SECTION("forceRefresh forces GC16 + Sync") {
@@ -211,20 +216,27 @@ TEST_CASE("Hideable: forceRefresh requests a genuine GC16 full refresh",
     hideableRO.update(shown);
     hideableRO.layout(constraints);
 
-    auto result = hideableRO.draw(ctx.getFramebuffer().canvas, { 0, 0 });
-    CHECK(result.waveform == fb::Waveform::GC16Fast);
-    CHECK(result.flags == fb::UpdateFlags::Sync);
+    std::vector<UpdateRegion> updates;
+    hideableRO.draw(ctx.getFramebuffer().canvas, { 0, 0 }, updates);
+    REQUIRE(updates.size() == 1);
+    CHECK(updates[0].waveform == fb::Waveform::GC16Fast);
+    CHECK(updates[0].flags == fb::UpdateFlags::Sync);
   }
 
   SECTION("forceRefresh is consumed after a single draw") {
     Hideable<Text> shown{ Text("hi"), true, /*forceRefresh=*/true };
     hideableRO.update(shown);
     hideableRO.layout(constraints);
-    hideableRO.draw(ctx.getFramebuffer().canvas, { 0, 0 });
+    {
+      std::vector<UpdateRegion> updates;
+      hideableRO.draw(ctx.getFramebuffer().canvas, { 0, 0 }, updates);
+    }
 
     hideableRO.markNeedsDraw();
-    auto result = hideableRO.draw(ctx.getFramebuffer().canvas, { 0, 0 });
-    CHECK(result.flags == fb::UpdateFlags::None);
+    std::vector<UpdateRegion> updates;
+    hideableRO.draw(ctx.getFramebuffer().canvas, { 0, 0 }, updates);
+    REQUIRE(updates.size() == 1);
+    CHECK(updates[0].flags == fb::UpdateFlags::None);
   }
 }
 

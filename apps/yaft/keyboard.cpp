@@ -196,16 +196,20 @@ KeyboardRenderObject::doLayout(const rmlib::Constraints& constraints) {
   return constraints.min;
 }
 
-rmlib::UpdateRegion
-KeyboardRenderObject::doDraw(rmlib::Canvas& canvas) {
+void
+KeyboardRenderObject::doDraw(rmlib::Canvas& canvas,
+                             std::vector<rmlib::UpdateRegion>& out) {
   Point pos = { 0, 0 };
 
-  UpdateRegion result;
+  const auto start = out.size();
   for (const auto& row : widget->params.layout.rows) {
     pos.x = 0;
 
     for (const auto& key : row) {
-      result |= drawKey(pos, key, canvas);
+      auto region = drawKey(pos, key, canvas);
+      if (!region.region.empty()) {
+        out.push_back(region);
+      }
 
       pos.x += key.width * int(keyWidth);
     }
@@ -214,10 +218,10 @@ KeyboardRenderObject::doDraw(rmlib::Canvas& canvas) {
   }
 
   if (!isPartialDraw()) {
-    result.waveform = fb::Waveform::GC16Fast;
+    forEachSince(out, start, [](UpdateRegion& region) {
+      region.waveform = fb::Waveform::GC16Fast;
+    });
   }
-
-  return result;
 }
 
 void

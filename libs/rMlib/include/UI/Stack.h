@@ -56,15 +56,11 @@ protected:
     return result;
   }
 
-  UpdateRegion doDraw(Canvas& canvas) override {
-    UpdateRegion result;
-
+  void doDraw(Canvas& canvas, std::vector<UpdateRegion>& out) override {
     for (const auto& child : this->children) {
       const auto subRect = canvas.rect().align(child->getSize(), 0.5, 0.5);
-      result |= child->draw(canvas, subRect.topLeft);
+      child->draw(canvas, subRect.topLeft, out);
     }
-
-    return result;
   }
 
 private:

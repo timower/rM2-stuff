@@ -110,7 +110,14 @@ struct IdleUpdate {
   bool val;
 };
 
-using UnixClientMsg = std::variant<Init, IdleUpdate, UpdateParams>;
+// One message (vs. stateful begin/end) so a crashed mid-sequence client
+// can't wedge the server's lock forever. `count` raw UpdateParams follow.
+struct UpdateBatchHeader {
+  int32_t count;
+};
+
+using UnixClientMsg =
+  std::variant<Init, IdleUpdate, UpdateParams, UpdateBatchHeader>;
 
 template<typename... T>
 unistdpp::Result<void>

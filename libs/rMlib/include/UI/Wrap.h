@@ -97,9 +97,7 @@ protected:
     return result;
   }
 
-  UpdateRegion doDraw(Canvas& canvas) override {
-    UpdateRegion result;
-
+  void doDraw(Canvas& canvas, std::vector<UpdateRegion>& out) override {
     const auto mySize = this->getSize();
     const auto origin = ((mySize - totalSize) / 2).toPoint() + Point{ 1, 1 };
     auto offset = origin;
@@ -120,7 +118,7 @@ protected:
         }
       }
 
-      result |= child->draw(canvas, offset);
+      child->draw(canvas, offset, out);
 
       if (isVertical()) {
         offset.y += size.height;
@@ -128,8 +126,6 @@ protected:
         offset.x += size.width;
       }
     }
-
-    return result;
   }
 
 private:

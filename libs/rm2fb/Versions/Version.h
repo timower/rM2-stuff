@@ -5,6 +5,7 @@
 
 #include <array>
 #include <optional>
+#include <vector>
 
 using BuildId = std::array<unsigned char, 20>;
 
@@ -15,6 +16,17 @@ public:
   // Server API:
   virtual void initThreads() const = 0;
   virtual bool doUpdate(const UpdateParams& params) const = 0;
+
+  // Default applies each update individually; ServerSwtcon.cpp overrides
+  // this for real batching via swtcon_lock()/swtcon_unlock_post().
+  virtual bool doUpdateBatch(const std::vector<UpdateParams>& updates) const {
+    bool ok = true;
+    for (auto& p : updates) {
+      ok = doUpdate(p) && ok;
+    }
+    return ok;
+  }
+
   virtual void shutdownThreads() const = 0;
 
   // Hooks for coexisting with a client that runs its own, independent

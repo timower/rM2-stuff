@@ -22,8 +22,9 @@ public:
     return this->child->layout(constraints);
   }
 
-  rmlib::UpdateRegion cleanup(rmlib::Canvas& canvas) override {
-    return rmlib::SingleChildRenderObject<Hideable<Child>>::cleanup(canvas);
+  void cleanup(rmlib::Canvas& canvas,
+               std::vector<rmlib::UpdateRegion>& out) override {
+    rmlib::SingleChildRenderObject<Hideable<Child>>::cleanup(canvas, out);
   }
 
   void update(const Hideable<Child>& newWidget) {
@@ -43,14 +44,17 @@ public:
   }
 
 protected:
-  rmlib::UpdateRegion doDraw(rmlib::Canvas& canvas) override {
-    auto result = this->child->draw(canvas, { 0, 0 });
+  void doDraw(rmlib::Canvas& canvas,
+              std::vector<rmlib::UpdateRegion>& out) override {
+    const auto start = out.size();
+    this->child->draw(canvas, { 0, 0 }, out);
     if (doFullRefresh) {
       doFullRefresh = false;
-      result.waveform = rmlib::fb::Waveform::GC16Fast;
-      result.flags = rmlib::fb::UpdateFlags::Sync;
+      rmlib::forEachSince(out, start, [](rmlib::UpdateRegion& region) {
+        region.waveform = rmlib::fb::Waveform::GC16Fast;
+        region.flags = rmlib::fb::UpdateFlags::Sync;
+      });
     }
-    return result;
   }
 
 private:

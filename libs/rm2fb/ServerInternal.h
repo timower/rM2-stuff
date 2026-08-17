@@ -407,6 +407,23 @@ struct Server : ControlInterface {
     return res;
   }
 
+  bool doUpdateBatch(const std::vector<UpdateParams>& updates) {
+    bool res = false;
+    if (!inQemu) {
+      res = hookAddrs->doUpdateBatch(updates);
+    }
+    for (auto& msg : updates) {
+      for (auto& client : tcpClients) {
+        doTCPUpdate(client, fb, msg);
+      }
+
+      if (debugMode) {
+        std::cerr << "UPDATE " << msg << ": " << res << "\n";
+      }
+    }
+    return res;
+  }
+
   bool dropClients() {
 
     // Remove closed clients
@@ -840,6 +857,23 @@ struct Server : ControlInterface {
                 return client.sock.writeAll(false);
               }
               bool res = doUpdate(m);
+              return client.sock.writeAll(res);
+            },
+            [&](UpdateBatchHeader& m) -> unistdpp::Result<void> {
+              // Must drain the payload regardless of front-client status
+              // below, or the next recvMessage() on this socket desyncs.
+              std::vector<UpdateParams> updates(m.count);
+              if (m.count > 0) {
+                TRY(client.sock.readAll(updates.data(),
+                                        updates.size() * sizeof(UpdateParams)));
+              }
+
+              if (client.pid != focusPid(focus)) {
+                // See the UpdateParams handler above for why non-front
+                // updates are dropped.
+                return client.sock.writeAll(false);
+              }
+              bool res = doUpdateBatch(updates);
               return client.sock.writeAll(res);
             },
             [&](IdleUpdate& m) -> unistdpp::Result<void> {

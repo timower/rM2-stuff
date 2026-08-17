@@ -58,17 +58,16 @@ public:
     return lastSize;
   }
 
-  virtual UpdateRegion cleanup(rmlib::Canvas& canvas) {
+  virtual void cleanup(rmlib::Canvas& canvas, std::vector<UpdateRegion>& out) {
     if (isFullDraw()) {
       canvas.set(cleanupRect, rmlib::white);
-      return UpdateRegion{ cleanupRect, rmlib::fb::Waveform::DU };
+      out.push_back(UpdateRegion{ cleanupRect, rmlib::fb::Waveform::DU });
     }
-    return {};
   }
 
-  UpdateRegion draw(rmlib::Canvas& canvas, Point offset) {
-    auto result = UpdateRegion{};
-
+  void draw(rmlib::Canvas& canvas,
+            Point offset,
+            std::vector<UpdateRegion>& out) {
     // TODO: do we need to distinguish when cleanup is used?
     if (needsDraw()) {
       const auto rect = Rect{ offset, offset + lastSize.toPoint() };
@@ -76,17 +75,16 @@ public:
       this->lastOffset = offset;
 
       auto subCanvas = canvas.subCanvas(rect);
-      auto subRes = doDraw(subCanvas);
-      subRes.region += offset;
+      const auto start = out.size();
+      doDraw(subCanvas, out);
 
-      assert(subRes.region.empty() || rect.contains(subRes.region));
-
-      result |= subRes;
+      forEachSince(out, start, [&](UpdateRegion& region) {
+        region.region += offset;
+        assert(region.region.empty() || rect.contains(region.region));
+      });
 
       mNeedsDraw = No;
     }
-
-    return result;
   }
 
   virtual void doHandleInput(const input::Event& ev) {}
@@ -152,7 +150,8 @@ public:
 
 protected:
   virtual Size doLayout(const Constraints& constraints) = 0;
-  virtual UpdateRegion doDraw(rmlib::Canvas& canvas) = 0;
+  virtual void doDraw(rmlib::Canvas& canvas,
+                      std::vector<UpdateRegion>& out) = 0;
   virtual void doRebuild(AppContext& context,
                          const BuildContext& buildContext) {}
 
@@ -237,15 +236,18 @@ public:
     child->handleInput(ev);
   }
 
-  UpdateRegion cleanup(rmlib::Canvas& canvas) override {
+  void cleanup(rmlib::Canvas& canvas, std::vector<UpdateRegion>& out) override {
     if (isFullDraw()) {
-      return RenderObject::cleanup(canvas);
+      RenderObject::cleanup(canvas, out);
+      return;
     }
 
     auto subCanvas = canvas.subCanvas(getCleanupRect());
-    auto subRes = child->cleanup(subCanvas);
-    subRes.region += getCleanupRect().topLeft;
-    return subRes;
+    const auto start = out.size();
+    child->cleanup(subCanvas, out);
+    const auto offset = getCleanupRect().topLeft;
+    forEachSince(
+      out, start, [&](UpdateRegion& region) { region.region += offset; });
   }
 
   void markNeedsLayout() override {
@@ -286,8 +288,8 @@ protected:
     return child->layout(constraints);
   }
 
-  UpdateRegion doDraw(rmlib::Canvas& canvas) override {
-    return child->draw(canvas, { 0, 0 });
+  void doDraw(rmlib::Canvas& canvas, std::vector<UpdateRegion>& out) override {
+    child->draw(canvas, { 0, 0 }, out);
   }
 
   bool getNeedsDraw() const override {
@@ -332,20 +334,20 @@ public:
     }
   }
 
-  UpdateRegion cleanup(rmlib::Canvas& canvas) final {
+  void cleanup(rmlib::Canvas& canvas, std::vector<UpdateRegion>& out) final {
     if (isFullDraw()) {
-      return RenderObject::cleanup(canvas);
+      RenderObject::cleanup(canvas, out);
+      return;
     }
 
-    auto result = UpdateRegion{};
     auto subCanvas = canvas.subCanvas(getCleanupRect());
     const auto offset = getCleanupRect().topLeft;
+    const auto start = out.size();
     for (const auto& child : children) {
-      auto subRes = child->cleanup(subCanvas);
-      subRes.region += offset;
-      result |= subRes;
+      child->cleanup(subCanvas, out);
     }
-    return result;
+    forEachSince(
+      out, start, [&](UpdateRegion& region) { region.region += offset; });
   }
 
   void markNeedsLayout() override {

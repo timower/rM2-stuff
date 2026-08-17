@@ -180,8 +180,9 @@ KeypadRenderObject::drawKey(rmlib::Canvas& canvas,
   canvas.drawRectangle(pos, pos + Point{ keyWidth - 1, keyHeight - 1 }, black);
 }
 
-rmlib::UpdateRegion
-KeypadRenderObject::doDraw(rmlib::Canvas& canvas) {
+void
+KeypadRenderObject::doDraw(rmlib::Canvas& canvas,
+                           std::vector<rmlib::UpdateRegion>& out) {
   keyLocations.clear();
   canvas.set(white);
 
@@ -209,7 +210,7 @@ KeypadRenderObject::doDraw(rmlib::Canvas& canvas) {
     y += keyHeight;
   }
 
-  return { canvas.rect() };
+  out.push_back({ canvas.rect() });
 }
 
 void
