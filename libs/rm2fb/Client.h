@@ -2,7 +2,14 @@
 
 #include "rm2fb/Message.h"
 
+#include <unistdpp/unistdpp.h>
+
 #include <vector>
+
+// The client's persistent connection to the rm2fb control socket - lazily
+// connected on first use, shared by doInit() and every update send.
+unistdpp::FD&
+getControlSocket();
 
 bool
 sendUpdate(const UpdateParams& params);
