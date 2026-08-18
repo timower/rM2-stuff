@@ -18,6 +18,14 @@ struct PowerInterface {
   virtual std::optional<rmlib::device::BatteryInfo> getBattery() = 0;
   virtual void powerOff() = 0;
 
+  // Hardware reboot - the device boots back into xochitl, nixos has no
+  // bootloader entry of its own.
+  virtual void reboot() = 0;
+
+  // systemd soft-reboot - re-execs into nixos' own root again without a
+  // real hardware reboot, staying in nixos.
+  virtual void softReboot() = 0;
+
   struct SleepUpdate {
     bool sleeping;    // true right before sleep, false right after resume.
     bool wokenByUser; // only meaningful when !sleeping.
@@ -51,6 +59,8 @@ struct SystemPowerInterface : PowerInterface {
 
   std::optional<rmlib::device::BatteryInfo> getBattery() override;
   void powerOff() override;
+  void reboot() override;
+  void softReboot() override;
 
   int sleepFd() override;
   std::optional<SleepUpdate> pollSleep() override;

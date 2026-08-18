@@ -2,6 +2,8 @@
 
 #include <unistdpp/file.h>
 
+#include <cstdint>
+
 #ifdef __linux__
 #include <systemd/sd-bus.h>
 #endif
@@ -172,10 +174,24 @@ Bus::callMethod(const char*,
                 const char*,
                 const char*,
                 const char*,
+                const char*) const;
+template unistdpp::Result<Message>
+Bus::callMethod(const char*,
+                const char*,
+                const char*,
+                const char*,
+                const char*,
                 const char*,
                 const char*,
                 const char*,
                 const char*) const;
+template unistdpp::Result<Message>
+Bus::callMethod(const char*,
+                const char*,
+                const char*,
+                const char*,
+                const char*,
+                uint64_t) const;
 
 template<typename... Args>
 unistdpp::Result<void>

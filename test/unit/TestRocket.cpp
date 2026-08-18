@@ -181,7 +181,7 @@ TEST_CASE("AppWidget", "[rocket]") {
 }
 
 constexpr static auto about_to_sleep_text = "[          󰒲          ]";
-constexpr static auto retry_sleep_text = "[        󰒲        ]";
+constexpr static auto retry_sleep_text = "󰒳";
 
 TEST_CASE("Hideable: forceRefresh requests a genuine GC16 full refresh",
           "[rocket]") {
@@ -291,6 +291,8 @@ struct FakePower : PowerInterface {
   std::optional<rmlib::device::BatteryInfo> battery =
     rmlib::device::BatteryInfo{ .percentage = 100, .isCharging = false };
   bool didPowerOff = false;
+  bool didReboot = false;
+  bool didSoftReboot = false;
 
   int suspendRequests = 0;
   bool suspendShouldFail = false;
@@ -314,6 +316,8 @@ struct FakePower : PowerInterface {
     return battery;
   }
   void powerOff() override { didPowerOff = true; }
+  void reboot() override { didReboot = true; }
+  void softReboot() override { didSoftReboot = true; }
 
   int sleepFd() override { return sleepReadFd.fd; }
 
@@ -700,12 +704,13 @@ TEST_CASE("Launcher FSM: the launch splash clears once the app becomes "
 
   auto appWidget = ctx.findByType<AppWidget>();
   REQUIRE(appWidget.size() == 1);
+  const auto imagesBeforeSplash = ctx.findByType<Image>().size();
+
   ctx.tap(appWidget);
   ctx.pump();
 
-  // Splash is up: it replaces the normal launcher UI (app list included)
-  // entirely.
-  CHECK(ctx.findByType<AppWidget>().empty());
+  // Splash is up, overlaid on top of (not replacing) the normal launcher UI.
+  CHECK(ctx.findByType<Image>().size() == imagesBeforeSplash + 1);
 
   // The multiplexer acks the app taking over the screen, then rocket is
   // shown again later.
@@ -713,9 +718,8 @@ TEST_CASE("Launcher FSM: the launch splash clears once the app becomes "
   pressPower(ctx);
   raiseAndPump(ctx, SIGCONT);
 
-  // Had SIGUSR1 not cleared the splash, it would still be showing here
-  // instead of the normal launcher UI.
-  CHECK_FALSE(ctx.findByType<AppWidget>().empty());
+  // Had SIGUSR1 not cleared the splash, its extra image would still be up.
+  CHECK(ctx.findByType<Image>().size() == imagesBeforeSplash);
 }
 
 TEST_CASE("Launcher FSM: the launch splash clears if the app exits before "
@@ -730,17 +734,19 @@ TEST_CASE("Launcher FSM: the launch splash clears if the app exits before "
 
   auto appWidget = ctx.findByType<AppWidget>();
   REQUIRE(appWidget.size() == 1);
+  const auto imagesBeforeSplash = ctx.findByType<Image>().size();
+
   ctx.tap(appWidget);
   ctx.pump();
 
   // Splash is up.
-  CHECK(ctx.findByType<AppWidget>().empty());
+  CHECK(ctx.findByType<Image>().size() == imagesBeforeSplash + 1);
 
   // "true" exits almost instantly without ever touching rm2fb - no SIGUSR1
   // ever arrives. The pidfd should catch that and clear the splash well
   // before the 15s safety timeout.
   ctx.pump(std::chrono::milliseconds(200));
-  CHECK_FALSE(ctx.findByType<AppWidget>().empty());
+  CHECK(ctx.findByType<Image>().size() == imagesBeforeSplash);
 }
 
 TEST_CASE("Launcher battery: shows a warning icon below 10%, unrelated to "
@@ -754,7 +760,9 @@ TEST_CASE("Launcher battery: shows a warning icon below 10%, unrelated to "
   auto ctx = TestContext::make();
   ctx.pumpWidget(Center(LauncherWidget(client, power, getFakeApps, "13:37")));
 
-  REQUIRE_FALSE(ctx.findByText("\U000f0083 9%").empty());
+  // Percentage is only shown once the menu is open; the icon alone is
+  // enough to confirm the warning threshold was picked up.
+  REQUIRE_FALSE(ctx.findByText("\U000f0083 ").empty());
   CHECK_FALSE(power.didPowerOff);
 }
 
@@ -781,6 +789,8 @@ TEST_CASE("Launcher battery: charging suppresses the shutdown even below 9%",
   auto ctx = TestContext::make();
   ctx.pumpWidget(Center(LauncherWidget(client, power, getFakeApps, "13:37")));
 
-  REQUIRE_FALSE(ctx.findByText("\U000f0084 5%").empty());
+  // Percentage is only shown once the menu is open; the icon alone is
+  // enough to confirm charging suppresses the warning icon.
+  REQUIRE_FALSE(ctx.findByText("\U000f0084 ").empty());
   CHECK_FALSE(power.didPowerOff);
 }

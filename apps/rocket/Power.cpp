@@ -30,11 +30,49 @@ SystemPowerInterface::getBattery() {
 
 void
 SystemPowerInterface::powerOff() {
+#ifdef EMULATE
+  return;
+#endif
   bus
     .callMethod(
       login1::destination, login1::path, login1::interface, "PowerOff", "b", 0)
     .or_else([](auto errc) {
       std::cerr << "Error powering off: " << unistdpp::to_string(errc) << "\n";
+    });
+}
+
+void
+SystemPowerInterface::reboot() {
+#ifdef EMULATE
+  return;
+#endif
+  bus
+    .callMethod(
+      login1::destination, login1::path, login1::interface, "Reboot", "b", 0)
+    .or_else([](auto errc) {
+      std::cerr << "Error rebooting: " << unistdpp::to_string(errc) << "\n";
+    });
+}
+
+void
+SystemPowerInterface::softReboot() {
+#ifdef EMULATE
+  return;
+#endif
+  // SD_LOGIND_SOFT_REBOOT, see logind's org.freedesktop.login1.Manager
+  // RebootWithFlags() docs - goes through the same polkit-gated path as a
+  // regular Reboot(), unlike calling systemd1.Manager.SoftReboot directly.
+  constexpr uint64_t sdLogindSoftReboot = UINT64_C(1) << 2;
+  bus
+    .callMethod(login1::destination,
+                login1::path,
+                login1::interface,
+                "RebootWithFlags",
+                "t",
+                sdLogindSoftReboot)
+    .or_else([](auto errc) {
+      std::cerr << "Error soft-rebooting: " << unistdpp::to_string(errc)
+                << "\n";
     });
 }
 
