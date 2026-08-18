@@ -9,7 +9,6 @@
 #include "rm2fb/SharedBuffer.h"
 
 #include "InputDevice.h"
-#include "InputMonitor.h"
 #include "Versions/Version.h"
 
 #include <unistdpp/file.h>
@@ -19,10 +18,13 @@
 
 #include <algorithm>
 #include <csignal>
+#include <linux/input.h>
 #include <optional>
+#include <string>
 #include <sys/mman.h>
 #include <type_traits>
 #include <unistd.h>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -205,6 +207,10 @@ struct UnixClient {
   // front; parked back here (moved back via takeFD()) while it isn't -
   // see pause()/resume().
   unistdpp::FD buffer;
+
+  // Real evdev fds opened on this client's behalf, keyed by path - see
+  // handleOpenInputDevice()/drainInputFds().
+  std::unordered_map<std::string, unistdpp::FD> inputFds;
 };
 
 struct Server : ControlInterface {
@@ -216,7 +222,6 @@ struct Server : ControlInterface {
   unistdpp::FD serverLockFd;
 
   AllUinputDevices uinputDevices;
-  InputMonitor inputMonitor;
 
   unistdpp::FD serverSock;
   unistdpp::FD tcpListenSock;
@@ -366,9 +371,7 @@ struct Server : ControlInterface {
       std::exit(EXIT_FAILURE);
     }
 
-    inputMonitor.openDevices();
     uinputDevices = makeAllDevices();
-    inputMonitor.startMonitor();
   }
 
   void initSWTCON() const {
@@ -499,8 +502,10 @@ struct Server : ControlInterface {
       resyncUpdate();
     }
 
+    // Not for a dontPause client - it's never actually SIGSTOP'ed, so
+    // it's already continuously draining its own queue live.
     if (!client.dontPause) {
-      inputMonitor.flood();
+      drainInputFds(client);
     }
 
     // client is about to own the panel via its own swtcon instance - the
@@ -889,6 +894,44 @@ struct Server : ControlInterface {
     return {};
   }
 
+  // Opens (or reuses) a real evdev fd, hands a copy to the client via
+  // SCM_RIGHTS, and keeps one here too so drainInputFds() can use it.
+  unistdpp::Result<void> handleOpenInputDevice(UnixClient& client,
+                                               OpenInputDevice& m) {
+    auto it = client.inputFds.find(m.path);
+    if (it == client.inputFds.end()) {
+      // O_NONBLOCK is struct-file-level, shared with the server's own fd -
+      // forcing it broke xochitl's blocking-read evdev threads (100% CPU).
+      int flags = (m.flags & (O_ACCMODE | O_NONBLOCK)) | O_CLOEXEC;
+      auto fd = unistdpp::open(m.path, flags);
+      if (!fd) {
+        return client.sock.writeAll(false);
+      }
+      it = client.inputFds.emplace(m.path, std::move(*fd)).first;
+    }
+
+    return client.sock.writeAll(true).and_then(
+      [&] { return unistdpp::sendFDTo(client.sock, it->second.fd); });
+  }
+
+  // Discards client's stale evdev backlog (UnixClient::inputFds). Poll()-
+  // gated rather than O_NONBLOCK/EAGAIN since the fd may be blocking.
+  void drainInputFds(UnixClient& client) {
+    char buf[64 * sizeof(input_event)];
+    for (auto& [_, inputFd] : client.inputFds) {
+      while (true) {
+        std::vector<pollfd> pfd{ waitFor(inputFd, Wait::Read) };
+        auto res = unistdpp::poll(pfd, std::chrono::milliseconds(0));
+        if (!res || *res == 0 || !canRead(pfd[0])) {
+          break;
+        }
+        if (unistdpp::read(inputFd, buf, sizeof(buf)).value_or(0) <= 0) {
+          break;
+        }
+      }
+    }
+  }
+
   void readUnixSock(UnixClient& client) {
     recvMessage<UnixClientMsg>(client.sock)
       .and_then([&](auto msg) -> unistdpp::Result<void> {
@@ -898,6 +941,9 @@ struct Server : ControlInterface {
             [&](UpdateParams& m) { return handleUpdate(client, m); },
             [&](UpdateBatchHeader& m) { return handleUpdateBatch(client, m); },
             [&](IdleUpdate& m) { return handleIdleUpdate(client, m); },
+            [&](OpenInputDevice& m) {
+              return handleOpenInputDevice(client, m);
+            },
           },
           msg);
       })
@@ -925,9 +971,8 @@ struct Server : ControlInterface {
 
   int getPollFDs() {
     pollfds.clear();
-    pollfds.reserve(4 + unixClients.size() + tcpClients.size());
+    pollfds.reserve(3 + unixClients.size() + tcpClients.size());
 
-    pollfds.emplace_back(waitFor(inputMonitor.udevMonitorFd, Wait::Read));
     pollfds.emplace_back(waitFor(serverSock, Wait::Read));
     pollfds.emplace_back(waitFor(controlServer.sock, Wait::Read));
     if (tcpListenSock.isValid()) {
@@ -965,14 +1010,10 @@ struct Server : ControlInterface {
 
     // Check server socket.
     if (canRead(pollfds[0])) {
-      inputMonitor.handleNewDevices();
-    }
-
-    if (canRead(pollfds[1])) {
       clientChanges |= acceptUnixClient();
     }
 
-    if (canRead(pollfds[2])) {
+    if (canRead(pollfds[1])) {
       controlServer.handleMsg().or_else([](auto err) {
         std::cerr << "Control error: " << unistdpp::to_string(err) << "\n";
       });
@@ -992,7 +1033,7 @@ struct Server : ControlInterface {
 
     // If we don't have any tcp clients, there are not other FDs to check.
     if (tcpListenSock.isValid()) {
-      if (canRead(pollfds[3])) {
+      if (canRead(pollfds[2])) {
         clientChanges |= acceptTcpClient();
       }
 

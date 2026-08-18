@@ -9,9 +9,24 @@
 #include "rm2fb/SharedBuffer.h"
 
 #include "unistdpp/error.h"
+#include "unistdpp/socket.h"
 
+#include <cerrno>
+#include <cstring>
+#include <string_view>
+
+namespace {
+
+std::mutex&
+controlSocketMutex() {
+  static std::mutex m;
+  return m;
+}
+
+// The actual lazily-connected fd - private to this file, only ever
+// touched through ClientSocket, which holds the lock across its use.
 unistdpp::FD&
-getControlSocket() {
+rawControlSocket() {
   static unistdpp::FD res;
   if (!res.isValid()) {
     res = unistdpp::fatalOnError(
@@ -31,44 +46,120 @@ getControlSocket() {
   return res;
 }
 
+} // namespace
+
+ClientSocket::ClientSocket()
+  : lock(controlSocketMutex()), sock(rawControlSocket()) {}
+
+unistdpp::Result<void>
+ClientSocket::init(bool ownSwtcon, FbFormat format, Buffer& fb) {
+  if (!sock.isValid()) {
+    return tl::unexpected(std::errc::not_connected);
+  }
+
+  return sendMessage(
+           sock,
+           UnixClientMsg{ Init{ .ownSwtcon = ownSwtcon, .format = format } })
+    .and_then([&] { return fb.recv(sock); })
+    .or_else([&](auto err) {
+      std::cerr << "Error sending: " << unistdpp::to_string(err) << "\n";
+      sock.close();
+    });
+}
+
+unistdpp::Result<void>
+ClientSocket::sendIdleUpdate(bool idle) {
+  if (!sock.isValid()) {
+    return tl::unexpected(std::errc::not_connected);
+  }
+  return sendMessage(sock, UnixClientMsg{ IdleUpdate{ idle } });
+}
+
+unistdpp::Result<int>
+ClientSocket::openInputDevice(const char* pathname, int flags) {
+  if (!sock.isValid()) {
+    return tl::unexpected(std::errc::not_connected);
+  }
+
+  OpenInputDevice msg{};
+  msg.flags = flags;
+  strncpy(msg.path, pathname, sizeof(msg.path) - 1);
+
+  return sendMessage(sock, UnixClientMsg{ msg })
+    .and_then([&] { return sock.readAll<bool>(); })
+    .and_then([&](bool ok) -> unistdpp::Result<int> {
+      if (!ok) {
+        return tl::unexpected(std::errc::no_such_device);
+      }
+      return unistdpp::recvFD(sock);
+    });
+}
+
 bool
-sendUpdate(const UpdateParams& params) {
-  auto& clientSock = getControlSocket();
-  if (!clientSock.isValid()) {
+ClientSocket::sendUpdate(const UpdateParams& params) {
+  if (!sock.isValid()) {
     return false;
   }
 
-  return sendMessage(clientSock, UnixClientMsg{ params })
-    .and_then([&]() { return clientSock.readAll<bool>(); })
+  return sendMessage(sock, UnixClientMsg{ params })
+    .and_then([&]() { return sock.readAll<bool>(); })
     .or_else([&](auto err) {
       std::cerr << "Error sending: " << unistdpp::to_string(err) << "\n";
-      clientSock.close();
+      sock.close();
     })
     .value_or(false);
 }
 
 bool
-sendUpdateBatch(const std::vector<UpdateParams>& updates) {
-  auto& clientSock = getControlSocket();
-  if (!clientSock.isValid()) {
+ClientSocket::sendUpdateBatch(const std::vector<UpdateParams>& updates) {
+  if (!sock.isValid()) {
     return false;
   }
 
   const auto header =
     UpdateBatchHeader{ .count = static_cast<int32_t>(updates.size()) };
 
-  return sendMessage(clientSock, UnixClientMsg{ header })
+  return sendMessage(sock, UnixClientMsg{ header })
     .and_then([&]() -> unistdpp::Result<void> {
       if (updates.empty()) {
         return {};
       }
-      return clientSock.writeAll(updates.data(),
-                                 updates.size() * sizeof(UpdateParams));
+      return sock.writeAll(updates.data(),
+                           updates.size() * sizeof(UpdateParams));
     })
-    .and_then([&]() { return clientSock.readAll<bool>(); })
+    .and_then([&]() { return sock.readAll<bool>(); })
     .or_else([&](auto err) {
       std::cerr << "Error sending: " << unistdpp::to_string(err) << "\n";
-      clientSock.close();
+      sock.close();
     })
     .value_or(false);
+}
+
+bool
+isInputDevicePath(const char* pathname) {
+  // Covers eventN nodes and the by-id/by-path symlink aliases some
+  // callers use instead - both resolve to the same struct file.
+  constexpr std::string_view prefix = "/dev/input/";
+  return strncmp(pathname, prefix.data(), prefix.size()) == 0 &&
+         strlen(pathname) < sizeof(OpenInputDevice::path);
+}
+
+int
+openInputDeviceOrFail(const char* pathname, int flags) {
+  auto fd = ClientSocket().openInputDevice(pathname, flags);
+  if (!fd) {
+    errno = static_cast<int>(fd.error());
+    return -1;
+  }
+  return *fd;
+}
+
+bool
+sendUpdate(const UpdateParams& params) {
+  return ClientSocket().sendUpdate(params);
+}
+
+bool
+sendUpdateBatch(const std::vector<UpdateParams>& updates) {
+  return ClientSocket().sendUpdateBatch(updates);
 }

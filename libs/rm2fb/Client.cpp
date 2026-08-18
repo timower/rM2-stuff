@@ -47,18 +47,13 @@ doInit(Buffer& fb) {
   }
 
   std::cerr << "Sending init check\n";
-  auto& sock = getControlSocket();
+  ClientSocket sock;
   if (!sock.isValid()) {
     std::cerr << "Init failed, no server running\n";
     std::exit(EXIT_FAILURE);
   }
 
-  return sendMessage(sock, UnixClientMsg{ Init{ .ownSwtcon = false } })
-    .and_then([&] { return fb.recv(sock); })
-    .or_else([&](auto err) {
-      std::cerr << "Error sending: " << unistdpp::to_string(err) << "\n";
-      sock.close();
-    });
+  return sock.init(false, default_fb_format, fb);
 }
 
 } // namespace
@@ -73,6 +68,11 @@ open64(const char* pathname, int flags, mode_t mode = 0) {
     return fb.getFd();
   }
 
+  if (isInputDevicePath(pathname)) {
+    std::cerr << "Hooking input dev: " << pathname << "\n";
+    return openInputDeviceOrFail(pathname, flags);
+  }
+
   static const auto func_open =
     (int (*)(const char*, int, mode_t))dlsym(RTLD_NEXT, "open64");
 
@@ -85,6 +85,11 @@ open(const char* pathname, int flags, mode_t mode = 0) {
     auto& fb = getGlobalFrameBuffer();
     unistdpp::fatalOnError(doInit(fb), "init FB failed");
     return fb.getFd();
+  }
+
+  if (isInputDevicePath(pathname)) {
+    std::cerr << "Hooking input dev: " << pathname << "\n";
+    return openInputDeviceOrFail(pathname, flags);
   }
 
   static const auto func_open =
