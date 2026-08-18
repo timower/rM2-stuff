@@ -123,6 +123,21 @@ forEachSince(std::vector<UpdateRegion>& out, std::size_t start, Fn&& fn) {
   }
 }
 
+// Swtcon resolves overlapping updates by keeping whichever was submitted
+// last, not the highest-quality one - sort by this before submitting a
+// frame's updates so the best-quality region always wins any overlap.
+constexpr int
+waveformQuality(fb::Waveform waveform) {
+  switch (waveform) {
+    case fb::Waveform::GC16:
+      return 2;
+    case fb::Waveform::GC16Fast:
+      return 1;
+    default:
+      return 0;
+  }
+}
+
 class CachedBool {
 public:
   template<typename Fn>

@@ -151,6 +151,7 @@ openInputDeviceOrFail(const char* pathname, int flags) {
     errno = static_cast<int>(fd.error());
     return -1;
   }
+  std::cerr << "Hooked input dev: " << pathname << " flags: " << flags << "\n";
   return *fd;
 }
 

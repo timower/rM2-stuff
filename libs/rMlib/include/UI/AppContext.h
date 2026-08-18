@@ -4,6 +4,7 @@
 #include <UI/RenderObject.h>
 #include <UI/Timer.h>
 
+#include <algorithm>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -192,6 +193,14 @@ public:
     rootRO->draw(framebuffer.canvas, { 0, 0 }, pendingUpdates);
 
     if (!pendingUpdates.empty()) {
+      // Stable: submission order still decides the winner among
+      // same-quality overlaps, only quality itself is reordered.
+      std::stable_sort(pendingUpdates.begin(),
+                       pendingUpdates.end(),
+                       [](const UpdateRegion& a, const UpdateRegion& b) {
+                         return waveformQuality(a.waveform) <
+                                waveformQuality(b.waveform);
+                       });
       framebuffer.doUpdates(pendingUpdates);
     }
 
