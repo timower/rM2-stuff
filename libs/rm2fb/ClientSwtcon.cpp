@@ -204,7 +204,6 @@ open64(const char* pathname, int flags, mode_t mode = 0) {
   }
 
   if (isInputDevicePath(pathname)) {
-    std::cerr << "Hooking input dev: " << pathname << "\n";
     return openInputDeviceOrFail(pathname, flags);
   }
 
@@ -227,7 +226,6 @@ open(const char* pathname, int flags, mode_t mode = 0) {
   }
 
   if (isInputDevicePath(pathname)) {
-    std::cerr << "Hooking input dev: " << pathname << "\n";
     return openInputDeviceOrFail(pathname, flags);
   }
 

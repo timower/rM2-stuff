@@ -24,7 +24,6 @@
 #include <sys/mman.h>
 #include <type_traits>
 #include <unistd.h>
-#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -208,9 +207,9 @@ struct UnixClient {
   // see pause()/resume().
   unistdpp::FD buffer;
 
-  // Real evdev fds opened on this client's behalf, keyed by path - see
-  // handleOpenInputDevice()/drainInputFds().
-  std::unordered_map<std::string, unistdpp::FD> inputFds;
+  // Real evdev fds opened for this client - not deduped by path, since
+  // O_NONBLOCK is per-file-description (handleOpenInputDevice()).
+  std::vector<unistdpp::FD> inputFds;
 };
 
 struct Server : ControlInterface {
@@ -894,31 +893,28 @@ struct Server : ControlInterface {
     return {};
   }
 
-  // Opens (or reuses) a real evdev fd, hands a copy to the client via
-  // SCM_RIGHTS, and keeps one here too so drainInputFds() can use it.
+  // Opens a real evdev fd, hands a copy to the client via SCM_RIGHTS, and
+  // keeps one here too so drainInputFds() can use it - always a fresh open().
   unistdpp::Result<void> handleOpenInputDevice(UnixClient& client,
                                                OpenInputDevice& m) {
-    auto it = client.inputFds.find(m.path);
-    if (it == client.inputFds.end()) {
-      // O_NONBLOCK is struct-file-level, shared with the server's own fd -
-      // forcing it broke xochitl's blocking-read evdev threads (100% CPU).
-      int flags = (m.flags & (O_ACCMODE | O_NONBLOCK)) | O_CLOEXEC;
-      auto fd = unistdpp::open(m.path, flags);
-      if (!fd) {
-        return client.sock.writeAll(false);
-      }
-      it = client.inputFds.emplace(m.path, std::move(*fd)).first;
+    // O_NONBLOCK is struct-file-level, shared with the server's own fd -
+    // forcing it broke xochitl's blocking-read evdev threads (100% CPU).
+    int flags = (m.flags & (O_ACCMODE | O_NONBLOCK)) | O_CLOEXEC;
+    auto fd = unistdpp::open(m.path, flags);
+    if (!fd) {
+      return client.sock.writeAll(false);
     }
+    auto& stored = client.inputFds.emplace_back(std::move(*fd));
 
     return client.sock.writeAll(true).and_then(
-      [&] { return unistdpp::sendFDTo(client.sock, it->second.fd); });
+      [&] { return unistdpp::sendFDTo(client.sock, stored.fd); });
   }
 
   // Discards client's stale evdev backlog (UnixClient::inputFds). Poll()-
   // gated rather than O_NONBLOCK/EAGAIN since the fd may be blocking.
   void drainInputFds(UnixClient& client) {
     char buf[64 * sizeof(input_event)];
-    for (auto& [_, inputFd] : client.inputFds) {
+    for (auto& inputFd : client.inputFds) {
       while (true) {
         std::vector<pollfd> pfd{ waitFor(inputFd, Wait::Read) };
         auto res = unistdpp::poll(pfd, std::chrono::milliseconds(0));
