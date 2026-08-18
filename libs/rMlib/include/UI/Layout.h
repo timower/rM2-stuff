@@ -113,7 +113,11 @@ public:
 
   void update(const Border<Child>& newWidget) {
     if (this->widget->size != newWidget.size) {
+      // A size-only change can leave doLayout()'s own newSize check with
+      // nothing to detect (e.g. padding compensating to keep the total
+      // size constant), so the draw has to be requested here too.
       this->markNeedsLayout();
+      this->markNeedsDraw();
     }
 
     if (this->widget->color != newWidget.color) {

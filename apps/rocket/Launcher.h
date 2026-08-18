@@ -125,7 +125,7 @@ public:
       "󱑄", "󱑅", "󱑆", "󱑇", "󱑈", "󱑉",
     };
 
-    const auto prefix = std::string(values[tm.tm_hour % 12]) + " ";
+    const auto prefix = " " + std::string(values[tm.tm_hour % 12]) + " ";
 
     if (getWidget().timeOverride != "") {
       return getWidget().timeOverride;
@@ -171,8 +171,7 @@ public:
   auto runningApps() const {
     using namespace rmlib;
 
-    const auto* vis = std::get_if<Visible>(&visibility);
-    const pid_t returnTo = vis != nullptr ? vis->returnTo : -1;
+    const pid_t returnTo = getReturnTo();
 
     std::vector<RunningAppWidget> widgets;
     const auto myPid = getpid();
@@ -336,6 +335,12 @@ private:
   bool isMenuOpen() const {
     auto* vis = std::get_if<Visible>(&visibility);
     return vis == nullptr ? false : vis->showMenu;
+  }
+
+  pid_t getReturnTo() const {
+    return std::visit(overloaded{ [](const auto& v) { return v.returnTo; },
+                                  [](const Hidden& h) { return -1; } },
+                      visibility);
   }
 
   /// Power off if battery < battery_shutdown_percentage. Also the periodic
