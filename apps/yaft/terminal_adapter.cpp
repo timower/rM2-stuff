@@ -90,6 +90,26 @@ resolveGlyphs(uint32_t codepoint,
   bold = table.bold[codepoint] != nullptr ? table.bold[codepoint] : g;
 }
 
+// Escape sequences that mean the whole screen is about to be replaced: ED
+// full-erase (clear/ctrl-l), RIS (reset), and alt-screen enter/exit (vim,
+// less, htop, ...). Ghostty's aggregate dirty bit can't be used for this --
+// it also fires on ordinary scrolling.
+constexpr std::string_view kFullClearSequences[] = {
+  "\033[2J",     "\033[3J",     "\033c",     "\033[?1049h", "\033[?1049l",
+  "\033[?1047h", "\033[?1047l", "\033[?47h", "\033[?47l",
+};
+
+bool
+containsFullClearSequence(const uint8_t* data, size_t len) {
+  std::string_view sv(reinterpret_cast<const char*>(data), len);
+  for (auto seq : kFullClearSequences) {
+    if (sv.find(seq) != std::string_view::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void
 writePtyCallback(GhosttyTerminal /*terminal*/,
                  void* userdata,
@@ -184,6 +204,9 @@ Terminal::refreshCursor() {
 
 void
 Terminal::parse(const uint8_t* data, size_t len) {
+  if (containsFullClearSequence(data, len)) {
+    pendingFullClear_ = true;
+  }
   ghostty_terminal_vt_write(term_, data, len);
   updateRenderState();
 }
@@ -207,6 +230,7 @@ Terminal::resize(int pixelWidth, int pixelHeight, bool report) {
     term_, uint16_t(cols), uint16_t(lines), CELL_WIDTH, CELL_HEIGHT);
   updateRenderState();
   updateMouseEncoderSize();
+  pendingFullClear_ = true;
 
   if (report) {
     struct winsize ws{};
@@ -221,9 +245,7 @@ Terminal::resize(int pixelWidth, int pixelHeight, bool report) {
 void
 Terminal::consumeShouldClear() {
   shouldClear = false;
-  GhosttyRenderStateDirty clean = GHOSTTY_RENDER_STATE_DIRTY_FALSE;
-  ghostty_render_state_set(
-    renderState_, GHOSTTY_RENDER_STATE_OPTION_DIRTY, &clean);
+  pendingFullClear_ = false;
 }
 
 bool
@@ -332,10 +354,12 @@ Terminal::beginDraw() {
   ghostty_render_state_get(
     renderState_, GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR, &rowIter_);
 
-  GhosttyRenderStateDirty dirty = GHOSTTY_RENDER_STATE_DIRTY_FALSE;
-  ghostty_render_state_get(
-    renderState_, GHOSTTY_RENDER_STATE_DATA_DIRTY, &dirty);
-  shouldClear = dirty == GHOSTTY_RENDER_STATE_DIRTY_FULL;
+  // Ack ghostty's own dirty tracking every pass so hasPendingDirty() reports
+  // only new changes -- shouldClear is now sourced from pendingFullClear_.
+  GhosttyRenderStateDirty clean = GHOSTTY_RENDER_STATE_DIRTY_FALSE;
+  ghostty_render_state_set(
+    renderState_, GHOSTTY_RENDER_STATE_OPTION_DIRTY, &clean);
+  shouldClear = pendingFullClear_;
 
   colors_ = GHOSTTY_INIT_SIZED(GhosttyRenderStateColors);
   ghostty_render_state_colors_get(renderState_, &colors_);

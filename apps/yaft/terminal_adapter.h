@@ -50,8 +50,9 @@ public:
   int marginTop = 0;
   int marginLeft = 0;
 
-  // Set when ghostty reports the whole frame changed (e.g. screen clear).
-  // Mirrors the old terminal_t::shouldClear full-refresh hint.
+  // True when pty output contained a full-clear/alt-screen-switch escape
+  // sequence -- ghostty's own dirty bit is unusable since scrolling sets it
+  // too.
   bool shouldClear = false;
   void consumeShouldClear();
 
@@ -118,4 +119,6 @@ private:
   // Reused scratch buffer for multi-codepoint grapheme clusters (rare; only
   // the base codepoint is actually rendered).
   std::vector<uint32_t> graphemeBuf_;
+
+  bool pendingFullClear_ = false;
 };
