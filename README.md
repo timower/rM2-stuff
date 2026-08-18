@@ -8,21 +8,32 @@ Collection of reMarkable related apps, utilities and libraries.
 Projects
 --------
 
-### rm2fb
+### [rm2fb](libs/rm2fb)
 [![2.15: supported](https://img.shields.io/badge/2.15-supported-brightgreen)](https://support.remarkable.com/s/article/Software-release-2-15-October-2022)
 [![3.3: supported](https://img.shields.io/badge/3.3-supported-brightgreen)](https://support.remarkable.com/s/article/Software-release-3-3)
 [![3.5: supported](https://img.shields.io/badge/3.5-supported-brightgreen)](https://support.remarkable.com/s/article/Software-release-3-5)
 [![3.8: supported](https://img.shields.io/badge/3.8-supported-brightgreen)](https://support.remarkable.com/s/article/Software-release-3-8)
 [![3.20: supported](https://img.shields.io/badge/3.20-supported-brightgreen)](https://support.remarkable.com/s/article/Software-release-3-20)
 [![3.22: supported](https://img.shields.io/badge/3.22-supported-brightgreen)](https://support.remarkable.com/s/article/Software-release-3-22)
-[![3.23: beta](https://img.shields.io/badge/3.23-beta-orange)](https://support.remarkable.com/s/article/Software-release-3-23)
+[![3.23: supported](https://img.shields.io/badge/3.23-supported-brightgreen)](https://support.remarkable.com/s/article/Software-release-3-23)
+[![3.28: beta](https://img.shields.io/badge/3.28-beta-orange)](https://support.remarkable.com/s/article/Software-release-3-28)
 
 
-Custom implementation for [reMarkable 2 framebuffer](https://github.com/ddvk/remarkable2-framebuffer).
-The differences are:
- * Lower level hooking, removing the Qt dependence.
- * Uses UNIX sockets instead of message queues. Makes it easier to implement synchronized updates.
- * Supports less but newer xochitl versions
+Custom implementation for [reMarkable 2 framebuffer](https://github.com/ddvk/remarkable2-framebuffer), extended to be a full display manager.
+Ensures only a single client can control the display, and also handles input capturing.
+
+Use Rocket to switch between apps, or `rm2fbctl` on the commandline:
+```
+rm2fbctl list
+rm2fbctl switch <pid>
+```
+This rm2fb implementation will not work with other launchers.
+
+Also supports a 'swtcon' mode, which allows Xochitl to use its own swtcon to drive the display.
+This decouples rm2fb from the xochitl version, as no address based hooks are used.
+In this mode I tested up to 3.28 beta.
+
+For a more supported display driver use [Oxide](https://github.com/Eeems-Org/oxide) or [qtfb](https://github.com/asivery/rm-appload).
 
 ### [Yaft](apps/yaft)
 
@@ -35,7 +46,7 @@ More usage information can be found in the yaft [Readme](apps/yaft).
 
 ### Rocket
 
-Launcher that uses the power button to show.
+Launcher that uses the power button to activate and switch apps.
 
 <img src="doc/rocket.png" width=500/>
 
@@ -66,11 +77,8 @@ allows to declaratively manage your reMarkable 2 configuration.
 
 ### SWTCON
 
-This lib contains a reverse engineered software TCON. It currently still relies
-on some functions from `xochitl`, namely the generator thread routine.
-To use these functions it must be launched as an `LD_PRELOAD` library attached to xochitl.
-The `swtcon-preload` tool is an example of how it can be currently used.
-
+This library contains a reverse engineered software TCON, based on `libqsgepaper.so` version 3.23.0.54.
+Used by rm2fb in the 'swtcon' mode, which requires no xochitl or libqsgepaper hooking.
 
 Building
 --------
@@ -92,6 +100,12 @@ $ cmake --build build/dev --target yaft
 $ cmake --build build/dev --target package
 ```
 
+You can also build using Nix for the rm2 toolchain:
+```bash
+$ nix build .#dev-rm2-toolchain
+```
+See [NixOS](nix/) for more options.
+
 Emulating
 ---------
 
@@ -104,3 +118,5 @@ $ cmake --preset dev-host
 $ cmake --build build/host --target yaft
 $ ./build/host/apps/yaft/yaft # Should launch Yaft with an emulated screen in a separete window.
 ```
+
+A full QEMU based emulator can also be built in [NixOS](nix/).

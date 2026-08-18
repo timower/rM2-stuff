@@ -86,8 +86,8 @@ nix build .#nixosConfigurations.example.config.system.build.vm
 ./result
 # Wait for boot, login as root
 ```
-This VM boots into NixOS directly. To boot into xochitl first use
-`config.system.build.vm-xochitl`.
+This VM boots into NixOS directly.
+To boot into xochitl first use `config.system.build.vm-xochitl`.
 
 
 TODO
@@ -104,12 +104,8 @@ TODO
  - [x] Fix koreader spamming 'WARN  Polling for input events returned an error:'
  - [x] Make vm that starts rm2-emu automatically.
  - [x] NixOS tests.
-
+ - [x] Make xochitl run as a user?
+ - [x] Minimize size
+  - [x] Drop nixos tools, don't use `-ng` to lose python dep.
  - [ ] Correctly start user session for Rocket.
- - [ ] Make xochitl run as a user?
-
- - [ ] Minimize size
-  - [ ] Drop nixos tools, don't use `-ng` to lose python dep.
-  - [ ] Build overlayfs kernel module, use instead of perl etc activation.
-
  - [ ] Usb ethernet.

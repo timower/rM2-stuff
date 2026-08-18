@@ -1,135 +1,35 @@
 reMarkable 2 - Framebuffer
 ==========================
 
-Waveform modes
---------------
+A display manager for the reMarkable 2, extending [ddvk's rm2fb](https://github.com/ddvk/remarkable2-framebuffer).
 
-The old ioctls recognized at least:
+`rm2fb_server` runs as a systemd service (`rm2fb.service`), preloaded into
+`xochitl` via `LD_PRELOAD`. It hooks the framebuffer and evdev input calls so
+that exactly one client controls the display and input at a time, and
+multiplexes updates from all connected clients through a UNIX socket
+(`rm2fb.socket`) instead of `xochitl`'s message queues.
+
+Use Rocket to switch between apps, or `rm2fbctl` on the commandline:
 ```
-WAVEFORM_MODE_INIT = 0;
-WAVEFORM_MODE_DU = 1;
-WAVEFORM_MODE_GC16 = 2;
-WAVEFORM_MODE_GL16 = 3;
-WAVEFORM_MODE_A2 = 4;
+rm2fbctl list
+rm2fbctl switch <pid>
 ```
+Other launchers relying on the original rm2fb protocol are not supported.
 
-These are mapped to internal waveform parameters passed to 'actual_update'.
-In 2.15:
-```cpp
-switch(waveform) {
-  case 0: // INIT
-  case 3: // GL16
-    newWaveform = 2;
-    goto do_update;
-  case 1: // DU
-    newWaveform = 0;
-    goto do_update;
-  case 2: // GC16
-  case 8: // ???
-    newWaveform = 1;
-    goto do_update;
-  do_update:
-    local_30 = local_3c;
-    local_24 = local_38;
-    local_2c = local_40;
-    local_28 = local_34;
-    local_20 = param_4;
-    actual_update(&local_30);
-    func_0x004d98a4(param_1,&local_40);
-    return;
-  case 4:
-    break;
-  case 5:
-    break;
-  case 6: // ??? Used for pan
-    newWaveform = 3;
-    goto do_update;
-  case 7:
-    break;
-}
-```
+### swtcon mode
 
-In 3.3:
-```cpp
-switch(param_3) {
-  case 0: // INIT
-  case 3: // GL16
-    local_20.waveform = 2;
-    break;
+Instead of hooking `xochitl`'s internal update functions by address (which
+breaks on every xochitl update), the `_swtcon` variants of the server and
+client use rm2fb's own reverse engineered software TCON (see
+[SWTCON](../swtcon)) to drive the display, so no address-hooking into a
+specific xochitl version is needed. Only built for the 32-bit ARM target,
+since swtcon itself only builds there.
 
-  case 1: // DU
-  default:
-    local_20.waveform = 0;
-    break;
-
-  case 2: // GC16
-    local_20.waveform = 3;
-    break;
-
-  case 4: // A2
-    if (*(char *)(param_1 + 0x3e) == '\0') {
-      local_20.waveform = 0;
-    }
-    else {
-      local_20.waveform = 8;
-    }
-    break;
-
-  case 5: // ??? GC16
-    local_20.waveform = 1;
-}
-```
-
-In 3.5:
-```cpp
-switch(param_3) {
-  case 0: // INIT
-  case 3: // GL16
-    local_20.waveform = 2;
-    break;
-
-  default: // DU
-    local_20.waveform = 0;
-    break;
-
-  case 2: // GC16
-    local_20.waveform = 3;
-    break;
-
-  case 4: // A2
-    if (*(char *)(instance + 0x3e) == '\0') {
-      local_20.waveform = 0;
-    }
-    else {
-      local_20.waveform = 8;
-    }
-    break;
-
-  case 5: // ??? GC16
-    local_20.waveform = 1;
-}
-```
-
-In 3.6+ they've changed the parameters of the update functions.
-So there's not easy mapping, but update-dump tells us:
-```
-pen:          wave 1, flags 4, extra 1
-highlighter:  wave 1, flags 4, extra 1
-
-typing text:  wave 1, flags 4, extra 4
-zoom/pan:     wave 6, flags 0, extra 4
-
-b/w update:   wave 1, flags 0, extra 6
-ui update:    wave 3, flags 0, extra 6
-
-full refresh: wave 2, flags 1, extra 6
-```
-
-This means we probably have an internal waveform table that looks like:
-
-| Description | 2.15 | 3.3 | 3.5 | 3.6+ |
-| ----------- | ---- | --- | --- | ---- |
-| DU (pen)    | 0    | 0   | 0   | 1    |
-| GL16 (init) | 2    | 2   | 2   | 2    |
-| GC16 (ui)   | 1    | 3   | 3   | 3    |
-| A2 (pan)    | 3    | 8/0 | 8/0 | 6    |
+To run it:
+ * Start `rm2fb_server_swtcon` instead of `rm2fb_server`, e.g. as the
+   `rm2fb.service` `ExecStart`.
+ * `LD_PRELOAD` `librm2fb_client_swtcon.so` (built from the
+   `rm2fb_client_swtcon` target) into `xochitl` instead of
+   `librm2fb_client.so`. This leaves xochitl's own statically-linked swtcon
+   untouched to drive the panel directly; the client only redirects its
+   internal buffers so the server can see their content while paused.
