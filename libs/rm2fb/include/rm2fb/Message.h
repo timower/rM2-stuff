@@ -116,8 +116,20 @@ struct UpdateBatchHeader {
   int32_t count;
 };
 
-using UnixClientMsg =
-  std::variant<Init, IdleUpdate, UpdateParams, UpdateBatchHeader>;
+// Asks the server to open an evdev node for this client - see
+// Server::handleOpenInputDevice()/drainInputFds() in ServerInternal.h.
+//
+// flags forwards the caller's own open() flags; O_NONBLOCK must match
+// since it's struct-file-level, shared with the server's own kept fd.
+struct OpenInputDevice {
+  char path[64] = {};
+  int flags = 0;
+};
+
+// Append-only: the variant index is the wire tag, so existing alternatives
+// must keep their indices.
+using UnixClientMsg = std::
+  variant<Init, IdleUpdate, UpdateParams, UpdateBatchHeader, OpenInputDevice>;
 
 template<typename... T>
 unistdpp::Result<void>

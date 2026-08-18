@@ -3,9 +3,8 @@
 // internal update/init/shutdown calls by address per xochitl version (see
 // Client.cpp/Versions/*.cpp, kept unchanged for backwards compat - older
 // xochitl builds that still dlopen libqsgepaper.so need that path).
-// Shares getControlSocket()/sendUpdate()/sendUpdateBatch() with Client.cpp
-// via ClientSocket.cpp (see Client.h) - everything else below is specific
-// to this variant.
+// Shares ClientSocket/sendUpdate()/sendUpdateBatch() with Client.cpp (see
+// ClientSocket.cpp) - everything below is specific to this variant.
 //
 // Two independent pieces, both validated standalone in
 // tools/xochitl-preload before landing here:
@@ -71,20 +70,13 @@ doInit(Buffer& fb, bool ownSwtcon, FbFormat format = default_fb_format) {
     return {};
   }
 
-  auto& sock = getControlSocket();
+  ClientSocket sock;
   if (!sock.isValid()) {
     std::cerr << "Init failed, no server running\n";
     std::exit(EXIT_FAILURE);
   }
 
-  return sendMessage(
-           sock,
-           UnixClientMsg{ Init{ .ownSwtcon = ownSwtcon, .format = format } })
-    .and_then([&] { return fb.recv(sock); })
-    .or_else([&](auto err) {
-      std::cerr << "Error sending: " << unistdpp::to_string(err) << "\n";
-      sock.close();
-    });
+  return sock.init(ownSwtcon, format, fb);
 }
 
 // ---------------------------------------------------------------------
@@ -188,11 +180,11 @@ handleBlankTransition(unsigned long request, void* arg) {
 
   std::cerr << "rm2fb: xochitl " << (goingIdle ? "idle" : "un-idle") << "\n";
 
-  auto& sock = getControlSocket();
+  ClientSocket sock;
   if (!sock.isValid())
     return;
 
-  auto res = sendMessage(sock, UnixClientMsg{ IdleUpdate{ goingIdle } });
+  auto res = sock.sendIdleUpdate(goingIdle);
   if (!res) {
     std::cerr << "rm2fb: failed sending " << (goingIdle ? "idle" : "un-idle")
               << " notice: " << unistdpp::to_string(res.error()) << "\n";
@@ -211,6 +203,11 @@ open64(const char* pathname, int flags, mode_t mode = 0) {
     return fb.getFd();
   }
 
+  if (isInputDevicePath(pathname)) {
+    std::cerr << "Hooking input dev: " << pathname << "\n";
+    return openInputDeviceOrFail(pathname, flags);
+  }
+
   static const auto func_open =
     (int (*)(const char*, int, mode_t))dlsym(RTLD_NEXT, "open64");
   int fd = func_open(pathname, flags, mode);
@@ -227,6 +224,11 @@ open(const char* pathname, int flags, mode_t mode = 0) {
     auto& fb = getGlobalFrameBuffer();
     unistdpp::fatalOnError(doInit(fb, false), "init FB failed");
     return fb.getFd();
+  }
+
+  if (isInputDevicePath(pathname)) {
+    std::cerr << "Hooking input dev: " << pathname << "\n";
+    return openInputDeviceOrFail(pathname, flags);
   }
 
   static const auto func_open =
