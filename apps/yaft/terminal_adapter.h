@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 #include <vector>
 
 #include <ghostty/vt.h>
@@ -62,9 +63,27 @@ public:
   int cursorX = 0;
   int cursorY = 0;
 
-  bool isAppCursorMode() const;
   bool mouseTrackingEnabled() const;
-  bool mouseMoveMode() const;
+
+  // Encodes a key event with libghostty's key encoder (legacy, modifyOtherKeys
+  // or Kitty protocol, depending on what the running program requested) and
+  // writes the result to the pty.
+  void sendKey(GhosttyKeyAction action,
+               GhosttyKey key,
+               GhosttyMods mods,
+               std::string_view utf8 = {},
+               uint32_t unshiftedCodepoint = 0);
+
+  // Encodes a mouse button press/release with libghostty's mouse encoder and
+  // writes the result to the pty, if the active tracking mode reports it.
+  void sendMouseButton(GhosttyMouseAction action,
+                       GhosttyMouseButton button,
+                       float x,
+                       float y,
+                       bool anyButtonPressed);
+
+  // Same, but for a motion (no button) event.
+  void sendMouseMotion(float x, float y, bool anyButtonPressed);
 
   // Per-frame row iteration: call beginDraw() once, then nextRow() for each
   // line in order. Matches doDraw()'s existing sequential line loop.
@@ -81,11 +100,20 @@ private:
   TermCell resolveCell(int col, GhosttyCellWide wide);
   TermCell blankCell();
 
+  void updateMouseEncoderSize();
+  void encodeAndWriteMouse(bool anyButtonPressed);
+
   GhosttyTerminal term_ = nullptr;
   GhosttyRenderState renderState_ = nullptr;
   GhosttyRenderStateRowIterator rowIter_ = nullptr;
   GhosttyRenderStateRowCells cells_ = nullptr;
   GhosttyRenderStateColors colors_{};
+
+  GhosttyKeyEncoder keyEncoder_ = nullptr;
+  GhosttyKeyEvent keyEvent_ = nullptr;
+
+  GhosttyMouseEncoder mouseEncoder_ = nullptr;
+  GhosttyMouseEvent mouseEvent_ = nullptr;
 
   // Reused scratch buffer for multi-codepoint grapheme clusters (rare; only
   // the base codepoint is actually rendered).

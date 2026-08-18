@@ -70,7 +70,11 @@ private:
 
   void sendKeyDown(const KeyInfo& key, bool repeat = false);
   void sendKeyDown(const EvKeyInfo& key, bool repeat = false);
-  void sendKeyDown(int scancode, bool shift, bool alt, bool ctrl);
+  void sendKeyDown(int scancode,
+                   bool shift,
+                   bool alt,
+                   bool ctrl,
+                   bool repeat = false);
 
   const KeyInfo* getKey(const rmlib::Point& point);
 

@@ -42,18 +42,6 @@ brightness2gray(uint16_t brightness) {
   }
   return White;
 }
-
-void
-initMouseBuf(std::array<char, 6>& buf, Point loc) {
-  constexpr char esc_char = '\x1b';
-
-  loc.x /= CELL_WIDTH;
-  loc.y /= CELL_HEIGHT;
-
-  char cx = 33 + loc.x;
-  char cy = 33 + loc.y;
-  buf = { esc_char, '[', 'M', 32, cx, cy };
-}
 // \}
 } // namespace
 
@@ -292,34 +280,30 @@ ScreenRenderObject::handleTouchEvent(const Ev& ev) {
   const auto rotatedLoc =
     widget->isLandscape ? Point{ scaledLoc.y, getSize().width - scaledLoc.x }
                         : scaledLoc;
-
-  std::array<char, 6> buf{};
-  initMouseBuf(buf, rotatedLoc);
+  const auto x = float(rotatedLoc.x);
+  const auto y = float(rotatedLoc.y);
 
   // Mouse down on first finger if mouse is not down.
   if (ev.isDown() && mouseSlot == -1 /*&& lastFingers == 0*/) {
     mouseSlot = slot;
-
-    // Send mouse down code
-    buf[3] += 0; // mouse button 1
-    widget->term->write(reinterpret_cast<const uint8_t*>(buf.data()),
-                        buf.size());
+    widget->term->sendMouseButton(GHOSTTY_MOUSE_ACTION_PRESS,
+                                  GHOSTTY_MOUSE_BUTTON_LEFT,
+                                  x,
+                                  y,
+                                  /* anyButtonPressed */ true);
 
   } else if ((ev.isUp() && slot == mouseSlot) /*||
              (kb.mouseSlot != -1 && kb.gestureCtrlr.getCurrentFingers() > 1)*/) {
 
     // Mouse up after finger lift or second finger down (for scrolling).
     mouseSlot = -1;
-
-    // Send mouse up code
-    buf[3] += 3; // mouse release
-    widget->term->write(reinterpret_cast<const uint8_t*>(buf.data()),
-                        buf.size());
-  } else if (mouseSlot == slot && lastMousePos != rotatedLoc &&
-             widget->term->mouseMoveMode()) {
-    buf[3] += 32; // mouse move
-    widget->term->write(reinterpret_cast<const uint8_t*>(buf.data()),
-                        buf.size());
+    widget->term->sendMouseButton(GHOSTTY_MOUSE_ACTION_RELEASE,
+                                  GHOSTTY_MOUSE_BUTTON_LEFT,
+                                  x,
+                                  y,
+                                  /* anyButtonPressed */ false);
+  } else if (mouseSlot == slot && lastMousePos != rotatedLoc) {
+    widget->term->sendMouseMotion(x, y, /* anyButtonPressed */ true);
   }
   lastMousePos = rotatedLoc;
 }

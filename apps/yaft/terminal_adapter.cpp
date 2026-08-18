@@ -134,9 +134,24 @@ Terminal::Terminal(int pixelWidth, int pixelHeight) {
   ghostty_render_state_row_cells_new(nullptr, &cells_);
 
   updateRenderState();
+
+  ghostty_key_encoder_new(nullptr, &keyEncoder_);
+  ghostty_key_event_new(nullptr, &keyEvent_);
+
+  ghostty_mouse_encoder_new(nullptr, &mouseEncoder_);
+  ghostty_mouse_event_new(nullptr, &mouseEvent_);
+  constexpr bool kTrackLastCell = true;
+  ghostty_mouse_encoder_setopt(
+    mouseEncoder_, GHOSTTY_MOUSE_ENCODER_OPT_TRACK_LAST_CELL, &kTrackLastCell);
+  updateMouseEncoderSize();
 }
 
 Terminal::~Terminal() {
+  ghostty_mouse_event_free(mouseEvent_);
+  ghostty_mouse_encoder_free(mouseEncoder_);
+  ghostty_key_event_free(keyEvent_);
+  ghostty_key_encoder_free(keyEncoder_);
+
   ghostty_render_state_row_cells_free(cells_);
   ghostty_render_state_row_iterator_free(rowIter_);
   ghostty_render_state_free(renderState_);
@@ -191,6 +206,7 @@ Terminal::resize(int pixelWidth, int pixelHeight, bool report) {
   ghostty_terminal_resize(
     term_, uint16_t(cols), uint16_t(lines), CELL_WIDTH, CELL_HEIGHT);
   updateRenderState();
+  updateMouseEncoderSize();
 
   if (report) {
     struct winsize ws{};
@@ -219,24 +235,96 @@ Terminal::hasPendingDirty() const {
 }
 
 bool
-Terminal::isAppCursorMode() const {
-  GhosttyTerminalModeConfig cfg{ GHOSTTY_MODE_DECCKM, false };
-  ghostty_terminal_get(term_, GHOSTTY_TERMINAL_DATA_MODE, &cfg);
-  return cfg.value;
-}
-
-bool
 Terminal::mouseTrackingEnabled() const {
   bool tracking = false;
   ghostty_terminal_get(term_, GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING, &tracking);
   return tracking;
 }
 
-bool
-Terminal::mouseMoveMode() const {
-  GhosttyTerminalModeConfig cfg{ GHOSTTY_MODE_BUTTON_MOUSE, false };
-  ghostty_terminal_get(term_, GHOSTTY_TERMINAL_DATA_MODE, &cfg);
-  return cfg.value;
+void
+Terminal::sendKey(GhosttyKeyAction action,
+                  GhosttyKey key,
+                  GhosttyMods mods,
+                  std::string_view utf8,
+                  uint32_t unshiftedCodepoint) {
+  ghostty_key_encoder_setopt_from_terminal(keyEncoder_, term_);
+  // Keep the Kitty keyboard protocol off even if a client negotiated it:
+  // our keys never carry a real physical-key identity (see below), so
+  // switching encodings on negotiation only breaks well-known bindings
+  // like Ctrl+C/Ctrl+D in clients that assume CSI u once negotiated.
+  constexpr GhosttyKittyKeyFlags kKittyDisabled = GHOSTTY_KITTY_KEY_DISABLED;
+  ghostty_key_encoder_setopt(
+    keyEncoder_, GHOSTTY_KEY_ENCODER_OPT_KITTY_FLAGS, &kKittyDisabled);
+
+  ghostty_key_event_set_action(keyEvent_, action);
+  ghostty_key_event_set_key(keyEvent_, key);
+  ghostty_key_event_set_mods(keyEvent_, mods);
+  ghostty_key_event_set_utf8(keyEvent_, utf8.data(), utf8.size());
+  ghostty_key_event_set_unshifted_codepoint(keyEvent_, unshiftedCodepoint);
+
+  std::array<char, 64> buf{};
+  size_t written = 0;
+  if (ghostty_key_encoder_encode(
+        keyEncoder_, keyEvent_, buf.data(), buf.size(), &written) ==
+        GHOSTTY_SUCCESS &&
+      written > 0) {
+    write(reinterpret_cast<const uint8_t*>(buf.data()), written);
+  }
+}
+
+void
+Terminal::sendMouseButton(GhosttyMouseAction action,
+                          GhosttyMouseButton button,
+                          float x,
+                          float y,
+                          bool anyButtonPressed) {
+  ghostty_mouse_event_set_action(mouseEvent_, action);
+  ghostty_mouse_event_set_button(mouseEvent_, button);
+  ghostty_mouse_event_set_position(mouseEvent_, { x, y });
+  ghostty_mouse_event_set_mods(mouseEvent_, 0);
+  encodeAndWriteMouse(anyButtonPressed);
+}
+
+void
+Terminal::sendMouseMotion(float x, float y, bool anyButtonPressed) {
+  ghostty_mouse_event_set_action(mouseEvent_, GHOSTTY_MOUSE_ACTION_MOTION);
+  ghostty_mouse_event_clear_button(mouseEvent_);
+  ghostty_mouse_event_set_position(mouseEvent_, { x, y });
+  ghostty_mouse_event_set_mods(mouseEvent_, 0);
+  encodeAndWriteMouse(anyButtonPressed);
+}
+
+void
+Terminal::encodeAndWriteMouse(bool anyButtonPressed) {
+  ghostty_mouse_encoder_setopt_from_terminal(mouseEncoder_, term_);
+  ghostty_mouse_encoder_setopt(mouseEncoder_,
+                               GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED,
+                               &anyButtonPressed);
+
+  std::array<char, 32> buf{};
+  size_t written = 0;
+  if (ghostty_mouse_encoder_encode(
+        mouseEncoder_, mouseEvent_, buf.data(), buf.size(), &written) ==
+        GHOSTTY_SUCCESS &&
+      written > 0) {
+    write(reinterpret_cast<const uint8_t*>(buf.data()), written);
+  }
+}
+
+void
+Terminal::updateMouseEncoderSize() {
+  GhosttyMouseEncoderSize size{};
+  size.size = sizeof(size);
+  size.screen_width = uint32_t(width);
+  size.screen_height = uint32_t(height);
+  size.cell_width = uint32_t(CELL_WIDTH);
+  size.cell_height = uint32_t(CELL_HEIGHT);
+  size.padding_top = uint32_t(marginTop);
+  size.padding_left = uint32_t(marginLeft);
+  size.padding_bottom = uint32_t(height - marginTop - lines * CELL_HEIGHT);
+  size.padding_right = uint32_t(width - marginLeft - cols * CELL_WIDTH);
+  ghostty_mouse_encoder_setopt(
+    mouseEncoder_, GHOSTTY_MOUSE_ENCODER_OPT_SIZE, &size);
 }
 
 void

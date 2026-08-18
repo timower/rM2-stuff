@@ -9,7 +9,6 @@ using namespace rmlib;
 namespace {
 
 constexpr auto pen_slot = 0x1000;
-constexpr char esc_char = '\x1b';
 
 const std::vector<std::pair<std::string_view, std::string_view>> print_names = {
   { ":backspace", "<==" }, { ":tab", "<=>" }, { ":enter", "\\n" },
@@ -22,108 +21,40 @@ isModifier(int scancode) {
   return scancode == Shift || scancode == Ctrl || scancode == Alt;
 }
 
-const char*
-getKeyCodeStr(int scancode, bool shift, bool alt, bool ctrl, bool appCursor) {
-  static std::array<char, 512> buf;
-
-  constexpr auto write_vt_code = [](char code) {
-    buf[0] = esc_char;
-    buf[1] = '[';
-    buf[2] = code;
-    buf[3] = '~';
-    buf[4] = 0;
-  };
-
-  constexpr auto write_xt_code = [](char code, bool appCursor) {
-    buf[0] = esc_char;
-    buf[1] = appCursor ? 'O' : '[';
-    buf[2] = code;
-    buf[3] = 0;
-  };
-
-  if (scancode > 0xFF) {
-    // TODO: support modifiers.
-    switch (scancode) {
-      case Escape:
-        buf[0] = esc_char;
-        buf[1] = 0;
-        return buf.data();
-      case Tab:
-        buf[0] = '\t';
-        buf[1] = 0;
-        return buf.data();
-      case Backspace:
-        buf[0] = '\x7f';
-        buf[1] = 0;
-        return buf.data();
-      case Enter:
-        buf[0] = '\r'; // TODO: support newline mode
-        buf[1] = 0;
-        return buf.data();
-      case Del:
-        write_vt_code('3');
-        return buf.data();
-      case Home:
-        write_vt_code('1');
-        return buf.data();
-      case End:
-        write_vt_code('4');
-        return buf.data();
-
-      case Left:
-        write_xt_code('D', appCursor);
-        return buf.data();
-      case Up:
-        write_xt_code('A', appCursor);
-        return buf.data();
-      case Right:
-        write_xt_code('C', appCursor);
-        return buf.data();
-      case Down:
-        write_xt_code('B', appCursor);
-        return buf.data();
-
-      case PageUp:
-        write_vt_code('5');
-        return buf.data();
-      case PageDown:
-        write_vt_code('6');
-        return buf.data();
-    }
-
-    return nullptr;
+// Maps a SpecialKeys value to libghostty's layout-independent physical key
+// identity, used by its key encoder for cursor/function-key sequences.
+constexpr GhosttyKey
+specialToGhosttyKey(int scancode) {
+  switch (scancode) {
+    case Escape:
+      return GHOSTTY_KEY_ESCAPE;
+    case Tab:
+      return GHOSTTY_KEY_TAB;
+    case Backspace:
+      return GHOSTTY_KEY_BACKSPACE;
+    case Enter:
+      return GHOSTTY_KEY_ENTER;
+    case Del:
+      return GHOSTTY_KEY_DELETE;
+    case Home:
+      return GHOSTTY_KEY_HOME;
+    case End:
+      return GHOSTTY_KEY_END;
+    case Left:
+      return GHOSTTY_KEY_ARROW_LEFT;
+    case Up:
+      return GHOSTTY_KEY_ARROW_UP;
+    case Right:
+      return GHOSTTY_KEY_ARROW_RIGHT;
+    case Down:
+      return GHOSTTY_KEY_ARROW_DOWN;
+    case PageUp:
+      return GHOSTTY_KEY_PAGE_UP;
+    case PageDown:
+      return GHOSTTY_KEY_PAGE_DOWN;
+    default:
+      return GHOSTTY_KEY_UNIDENTIFIED;
   }
-
-  if (isprint(scancode) != 0) {
-    if (ctrl) {
-      if (0x41 <= scancode && scancode <= 0x5f) {
-        scancode -= 0x40;
-      } else {
-        return nullptr;
-      }
-    }
-
-    if (isalpha(scancode) != 0 && !shift) {
-      scancode = tolower(scancode);
-    }
-
-    if (alt) {
-      buf[0] = esc_char;
-      buf[1] = char(scancode);
-      buf[2] = 0;
-    } else {
-      buf[0] = char(scancode);
-      buf[1] = 0;
-    }
-    return buf.data();
-  }
-  if (scancode == 0x3) {
-    buf[0] = char(scancode);
-    buf[1] = 0;
-    return buf.data();
-  }
-
-  return nullptr;
 }
 
 template<typename Ev>
@@ -314,7 +245,8 @@ void
 KeyboardRenderObject::sendKeyDown(int scancode,
                                   bool shift,
                                   bool alt,
-                                  bool ctrl) {
+                                  bool ctrl,
+                                  bool repeat) {
   if (isCallback(scancode)) {
     if (widget->callback) {
       widget->callback(getCallback(scancode));
@@ -322,14 +254,44 @@ KeyboardRenderObject::sendKeyDown(int scancode,
     return;
   }
 
-  bool appCursor = widget->term->isAppCursorMode();
-  const auto* code = getKeyCodeStr(scancode, shift, alt, ctrl, appCursor);
-  if (code != nullptr) {
-    widget->term->write(reinterpret_cast<const uint8_t*>(code), strlen(code));
-  } else {
-    std::cerr << "unknown key combo: " << scancode << " shift " << shift
-              << " ctrl " << ctrl << " alt " << alt << std::endl;
+  GhosttyMods mods = 0;
+  if (shift) {
+    mods |= GHOSTTY_MODS_SHIFT;
   }
+  if (ctrl) {
+    mods |= GHOSTTY_MODS_CTRL;
+  }
+  if (alt) {
+    mods |= GHOSTTY_MODS_ALT;
+  }
+  const auto action =
+    repeat ? GHOSTTY_KEY_ACTION_REPEAT : GHOSTTY_KEY_ACTION_PRESS;
+
+  if (scancode > 0xFF) {
+    const auto key = specialToGhosttyKey(scancode);
+    if (key == GHOSTTY_KEY_UNIDENTIFIED) {
+      std::cerr << "unknown special key: " << scancode << std::endl;
+      return;
+    }
+    widget->term->sendKey(action, key, mods);
+    return;
+  }
+
+  if (scancode < 0x20 || isprint(scancode) != 0) {
+    char c = char(scancode);
+    if (isalpha(scancode) != 0 && !shift) {
+      c = char(tolower(scancode));
+    }
+    widget->term->sendKey(action,
+                          GHOSTTY_KEY_UNIDENTIFIED,
+                          mods,
+                          std::string_view(&c, 1),
+                          uint32_t(uint8_t(scancode)));
+    return;
+  }
+
+  std::cerr << "unknown key combo: " << scancode << " shift " << shift
+            << " ctrl " << ctrl << " alt " << alt << std::endl;
 }
 
 void
@@ -348,7 +310,7 @@ KeyboardRenderObject::sendKeyDown(const KeyInfo& key, bool repeat) {
   if (repeat && key.longPressCode != 0) {
     scancode = key.longPressCode;
   }
-  sendKeyDown(scancode, shift, alt, ctrl);
+  sendKeyDown(scancode, shift, alt, ctrl, repeat);
 }
 
 void
@@ -399,7 +361,7 @@ KeyboardRenderObject::sendKeyDown(const EvKeyInfo& key, bool repeat) {
     return key.scancode;
   }();
 
-  sendKeyDown(scancode, shift, alt, ctrl);
+  sendKeyDown(scancode, shift, alt, ctrl, repeat);
 }
 
 const KeyInfo*
