@@ -42,6 +42,10 @@ jobs:
         with:
           lfs: 'true'
 
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
       - name: Configure CMake
         run: |
           . /opt/x-tools/switch-arm.sh
@@ -71,6 +75,10 @@ jobs:
         run: |
          sudo apt-get update
          sudo apt-get install -y ninja-build libsdl2-dev xxd llvm libevdev-dev libsystemd-dev
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
 
       - name: Configure CMake
         run: cmake --preset dev-host
