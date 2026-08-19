@@ -24,7 +24,22 @@ let
   };
 
   vm-config = extendModules {
-    modules = [ { systemd.targets.sleep.enable = false; } ];
+    modules = [
+      {
+        systemd.targets.sleep.enable = false;
+
+        # rm-emu has no wifi iface, so wpa_supplicant's interface
+        # auto-detect (nixpkgs' wpa_supplicant.nix) hangs on udevadm
+        # forever, and xochitl's dbus Get eats dbus-daemon's fixed 25s
+        # activation timeout waiting for it to claim the bus name.
+        # Skip the wait: -u alone starts it with zero interfaces and
+        # claims the bus name immediately.
+        systemd.services.wpa_supplicant.script = lib.mkForce ''
+          touch /etc/wpa_supplicant.conf
+          exec wpa_supplicant -u -s -c /etc/wpa_supplicant.conf
+        '';
+      }
+    ];
   };
 
   # Statically linked: vm-init runs before /nix/store is mounted (that's its
