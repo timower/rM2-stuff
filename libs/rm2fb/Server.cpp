@@ -201,6 +201,10 @@ setupExitHandler() {
     perror("Sigaction");
     exit(EXIT_FAILURE);
   }
+
+  // Don't exit on SIGPIPE when a (TCP) client disconnect - writeAll will handle
+  // errors.
+  std::signal(SIGPIPE, SIG_IGN);
 }
 
 void

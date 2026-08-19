@@ -60,8 +60,14 @@ let
               ROCKET_TIME_OVERRIDE = "13:37";
             };
 
+            # Debugging convenience.
+            security.sudo.wheelNeedsPassword = false;
+
             users.users.test = {
-              extraGroups = [ "systemd-journal" ];
+              extraGroups = [
+                "systemd-journal"
+                "wheel"
+              ];
               isNormalUser = true;
               openssh.authorizedKeys.keyFiles = [ ./id_ed25519.pub ];
             };
