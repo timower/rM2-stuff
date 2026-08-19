@@ -16,12 +16,9 @@ let
 
   rm-emu = emu-pkg."rm-emu-${cfg.rmEmuVersion}";
 
-  # apps/yaft needs ghostty-vt to build at all (see nix/pkgs/ghostty-vt.nix);
-  # cfg.host.pkgs.callPackage builds rm2-stuff natively for the host below,
-  # so this is the native (non-cross) variant, same as flake.nix's `default`.
-  host-ghostty-vt = cfg.host.pkgs.callPackage ../pkgs/ghostty-vt.nix {
-    zig = cfg.host.pkgs.callPackage ../pkgs/zig_0_16.nix { };
-  };
+  # apps/yaft needs ghostty-vt; don't require cfg.host.pkgs to carry the
+  # overlay itself, apply it here (see nix/overlays/ghostty-vt.nix).
+  hostPkgs = cfg.host.pkgs.extend (import ../overlays/ghostty-vt.nix);
 
   vm-config = extendModules {
     modules = [
@@ -107,7 +104,7 @@ let
 
     export PATH="${
       lib.makeBinPath [
-        (cfg.host.pkgs.callPackage ../pkgs/rm2-stuff.nix { ghostty-vt = host-ghostty-vt; }).tools
+        (hostPkgs.callPackage ../pkgs/rm2-stuff.nix { }).tools
         vm-nixos
       ]
     }:$PATH"

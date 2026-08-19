@@ -1,28 +1,12 @@
 { lib, ... }:
 {
   nixpkgs.overlays = [
+    (import ../overlays/ghostty-vt.nix)
     (
       final: prev:
-      let
-        # rm2-stuff's apps/yaft needs ghostty-vt (see nix/pkgs/ghostty-vt.nix
-        # and flake.nix's `default`/`dev-cross`, which wire it the same way
-        # for the plain package builds) -- cross-target it to match whatever
-        # this system itself is being built for. `final` here already *is*
-        # the hostPlatform=armv7 package set, so zig -- which must run on
-        # the build machine, not the target, to cross-emit armv7 object code
-        # -- has to come from final.buildPackages, not final directly (which
-        # would build an armv7-native zig binary, pointless and, as found by
-        # actually building this, much more expensive).
-        ghostty-vt = final.callPackage ../pkgs/ghostty-vt.nix {
-          zig = final.buildPackages.callPackage ../pkgs/zig_0_16.nix { };
-          zigTargetFlags = lib.optionals prev.stdenv.hostPlatform.isArmv7 [
-            "-Dtarget=arm-linux-gnueabihf"
-            "-Dcpu=cortex_a7"
-          ];
-        };
-      in
       {
-        rm2-stuff = final.callPackage ../pkgs/rm2-stuff.nix { inherit ghostty-vt; };
+        # apps/yaft needs ghostty-vt, see nix/overlays/ghostty-vt.nix.
+        rm2-stuff = final.callPackage ../pkgs/rm2-stuff.nix { };
       }
       // lib.optionalAttrs prev.stdenv.hostPlatform.isArmv7 {
 

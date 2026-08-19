@@ -5,6 +5,9 @@
   buildPlatform ? "x86_64-linux",
 }:
 let
+  # swtcon-ab-compare below needs .ghostty-vt, see nix/overlays/ghostty-vt.nix.
+  pkgsExt = pkgs.extend (import ../overlays/ghostty-vt.nix);
+
   # For etc-activation's evalMinimalConfig, mirroring
   # nixpkgs' own nixos/tests/all-tests.nix helper.
   nixosLib = import "${pkgs.path}/nixos/lib" { featureFlags.minimalModules = { }; };
@@ -293,17 +296,13 @@ in
         # nixpkgs' own glibc, whose dynamic linker path only exists under a
         # NixOS-managed /nix/store, not on the stock rootfs booted here.
         rm2-toolchain = pkgs.callPackage ../pkgs/rm2-toolchain.nix { };
-        # apps/yaft needs ghostty-vt to build at all -- see flake.nix's
-        # "dev-rm2-toolchain" for why the same armv7 target flags work
-        # against this toolchain's sysroot despite it not being pkgsCross.
+        # apps/yaft needs ghostty-vt; override its target, see flake.nix's
+        # "dev-rm2-toolchain" for why this non-pkgsCross sysroot still works.
         rm2-stuff-cross = pkgs.callPackage ../pkgs/rm2-stuff.nix {
           toolchain_root = "${rm2-toolchain}";
-          ghostty-vt = pkgs.callPackage ../pkgs/ghostty-vt.nix {
-            zig = pkgs.callPackage ../pkgs/zig_0_16.nix { };
-            zigTargetFlags = [
-              "-Dtarget=arm-linux-gnueabihf"
-              "-Dcpu=cortex_a7"
-            ];
+          ghostty-vt = pkgsExt.ghostty-vt.override {
+            zigTarget = "arm-linux-gnueabihf";
+            zigCpu = "cortex_a7";
           };
         };
         sshOpts = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null";

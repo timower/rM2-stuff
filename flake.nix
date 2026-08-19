@@ -29,8 +29,12 @@
           linuxSystem = mkLinux system;
           lib = nixpkgs.lib;
 
-          pkgs = nixpkgs.legacyPackages."${system}";
-          pkgsLinux = nixpkgs.legacyPackages."${linuxSystem}";
+          ghosttyVtOverlay = import ./nix/overlays/ghostty-vt.nix;
+
+          pkgs = nixpkgs.legacyPackages."${system}".extend ghosttyVtOverlay;
+          pkgsLinux = nixpkgs.legacyPackages."${linuxSystem}".extend ghosttyVtOverlay;
+          # .extend's overlay propagates into pkgsCross (verified), so
+          # pkgsArmv7.ghostty-vt below auto-targets arm already.
           pkgsArmv7 = pkgs.pkgsCross.armv7l-hf-multiplatform;
 
           isDarwin = pkgs.stdenv.isDarwin;
@@ -40,26 +44,14 @@
             inherit (nixpkgs) lib;
             inherit pkgs pkgsLinux;
           };
-
-          # Nothing else reads pkgs.zig, so a plain override (not a
-          # whole-pkgs-set overlay) is enough -- see nix/pkgs/zig_0_16.nix.
-          zig_0_16 = pkgs.callPackage ./nix/pkgs/zig_0_16.nix { };
-          ghostty-vt = pkgs.callPackage ./nix/pkgs/ghostty-vt.nix { zig = zig_0_16; };
-          ghostty-vt-cross = pkgsArmv7.callPackage ./nix/pkgs/ghostty-vt.nix {
-            zig = zig_0_16;
-            zigTargetFlags = [
-              "-Dtarget=arm-linux-gnueabihf"
-              "-Dcpu=cortex_a7"
-            ];
-          };
         in
         {
-          default = pkgs.callPackage ./nix/pkgs/rm2-stuff.nix { inherit ghostty-vt; };
-          dev-cross = pkgsArmv7.callPackage ./nix/pkgs/rm2-stuff.nix {
-            ghostty-vt = ghostty-vt-cross;
-          };
+          default = pkgs.callPackage ./nix/pkgs/rm2-stuff.nix { };
+          dev-cross = pkgsArmv7.callPackage ./nix/pkgs/rm2-stuff.nix { };
 
-          inherit ghostty-vt ghostty-vt-cross zig_0_16 nix-installer;
+          inherit (pkgs) ghostty-vt zig_0_16;
+          ghostty-vt-cross = pkgsArmv7.ghostty-vt;
+          inherit nix-installer;
         }
         // lib.optionalAttrs pkgs.stdenv.hostPlatform.isx86_64 {
           # LuaJIT's build needs a real 32-bit x86 host compiler
@@ -73,19 +65,11 @@
           rm2-toolchain = pkgsLinux.callPackage ./nix/pkgs/rm2-toolchain.nix { };
           dev-rm2-toolchain = pkgsLinux.callPackage ./nix/pkgs/rm2-stuff.nix {
             toolchain_root = "${rm2-toolchain}";
-            # Legacy Yocto SDK toolchain, not pkgsCross -- but its sysroot's
-            # glibc (2.39) is well above what the armv7 zig build needs
-            # (verified: max required GLIBC_2.34), so the same target/cpu
-            # flags as ghostty-vt-cross work here too. zig itself still
-            # comes from the native pkgsLinux (== pkgs here, !isDarwin), not
-            # this toolchain -- it's a build-machine tool, unrelated to
-            # which sysroot the final C++ link step uses.
-            ghostty-vt = pkgsLinux.callPackage ./nix/pkgs/ghostty-vt.nix {
-              zig = zig_0_16;
-              zigTargetFlags = [
-                "-Dtarget=arm-linux-gnueabihf"
-                "-Dcpu=cortex_a7"
-              ];
+            # Legacy Yocto SDK toolchain, not pkgsCross -- pkgsLinux.stdenv
+            # is still native x86_64, so override the target explicitly.
+            ghostty-vt = pkgsLinux.ghostty-vt.override {
+              zigTarget = "arm-linux-gnueabihf";
+              zigCpu = "cortex_a7";
             };
           };
         }

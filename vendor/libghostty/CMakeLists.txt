@@ -17,7 +17,7 @@ find_program(GHOSTTY_VT_ZIG_EXECUTABLE zig REQUIRED)
 
 # When cross-compiling for the rM2 (see cmake/rm-toolchain.cmake and the
 # toltec toolchain), zig needs telling explicitly -- it can't infer a target
-# from the C toolchain. Mirrors flake.nix's ghostty-vt-cross/zigTargetFlags.
+# from the C toolchain. Mirrors nix/pkgs/ghostty-vt.nix's zigTarget/zigCpu.
 set(_ghostty_vt_zig_flags "")
 if(CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_PROCESSOR MATCHES "^arm")
   list(APPEND _ghostty_vt_zig_flags "-Dtarget=arm-linux-gnueabihf"

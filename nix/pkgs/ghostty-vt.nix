@@ -1,18 +1,55 @@
 # libghostty-vt (ghostty's embeddable terminal-state library), built via
-# `zig build`. Call with pkgs.callPackage for the host and
-# pkgsArmv7.callPackage for the rM2 cross target -- see flake.nix, which
-# overrides `zig` on both calls (ghostty requires zig 0.16.0, newer than the
-# repo's pinned nixpkgs, so the caller overlays it in via nixpkgs' own
-# zig.override({version, hash, llvmPackages})).
+# `zig build` -- see nix/overlays/ghostty-vt.nix for how it's wired up.
 {
   lib,
   stdenv,
   zig,
   callPackage,
   fetchFromGitHub,
-  zigTargetFlags ? [ ],
+  # Override when stdenv.hostPlatform doesn't match the real target (e.g.
+  # dev-rm2-toolchain's native-zig arm cross-compile).
+  zigTarget ? null,
+  # zig defaults -Dcpu to the *build machine's* native CPU, which can crash
+  # elsewhere (e.g. AVX-512 on CI runners, nixpkgs#169461/#185644).
+  zigCpu ? "baseline",
 }:
 let
+  hostPlatform = stdenv.hostPlatform;
+
+  zigArch =
+    {
+      x86_64 = "x86_64";
+      aarch64 = "aarch64";
+      armv7l = "arm";
+      armv6l = "arm";
+      i686 = "x86";
+    }
+    .${hostPlatform.parsed.cpu.name}
+      or (throw "ghostty-vt.nix: no zig arch mapping for cpu '${hostPlatform.parsed.cpu.name}'");
+
+  zigOs =
+    {
+      linux = "linux";
+      darwin = "macos";
+    }
+    .${hostPlatform.parsed.kernel.name}
+      or (throw "ghostty-vt.nix: no zig os mapping for kernel '${hostPlatform.parsed.kernel.name}'");
+
+  zigAbiSuffix =
+    {
+      gnu = "-gnu";
+      gnueabihf = "-gnueabihf";
+      musl = "-musl";
+    }
+    .${hostPlatform.parsed.abi.name} or "";
+
+  resolvedTarget = if zigTarget != null then zigTarget else "${zigArch}-${zigOs}${zigAbiSuffix}";
+
+  targetFlags = [
+    "-Dtarget=${resolvedTarget}"
+    "-Dcpu=${zigCpu}"
+  ];
+
   ghosttySrc = fetchFromGitHub {
     owner = "ghostty-org";
     repo = "ghostty";
@@ -20,15 +57,8 @@ let
     hash = "sha256-tzt9C99wsV0lriI6LtLDYMhnNbWNwIzmcWfRJStGhMs=";
   };
 
-  # `zig build` fetches its package-manager deps (e.g. `uucode`) over the
-  # network, which a sandboxed derivation can't do. ghostty's own repo
-  # vendors a zon2nix-generated lock file (build.zig.zon.nix) at every
-  # commit -- the same mechanism nixpkgs' own `ghostty` package uses --
-  # turning each dependency into an individually content-addressed fetch.
-  # `callPackage` is auto-injected by whichever pkgs set built this
-  # derivation (host or pkgsArmv7); that's fine unmodified -- fetchers like
-  # fetchurl/fetchgit are always the native/build-platform ones in nixpkgs
-  # regardless of which package set's callPackage supplied them.
+  # zon2nix-generated lock file turning zig's package-manager deps into
+  # individually content-addressed fetches, avoiding network access in-build.
   deps = callPackage "${ghosttySrc}/build.zig.zon.nix" {
     zig_0_16 = zig;
     name = "ghostty-vt-deps";
@@ -46,7 +76,7 @@ stdenv.mkDerivation {
     runHook preBuild
     export HOME=$TMPDIR
     export ZIG_GLOBAL_CACHE_DIR=$TMPDIR/zig-cache
-    zig build -Demit-lib-vt -Doptimize=ReleaseFast --system ${deps} ${lib.escapeShellArgs zigTargetFlags} --prefix $out
+    zig build -Demit-lib-vt -Doptimize=ReleaseFast --system ${deps} ${lib.escapeShellArgs targetFlags} --prefix $out
     runHook postBuild
   '';
 
